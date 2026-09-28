@@ -67,7 +67,7 @@ export class DebugUI {
     ff.add(postSettings, 'fogDensity', 0, 0.0015, 0.00001).name('density');
     ff.add(postSettings, 'fogBands', 0, 12, 1).name('bands (0 = smooth)');
     ff.add(postSettings, 'fogHeight', 0, 1, 0.01).name('valley mist');
-    ff.add(postSettings, 'fogFalloff', 5, 200, 1).name('mist falloff');
+    ff.add(postSettings, 'fogFalloff', 5, 200, 1).name('mist height x4');
     ff.add(postSettings, 'fogMax', 0, 1, 0.01).name('max');
     ff.add(postSettings, 'fogStart', 0, 400, 1).name('start');
 

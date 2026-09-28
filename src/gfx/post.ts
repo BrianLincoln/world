@@ -19,8 +19,8 @@ export const postSettings = {
   fogDensity: 0.00032,
   fogStart: 40,
   fogBands: 5,
-  fogHeight: 0.4,
-  fogFalloff: 55,
+  fogHeight: 0.22,
+  fogFalloff: 40,
   fogMax: 0.9,
   gradeScale: 1,
   bloom: 1.0,
@@ -114,11 +114,14 @@ void main() {
     vec3 wdir = normalize(mat3(uCamWorld) * vp);
     float wy = uCamPos.y + wdir.y * dist;
     float f = 1.0 - exp(-max(dist - uFogStart, 0.0) * uFogDensity);
-    float hf = uFogHeight * exp(-max(wy, 0.0) / uFogFalloff) * (1.0 - exp(-dist * uFogDensity * 3.0));
-    f = 1.0 - (1.0 - f) * (1.0 - hf);
     // Thinner air up high: peaks and snow caps stay legible as landmarks.
     f *= 1.0 - 0.4 * smoothstep(90.0, 420.0, wy);
     if (uFogBands > 0.5) f = floor(f * uFogBands + 0.3) / uFogBands;
+    // Valley mist: one flat bank with a hard top, lying over low ground in
+    // the distance (never contoured bands that cut across objects).
+    float mistTop = uFogFalloff * 0.25;
+    float mist = step(wy, mistTop) * uFogHeight * smoothstep(250.0, 900.0, dist);
+    f = max(f, min(uFogMax, f + mist));
     f = min(f, uFogMax);
     col = mix(col, uFogCol, f);
   }
