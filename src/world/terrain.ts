@@ -349,7 +349,7 @@ export class Terrain {
     geo.setAttribute('aBiome', new THREE.BufferAttribute(r.biome, 4));
     geo.setIndex(this.index);
     const skirt = 1 + n.size * 0.012;
-    const box = new THREE.Box3(new THREE.Vector3(0, Math.min(r.minY, r.minY * 2 - 1.2) - skirt - 2, 0), new THREE.Vector3(n.size, r.maxY + 1, n.size));
+    const box = new THREE.Box3(new THREE.Vector3(0, r.minY - 8 - skirt - 2, 0), new THREE.Vector3(n.size, r.maxY + 1, n.size));
     geo.boundingBox = box;
     geo.boundingSphere = box.getBoundingSphere(new THREE.Sphere());
     const ground = new THREE.Mesh(geo, this.terrainMat);

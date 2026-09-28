@@ -42,7 +42,10 @@ const SHOTS = [
   { name: 'seed-42', q: 'seed=42&t=8.2&yaw=-0.5' },
   { name: 'cabin-day', q: 'seed=hilda&t=10.5&pitch=0.14&dist=12', setup: "window.__ow.lookAtPoi('cabin', 30)" },
   { name: 'cabin-night', q: 'seed=hilda&t=22.5&pitch=0.12&dist=12', setup: "window.__ow.lookAtPoi('cabin', 26, 2.2)" },
-  { name: 'tor', q: 'seed=hilda&t=15.5&pitch=0.06&dist=14', setup: "window.__ow.lookAtPoi('tor', 70)" },
+  { name: 'tor', q: 'seed=hilda&t=15.5&pitch=0.06&dist=14', setup: "window.__ow.lookAtPoi('tor', 55, null, 6)" },
+  { name: 'circle', q: 'seed=hilda&t=14&pitch=0.12&dist=14', setup: "window.__ow.lookAtPoi('circle', 26)" },
+  { name: 'erratic', q: 'seed=fjord&t=10.5&pitch=0.1&dist=12', setup: "window.__ow.lookAtPoi('erratic', 30)" },
+  { name: 'ui', q: 'seed=hilda&t=11&pitch=0.15&dist=12', ui: true },
   { name: 'vista', q: 'seed=hilda&t=9.8&pitch=0.04&dist=9', setup: 'window.__ow.facePeak()' },
   { name: 'vista-fjord', q: 'seed=fjord&t=17.2&pitch=0.04&dist=9', setup: 'window.__ow.facePeak()' },
   { name: 'vista-42-dawn', q: 'seed=42&t=7.2&pitch=0.04&dist=9', setup: 'window.__ow.facePeak()' },
@@ -74,7 +77,7 @@ async function waitReady(timeout = 60000) {
 let gpuLogged = false;
 for (const s of SHOTS) {
   if (only && !only.includes(s.name)) continue;
-  const url = `http://localhost:${port}/?${s.q}&ui=0&paused=1&capture=1`;
+  const url = `http://localhost:${port}/?${s.q}${s.ui ? '' : '&ui=0'}&paused=1&capture=1`;
   await page.goto(url);
   if (!gpuLogged) {
     const gl = await page.evaluate(() => {

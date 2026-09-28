@@ -1,6 +1,9 @@
 import * as THREE from 'three';
-import { KIND_COLORS, SKY_U, TERRAIN_U, U, WATER_U } from './materials';
+import { SKY_U, TERRAIN_U, U, WATER_U } from './materials';
 import { BIOME, resolveSky, type SkyState } from './palette';
+
+const SHALLOW = new THREE.Color(BIOME.waterShallow);
+const key = new THREE.Vector3();
 
 // Day/night: advances the clock, moves sun and moon, resolves the palette
 // keyframes and pushes everything into the shared uniforms.
@@ -14,7 +17,6 @@ export class Environment {
   readonly sky: SkyState = {} as SkyState;
   readonly sunDir = new THREE.Vector3();
   readonly moonDir = new THREE.Vector3();
-  private baseKinds = KIND_COLORS.map((c) => c.clone());
 
   update(dt: number) {
     if (!this.paused) this.hour = (this.hour + (dt * 24) / (this.dayMinutes * 60)) % 24;
@@ -28,7 +30,7 @@ export class Environment {
     this.sunDir.set(Math.cos(t), Math.sin(t) * 0.78, 0.5).normalize();
     this.moonDir.set(-Math.cos(t) * 0.8, -Math.sin(t) * 0.7 + 0.08, 0.45).normalize();
     const sunUp = THREE.MathUtils.smoothstep(this.sunDir.y, -0.08, 0.06);
-    const key = new THREE.Vector3().copy(this.moonDir).lerp(this.sunDir, sunUp).normalize();
+    key.copy(this.moonDir).lerp(this.sunDir, sunUp).normalize();
     // Keep the key light from grazing: low light makes everything shade.
     key.y = Math.max(key.y, 0.24);
     key.normalize();
@@ -53,12 +55,11 @@ export class Environment {
     SKY_U.uCloudLine.value.copy(s.outline).lerp(s.cloudShade, 0.35);
 
     WATER_U.cDeep.value.copy(s.water);
-    WATER_U.cShallow.value.copy(s.water).lerp(new THREE.Color(BIOME.waterShallow), 0.5).lerp(s.skyHorizon, 0.15);
+    WATER_U.cShallow.value.copy(s.water).lerp(SHALLOW, 0.5).lerp(s.skyHorizon, 0.15);
     WATER_U.cFoam.value.set(BIOME.foam).lerp(s.skyHorizon, 0.3);
     WATER_U.cReflect.value.copy(s.skyHorizon);
 
     // Ground marks are a darker version of the meadow.
     TERRAIN_U.cStroke.value.set(BIOME.meadowDark).multiplyScalar(0.7);
-    void this.baseKinds;
   }
 }

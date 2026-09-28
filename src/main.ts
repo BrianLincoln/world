@@ -132,8 +132,14 @@ function adaptResolution(rawDt: number) {
   const avg = frameAcc / frameN;
   frameAcc = 0;
   frameN = 0;
-  if (avg > 1 / 50 && autoScale > 0.55) autoScale = Math.max(0.55, autoScale - 0.1);
-  else if (avg < 1 / 58 && autoScale < 1) autoScale = Math.min(1, autoScale + 0.05);
+  if (avg > 1 / 50) {
+    // First shed pixels; once at the floor, shed geometry (vertex-bound GPUs).
+    if (autoScale > 0.7) autoScale = Math.max(0.7, autoScale - 0.1);
+    else if (terrain.settings.splitFactor > 1.4) {
+      terrain.settings.splitFactor = Math.max(1.4, terrain.settings.splitFactor - 0.15);
+      terrain.nearLodDistance = Math.max(45, terrain.nearLodDistance - 10);
+    } else if (autoScale > 0.55) autoScale = Math.max(0.55, autoScale - 0.05);
+  } else if (avg < 1 / 58 && autoScale < 1) autoScale = Math.min(1, autoScale + 0.05);
 }
 
 function resize() {
@@ -209,8 +215,16 @@ function frame(ts?: number) {
     return `res ${(autoScale * postSettings.renderScale * 100).toFixed(0)}% · ${(i.triangles / 1e6).toFixed(2)}M tris · ${i.calls} calls · ${terrain.stats.nodes} nodes · ${terrain.stats.pending} queued\n` +
       `${player.current.name} · ${p.x.toFixed(0)}, ${p.y.toFixed(0)}, ${p.z.toFixed(0)} · ${env.hour.toFixed(1)}h · seed ${seedText}`;
   });
+  if (veil && !terrain.busy && ++readyFrames > 10) {
+    veil.classList.add('gone');
+    setTimeout(() => veil?.remove(), 1000);
+    veil = null;
+  }
   requestAnimationFrame(frame);
 }
+let veil = document.getElementById('veil');
+let readyFrames = 0;
+if (params.has('capture')) { veil?.remove(); veil = null; }
 requestAnimationFrame(frame);
 
 // Hooks for the screenshot / perf harness.
@@ -243,7 +257,7 @@ window.__ow = {
   height: (x: number, z: number) => gen.height(x, z),
   gen: () => gen,
   /** Frame the nearest POI of a kind: player stands `dist` m from it, camera behind. */
-  lookAtPoi: (kind: string, dist = 25, side: number | null = null) => {
+  lookAtPoi: (kind: string, dist = 25, side: number | null = null, hover = 0) => {
     const p0 = player.body.pos;
     let best: { x: number; z: number; y: number } | null = null;
     let bd = Infinity;
@@ -268,6 +282,10 @@ window.__ow = {
     const x = b.x + Math.cos(side!) * dist;
     const z = b.z + Math.sin(side!) * dist;
     placePlayer(x, z);
+    if (hover > 0) {
+      player.set('fly', ctx);
+      player.body.pos.y = Math.max(gen.height(x, z) + 2, b.y + hover);
+    }
     orbit.yaw = Math.atan2(-(b.x - x), -(b.z - z));
     orbit.snap();
     return { x: b.x, z: b.z };
@@ -276,6 +294,7 @@ window.__ow = {
   input,
   body: player.body,
   post: postSettings,
+  // debug handles for the probe scripts
   _r: renderer,
   _p: post,
   _scene: scene,

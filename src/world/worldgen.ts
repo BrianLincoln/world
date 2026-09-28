@@ -256,11 +256,11 @@ export class WorldGen {
         const boulders: Boulder[] = [];
         const stacks = 1 + Math.floor(rnd() * 3);
         for (let s = 0; s < stacks; s++) {
-          const sx = x + (s === 0 ? 0 : (rnd() - 0.5) * 16);
-          const sz = z + (s === 0 ? 0 : (rnd() - 0.5) * 16);
+          const sx = x + (s === 0 ? 0 : (rnd() - 0.5) * 26);
+          const sz = z + (s === 0 ? 0 : (rnd() - 0.5) * 26);
           const base = this.baseHeight(sx, sz);
           let y = base - 1.2;
-          let r = (s === 0 ? 5.5 : 3.2) + rnd() * 3;
+          let r = (s === 0 ? 8 : 4.5) + rnd() * 4;
           const n = 2 + Math.floor(rnd() * (s === 0 ? 4 : 3));
           let ox = 0;
           let oz = 0;
@@ -274,7 +274,7 @@ export class WorldGen {
             oz += (rnd() - 0.5) * r * 0.5;
           }
         }
-        out.push({ kind: 'tor', x, z, y: h, rot: 0, clear: 18, boulders });
+        out.push({ kind: 'tor', x, z, y: h, rot: 0, clear: 26, boulders });
       }
     }
 
@@ -282,7 +282,7 @@ export class WorldGen {
     if (rnd() < 0.08) {
       const [x, z] = inCell();
       const h = this.baseHeight(x, z);
-      if (h > 4 && h < 130 && flatEnough(x, z, h, 3)) {
+      if (h > 4 && h < 130 && flatEnough(x, z, h, 3) && this.forestDensity(x, z, h) < 0.2) {
         const boulders: Boulder[] = [];
         const n = 7 + Math.floor(rnd() * 4);
         const R = 7 + rnd() * 3;

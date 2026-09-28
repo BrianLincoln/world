@@ -45,8 +45,11 @@ out float vH;
 void main() {
   vec3 p = position;
   vH = p.y;
-  // Sink the seabed so distant shorelines never z-fight with the water plane.
-  if (p.y < 0.0) p.y = p.y * 2.0 - 1.2;
+  // Sink the seabed with distance only, so far shorelines never z-fight with
+  // the water plane while near shores keep their true shape.
+  vec4 wp0 = modelMatrix * vec4(p, 1.0);
+  float push = clamp(length(wp0.xyz - cameraPosition) / 400.0, 0.0, 8.0);
+  if (p.y < 0.0) p.y -= push * min(1.0, -p.y * 2.0);
   vec4 wp = modelMatrix * vec4(p, 1.0);
   vWorld = wp.xyz;
   vN = normal;
@@ -134,12 +137,12 @@ void main() {
   if (h < 1.1 + nz2.r * 1.3) { c = cSand; grass = false; }
   if (h < -2.5) c = cSeabed;
   if (path < 0.95 + (nz2.g - 0.5) * 0.6 && h > 0.8) { c = cPath; grass = false; }
-  float snowLine = uSnowLine + (nz.r - 0.5) * 70.0 + (nz2.b - 0.5) * 16.0;
+  float snowLine = uSnowLine + (nz.r - 0.5) * 80.0 + (texture(uNoise, vWorld.xz / 90.0).b - 0.5) * 18.0;
   bool snow = h > snowLine && slope < 0.8;
   if (snow) { c = cSnow; grass = false; }
 
   vec3 lightBand = toonLight(n);
-  lightBand = mix(lightBand, mix(uMidCol, uLightCol, 0.6), smoothstep(700.0, 2200.0, dist));
+  lightBand = mix(lightBand, mix(uMidCol, uLightCol, 0.6), smoothstep(350.0, 1300.0, dist));
   vec3 col = c * lightBand;
   // Contact shadow under the explorer: a flat ellipse in the shade tone.
   vec2 pd = (vWorld.xz - uPlayerFeet.xz) * vec2(1.0, 1.0);

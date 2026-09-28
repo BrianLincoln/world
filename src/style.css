@@ -10,3 +10,10 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: #efd6c3; }
   font: 12px/1.4 ui-sans-serif, system-ui, sans-serif; color: #3d2a2a;
   background: rgba(250, 240, 228, 0.72); padding: 5px 12px; border-radius: 999px;
 }
+#veil {
+  position: fixed; inset: 0; display: grid; place-content: center; text-align: center;
+  background: #efd6c3; color: #5c3a3e; transition: opacity 0.8s ease; z-index: 10;
+  font: 600 34px/1.2 Georgia, 'Times New Roman', serif; letter-spacing: 0.04em;
+}
+#veil span { font: italic 15px/2 Georgia, serif; opacity: 0.75; }
+#veil.gone { opacity: 0; pointer-events: none; }
