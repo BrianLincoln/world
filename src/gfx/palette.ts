@@ -63,7 +63,7 @@ export const SKY_PRESETS: Record<string, SkyPalette> = {
     name: 'Coral dusk',
     skyTop: '#76597f', skyMid: '#d98583', skyHorizon: '#f5b08e', sunGlow: '#fbd0a8',
     fog: '#eca58e', light: '#fff0e0', mid: '#ecc2b8', shade: '#bc92a0',
-    tint: '#d88c7c', tintAmt: 0.62, lift: 0.12,
+    tint: '#d88c7c', tintAmt: 0.62, lift: 0.16,
     cloud: '#86648a', cloudShade: '#6e5078', cloudRim: '#f6c7a6', outline: '#4a2a3a',
     sun: '#fff0d8', stars: 0.15, night: 0.15, water: '#8c86a6',
   },

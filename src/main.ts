@@ -113,15 +113,33 @@ const ui = new DebugUI({
   setMode: (m) => player.set(m, ctx),
   position: () => player.body.pos,
 });
+if (params.has('capture')) postSettings.adaptive = false;
 if (params.get('ui') === '0') {
   ui.hide();
   document.getElementById('help')?.remove();
 }
 
+// Adaptive resolution: if frames run long, render fewer pixels. Outlines and
+// flat colour survive downscaling well, so this is the cheapest quality knob.
+let autoScale = 1;
+let frameAcc = 0;
+let frameN = 0;
+function adaptResolution(rawDt: number) {
+  if (!postSettings.adaptive || document.hidden) return;
+  frameAcc += rawDt;
+  frameN++;
+  if (frameAcc < 1.5) return;
+  const avg = frameAcc / frameN;
+  frameAcc = 0;
+  frameN = 0;
+  if (avg > 1 / 50 && autoScale > 0.55) autoScale = Math.max(0.55, autoScale - 0.1);
+  else if (avg < 1 / 58 && autoScale < 1) autoScale = Math.min(1, autoScale + 0.05);
+}
+
 function resize() {
   const w = window.innerWidth;
   const h = window.innerHeight;
-  const pr = Math.min(window.devicePixelRatio || 1, 2) * postSettings.renderScale;
+  const pr = Math.min(window.devicePixelRatio || 1, 1.5) * postSettings.renderScale * autoScale;
   renderer.setPixelRatio(1);
   renderer.setSize(w, h, false);
   renderer.domElement.style.width = w + 'px';
@@ -134,6 +152,7 @@ function resize() {
   camera.updateProjectionMatrix();
 }
 let lastScale = postSettings.renderScale;
+let lastAuto = autoScale;
 window.addEventListener('resize', resize);
 resize();
 
@@ -143,10 +162,13 @@ let elapsed = 0;
 
 function frame(ts?: number) {
   timer.update(ts);
-  const dt = Math.min(timer.getDelta(), 0.05);
+  const rawDt = timer.getDelta();
+  const dt = Math.min(rawDt, 0.05);
+  adaptResolution(rawDt);
   elapsed += dt;
-  if (postSettings.renderScale !== lastScale) {
+  if (postSettings.renderScale !== lastScale || autoScale !== lastAuto) {
     lastScale = postSettings.renderScale;
+    lastAuto = autoScale;
     resize();
   }
 
@@ -184,7 +206,7 @@ function frame(ts?: number) {
   ui.tick(dt, () => {
     const p = player.body.pos;
     const i = renderer.info.render;
-    return `${(i.triangles / 1e6).toFixed(2)}M tris · ${i.calls} calls · ${terrain.stats.nodes} nodes · ${terrain.stats.pending} queued\n` +
+    return `res ${(autoScale * postSettings.renderScale * 100).toFixed(0)}% · ${(i.triangles / 1e6).toFixed(2)}M tris · ${i.calls} calls · ${terrain.stats.nodes} nodes · ${terrain.stats.pending} queued\n` +
       `${player.current.name} · ${p.x.toFixed(0)}, ${p.y.toFixed(0)}, ${p.z.toFixed(0)} · ${env.hour.toFixed(1)}h · seed ${seedText}`;
   });
   requestAnimationFrame(frame);
@@ -203,6 +225,19 @@ window.__ow = {
   teleport: (x: number, z: number) => placePlayer(x, z),
   view: (yaw: number, pitch: number, dist: number) => { orbit.yaw = yaw; orbit.pitch = pitch; orbit.targetDistance = dist; orbit.snap(); },
   setMode: (m: string, y?: number) => { player.set(m, ctx); if (y !== undefined) player.body.pos.y = gen.height(player.body.pos.x, player.body.pos.z) + y; },
+  /** Turn the camera toward the highest ground within `r` metres. */
+  facePeak: (r = 5000) => {
+    const p0 = player.body.pos;
+    let best = -Infinity, bx = 0, bz = 0;
+    for (let z = -r; z <= r; z += 150) for (let x = -r; x <= r; x += 150) {
+      if (x * x + z * z > r * r || x * x + z * z < 600 * 600) continue;
+      const h = gen.height(p0.x + x, p0.z + z);
+      if (h > best) { best = h; bx = x; bz = z; }
+    }
+    orbit.yaw = Math.atan2(-bx, -bz);
+    orbit.snap();
+    return { h: best, d: Math.hypot(bx, bz) };
+  },
   setSeed,
   pos: () => ({ ...player.body.pos }),
   height: (x: number, z: number) => gen.height(x, z),
@@ -223,6 +258,7 @@ window.__ow = {
       let lowest = Infinity;
       for (let a = 0; a < 6.28; a += 0.39) {
         const x = b.x + Math.cos(a) * dist, z = b.z + Math.sin(a) * dist;
+        if (gen.height(x, z) < 3) continue;
         let score = gen.height(x, z);
         for (let t = 0.25; t < 1; t += 0.25) score += Math.max(0, gen.height(b.x + Math.cos(a) * dist * t, b.z + Math.sin(a) * dist * t) - b.y) * 2;
         score += 60 * gen.forestDensity(x, z, gen.height(x, z));

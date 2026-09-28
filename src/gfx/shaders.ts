@@ -25,9 +25,11 @@ vec3 toonLight(vec3 n) {
 export const GBUF_OUT = /* glsl */ `
 layout(location = 0) out vec4 gColor;
 layout(location = 1) out vec4 gND;
+// Props store half-length normals so post passes can tell them from ground.
+uniform float uIsProp;
 void writeG(vec3 col, float emissive, vec3 nWorld, vec3 viewPos) {
   gColor = vec4(col, emissive);
-  gND = vec4(normalize((viewMatrix * vec4(nWorld, 0.0)).xyz), -viewPos.z);
+  gND = vec4(normalize((viewMatrix * vec4(nWorld, 0.0)).xyz) * (uIsProp > 0.5 ? 0.5 : 1.0), -viewPos.z);
 }
 `;
 
@@ -133,7 +135,8 @@ void main() {
   if (h < -2.5) c = cSeabed;
   if (path < 0.95 + (nz2.g - 0.5) * 0.6 && h > 0.8) { c = cPath; grass = false; }
   float snowLine = uSnowLine + (nz.r - 0.5) * 70.0 + (nz2.b - 0.5) * 16.0;
-  if (h > snowLine && slope < 0.8) { c = cSnow; grass = false; }
+  bool snow = h > snowLine && slope < 0.8;
+  if (snow) { c = cSnow; grass = false; }
 
   vec3 lightBand = toonLight(n);
   lightBand = mix(lightBand, mix(uMidCol, uLightCol, 0.6), smoothstep(700.0, 2200.0, dist));
@@ -145,7 +148,8 @@ void main() {
     float s = strokes(vWorld.xz, dist);
     col = mix(col, cStroke * toonLight(n), s * 0.8);
   }
-  writeG(col, 0.0, n, vView);
+  // Snow caps resist the monochrome grade: they stay the brightest thing.
+  writeG(col, snow ? -0.55 : 0.0, n, vView);
 }
 `;
 

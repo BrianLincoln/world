@@ -43,13 +43,15 @@ const SHOTS = [
   { name: 'cabin-day', q: 'seed=hilda&t=10.5&pitch=0.14&dist=12', setup: "window.__ow.lookAtPoi('cabin', 30)" },
   { name: 'cabin-night', q: 'seed=hilda&t=22.5&pitch=0.12&dist=12', setup: "window.__ow.lookAtPoi('cabin', 26, 2.2)" },
   { name: 'tor', q: 'seed=hilda&t=15.5&pitch=0.06&dist=14', setup: "window.__ow.lookAtPoi('tor', 70)" },
-  { name: 'sky-clouds', q: 'seed=hilda&t=11&pitch=-0.3&dist=8' },
+  { name: 'vista', q: 'seed=hilda&t=9.8&pitch=0.04&dist=9', setup: 'window.__ow.facePeak()' },
+  { name: 'vista-fjord', q: 'seed=fjord&t=17.2&pitch=0.04&dist=9', setup: 'window.__ow.facePeak()' },
+  { name: 'vista-42-dawn', q: 'seed=42&t=7.2&pitch=0.04&dist=9', setup: 'window.__ow.facePeak()' },
   { name: 'seed-42-dusk', q: 'seed=42&t=18.6&mode=fly&y=80&pitch=0.15&dist=25&yaw=2.5' },
 ];
 const only = opt('--only', null)?.split(',');
 
 const browser = await chromium.launch({
-  args: ['--use-angle=metal', '--enable-gpu', '--ignore-gpu-blocklist', '--enable-unsafe-webgpu'],
+  args: ['--use-angle=metal', '--enable-gpu', '--ignore-gpu-blocklist', ...(flag('--uncapped') ? ['--disable-gpu-vsync', '--disable-frame-rate-limit'] : [])],
 });
 const page = await browser.newPage({ viewport: { width: 1600, height: 900 }, deviceScaleFactor: 1 });
 page.on('console', (m) => { if (m.type() === 'error' || m.type() === 'warning') console.log('[page]', m.type(), m.text().slice(0, 400)); });

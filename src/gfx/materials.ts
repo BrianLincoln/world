@@ -130,11 +130,11 @@ function mat(vert: string, frag: string, uniforms: Record<string, THREE.IUniform
 }
 
 export function makeTerrainMaterial() {
-  return mat(TERRAIN_VERT, TERRAIN_FRAG, { ...U, ...TERRAIN_U });
+  return mat(TERRAIN_VERT, TERRAIN_FRAG, { ...U, ...TERRAIN_U, uIsProp: { value: 0 } });
 }
 
 export function makeWaterMaterial() {
-  return mat(WATER_VERT, WATER_FRAG, { ...U, ...WATER_U });
+  return mat(WATER_VERT, WATER_FRAG, { ...U, ...WATER_U, uIsProp: { value: 0 } });
 }
 
 // Kind colours shared by all props (see PROP_FRAG for the index table).
@@ -153,6 +153,7 @@ export function makePropMaterial(opts: { bend?: number; wind?: number; heightRef
   return mat(PROP_VERT, PROP_FRAG, {
     ...U,
     ...PROP_U,
+    uIsProp: { value: 1 },
     uBend: { value: opts.bend ?? 0 },
     uWind: { value: opts.wind ?? 0 },
     uHeightRef: { value: opts.heightRef ?? 1 },
@@ -171,5 +172,5 @@ export function makeCloudMaterial() {
 }
 
 export function makeSolidMaterial(hex: string, emissive = 0) {
-  return mat(SOLID_VERT, SOLID_FRAG, { ...U, uColor: { value: col(hex) }, uEmissive: { value: emissive } });
+  return mat(SOLID_VERT, SOLID_FRAG, { ...U, uIsProp: { value: 1 }, uColor: { value: col(hex) }, uEmissive: { value: emissive } });
 }

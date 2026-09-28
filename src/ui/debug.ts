@@ -66,6 +66,7 @@ export class DebugUI {
     const ff = this.gui.addFolder('Fog');
     ff.add(postSettings, 'fogDensity', 0, 0.0015, 0.00001).name('density');
     ff.add(postSettings, 'fogBands', 0, 12, 1).name('bands (0 = smooth)');
+    ff.add(postSettings, 'layeredFog').name('fog per layer');
     ff.add(postSettings, 'fogHeight', 0, 1, 0.01).name('valley mist');
     ff.add(postSettings, 'fogFalloff', 5, 200, 1).name('mist height x4');
     ff.add(postSettings, 'fogMax', 0, 1, 0.01).name('max');
@@ -82,6 +83,7 @@ export class DebugUI {
     const fr = this.gui.addFolder('Render');
     fr.add(postSettings, 'bloom', 0, 3, 0.01).name('window bloom');
     fr.add(postSettings, 'renderScale', 0.5, 2, 0.05).name('resolution scale');
+    fr.add(postSettings, 'adaptive').name('adaptive resolution');
     fr.add(postSettings, 'fxaa').name('FXAA');
     fr.add(h.terrain.settings, 'splitFactor', 1.2, 4, 0.05).name('terrain detail');
     fr.add(h.terrain.settings, 'showProps').name('props');
