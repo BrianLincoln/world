@@ -1,5 +1,7 @@
 # Fjellheim — notes
 
+> Decision log. The original brief is in `docs/BRIEF.md`; the working loop and gotchas are in `docs/WORKFLOW.md`; agent entry point is `CLAUDE.md`.
+
 A browser-playable, procedurally generated Nordic sandbox in the flat-shaded
 storybook style of the `/inspo` references (Hilda backgrounds). No goals; the
 point is wandering somewhere beautiful.
