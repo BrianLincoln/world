@@ -1,0 +1,175 @@
+import * as THREE from 'three';
+import { BIOME } from './palette';
+import {
+  CLOUD_FRAG, CLOUD_VERT, FS_VERT, PROP_FRAG, PROP_VERT, SKY_FRAG, SOLID_FRAG, SOLID_VERT,
+  TERRAIN_FRAG, TERRAIN_VERT, WATER_FRAG, WATER_VERT,
+} from './shaders';
+
+// One shared uniform set drives every scene material, so the day/night cycle
+// and debug panel update a single place.
+
+function makeNoiseTexture(): THREE.DataTexture {
+  // Tileable value-noise fbm, 4 independent channels.
+  const N = 256;
+  const data = new Uint8Array(N * N * 4);
+  const lattice = (period: number, salt: number) => {
+    const g = new Float32Array(period * period);
+    let s = 1234567 + salt * 7919;
+    for (let i = 0; i < g.length; i++) {
+      s = (Math.imul(s, 1103515245) + 12345) >>> 0;
+      g[i] = (s >>> 8) / 16777216;
+    }
+    return g;
+  };
+  const chans: number[][] = [];
+  for (let c = 0; c < 4; c++) {
+    const octs = [8, 16, 32, 64].map((p, o) => ({ p, g: lattice(p, c * 10 + o), a: 1 / (1 << o) }));
+    const out = new Array(N * N).fill(0);
+    for (const { p, g, a } of octs) {
+      for (let y = 0; y < N; y++) {
+        for (let x = 0; x < N; x++) {
+          const fx = (x / N) * p;
+          const fy = (y / N) * p;
+          const ix = Math.floor(fx);
+          const iy = Math.floor(fy);
+          let u = fx - ix;
+          let v = fy - iy;
+          u = u * u * (3 - 2 * u);
+          v = v * v * (3 - 2 * v);
+          const i0 = ix % p, i1 = (ix + 1) % p, j0 = iy % p, j1 = (iy + 1) % p;
+          const a00 = g[j0 * p + i0], a10 = g[j0 * p + i1], a01 = g[j1 * p + i0], a11 = g[j1 * p + i1];
+          out[y * N + x] += a * ((a00 * (1 - u) + a10 * u) * (1 - v) + (a01 * (1 - u) + a11 * u) * v);
+        }
+      }
+    }
+    chans.push(out.map((v) => v / 1.875));
+  }
+  for (let i = 0; i < N * N; i++) {
+    for (let c = 0; c < 4; c++) data[i * 4 + c] = Math.max(0, Math.min(255, Math.round(chans[c][i] * 255)));
+  }
+  const tex = new THREE.DataTexture(data, N, N, THREE.RGBAFormat);
+  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+  tex.magFilter = THREE.LinearFilter;
+  tex.minFilter = THREE.LinearMipmapLinearFilter;
+  tex.generateMipmaps = true;
+  tex.needsUpdate = true;
+  return tex;
+}
+
+const col = (hex: string) => new THREE.Color(hex);
+
+export const U = {
+  uLightDir: { value: new THREE.Vector3(0.4, 0.6, 0.3).normalize() },
+  uLightCol: { value: new THREE.Color(1, 1, 1) },
+  uMidCol: { value: new THREE.Color(0.85, 0.8, 0.8) },
+  uShadeCol: { value: new THREE.Color(0.65, 0.6, 0.66) },
+  uBand1: { value: 0.3 },
+  uBand2: { value: -0.02 },
+  uTime: { value: 0 },
+  uNight: { value: 0 },
+  uNoise: { value: null as unknown as THREE.Texture },
+  uFocus: { value: new THREE.Vector3() },
+};
+
+export const TERRAIN_U = {
+  cMeadow: { value: col(BIOME.meadow) },
+  cMeadowDark: { value: col(BIOME.meadowDark) },
+  cForest: { value: col(BIOME.forestFloor) },
+  cHeath: { value: col(BIOME.heath) },
+  cRock: { value: col(BIOME.rock) },
+  cRockDark: { value: col(BIOME.rockDark) },
+  cSnow: { value: col(BIOME.snow) },
+  cSand: { value: col(BIOME.sand) },
+  cPath: { value: col(BIOME.path) },
+  cSeabed: { value: col(BIOME.seabed) },
+  cStroke: { value: col(BIOME.meadowDark).multiplyScalar(0.72) },
+  uSnowLine: { value: 235 },
+  uStrokes: { value: 1 },
+  uPlayerFeet: { value: new THREE.Vector3(0, -1e4, 0) },
+};
+
+export const WATER_U = {
+  cDeep: { value: col('#8fa3ad') },
+  cShallow: { value: col(BIOME.waterShallow) },
+  cFoam: { value: col(BIOME.foam) },
+  cReflect: { value: col('#f4e6d4') },
+};
+
+export const SKY_U = {
+  uInvProj: { value: new THREE.Matrix4() },
+  uCamWorld: { value: new THREE.Matrix4() },
+  uSkyTop: { value: new THREE.Color() },
+  uSkyMid: { value: new THREE.Color() },
+  uSkyHorizon: { value: new THREE.Color() },
+  uSunGlow: { value: new THREE.Color() },
+  uSunCol: { value: new THREE.Color() },
+  uSunDir: { value: new THREE.Vector3(0, 1, 0) },
+  uMoonDir: { value: new THREE.Vector3(0, 1, 0) },
+  uStars: { value: 0 },
+  uSkyBands: { value: 7 },
+  uCloud: { value: new THREE.Color() },
+  uCloudShade: { value: new THREE.Color() },
+  uCloudRim: { value: new THREE.Color() },
+  uCloudLine: { value: new THREE.Color() },
+  uCloudDist: { value: 6000 },
+  uCloudDrift: { value: 0 },
+};
+
+export function initMaterials() {
+  U.uNoise.value = makeNoiseTexture();
+}
+
+function mat(vert: string, frag: string, uniforms: Record<string, THREE.IUniform>, extra: Partial<THREE.ShaderMaterialParameters> = {}) {
+  return new THREE.ShaderMaterial({
+    glslVersion: THREE.GLSL3,
+    vertexShader: vert,
+    fragmentShader: frag,
+    uniforms,
+    ...extra,
+  });
+}
+
+export function makeTerrainMaterial() {
+  return mat(TERRAIN_VERT, TERRAIN_FRAG, { ...U, ...TERRAIN_U });
+}
+
+export function makeWaterMaterial() {
+  return mat(WATER_VERT, WATER_FRAG, { ...U, ...WATER_U });
+}
+
+// Kind colours shared by all props (see PROP_FRAG for the index table).
+export const KIND_COLORS: THREE.Color[] = [
+  col(BIOME.foliage), col(BIOME.trunk), col(BIOME.rock), col(BIOME.bush),
+  col(BIOME.tuft), col(BIOME.flower), col(BIOME.flowerCore), col(BIOME.cabinWall),
+  col(BIOME.cabinRoof), col(BIOME.cabinTrim), col(BIOME.cabinWindow), col(BIOME.cabinDoor),
+  col(BIOME.stone), col(BIOME.cabinWall2), col(BIOME.snow), col('#ffffff'),
+];
+export const PROP_U = {
+  uKind: { value: KIND_COLORS },
+  uGlow: { value: col(BIOME.windowGlow) },
+};
+
+export function makePropMaterial(opts: { bend?: number; wind?: number; heightRef?: number; toneVar?: number; doubleSide?: boolean; flipBack?: boolean; cutaway?: boolean }) {
+  return mat(PROP_VERT, PROP_FRAG, {
+    ...U,
+    ...PROP_U,
+    uBend: { value: opts.bend ?? 0 },
+    uWind: { value: opts.wind ?? 0 },
+    uHeightRef: { value: opts.heightRef ?? 1 },
+    uToneVar: { value: opts.toneVar ?? 0.15 },
+    uFlip: { value: opts.flipBack ? 1 : 0 },
+    uCutaway: { value: opts.cutaway ? 1 : 0 },
+  }, { side: opts.doubleSide ? THREE.DoubleSide : THREE.FrontSide });
+}
+
+export function makeSkyMaterial() {
+  return mat(FS_VERT, SKY_FRAG, { ...U, ...SKY_U }, { depthTest: false, depthWrite: false });
+}
+
+export function makeCloudMaterial() {
+  return mat(CLOUD_VERT, CLOUD_FRAG, { ...U, ...SKY_U }, { depthTest: false, depthWrite: false, side: THREE.DoubleSide });
+}
+
+export function makeSolidMaterial(hex: string, emissive = 0) {
+  return mat(SOLID_VERT, SOLID_FRAG, { ...U, uColor: { value: col(hex) }, uEmissive: { value: emissive } });
+}

@@ -1,0 +1,423 @@
+import { Simplex } from '../core/noise';
+import { clamp, hash01, hashInt, lerp, mulberry32, smoothstep } from '../core/rng';
+
+// The world is a pure function of (seed, x, z). Nothing here touches three.js
+// so it runs identically inside chunk workers and on the main thread.
+
+export const SEA_LEVEL = 0;
+export const SNOW_LINE = 235;
+export const TREE_LINE = 175;
+
+const PEAK_CELL = 2300;
+const POI_CELL = 420;
+
+export interface Boulder {
+  x: number; y: number; z: number;
+  sx: number; sy: number; rot: number;
+}
+
+export interface Poi {
+  kind: 'cabin' | 'tor' | 'circle' | 'erratic';
+  x: number; z: number; y: number;
+  rot: number;
+  /** Clearing radius: trees and bushes keep out of this. */
+  clear: number;
+  boulders?: Boulder[];
+  variant?: number;
+}
+
+export interface PathSeg { ax: number; az: number; bx: number; bz: number }
+
+interface Peak { x: number; z: number; h: number; r: number }
+
+export class WorldGen {
+  readonly seed: number;
+  private nWarp: Simplex;
+  private nCont: Simplex;
+  private nHills: Simplex;
+  private nHigh: Simplex;
+  private nMound: Simplex;
+  private nValley: Simplex;
+  private nMask: Simplex;
+  private nForest: Simplex;
+  private nForest2: Simplex;
+  private nRock: Simplex;
+  private nMisc: Simplex;
+  private peakCache = new Map<number, Peak | null>();
+  private poiCache = new Map<number, Poi[]>();
+  private pathCache = new Map<number, PathSeg[]>();
+
+  constructor(seed: number) {
+    this.seed = seed >>> 0;
+    const r = mulberry32(this.seed);
+    const s = () => Math.floor(r() * 4294967295);
+    this.nWarp = new Simplex(s());
+    this.nCont = new Simplex(s());
+    this.nHills = new Simplex(s());
+    this.nHigh = new Simplex(s());
+    this.nMound = new Simplex(s());
+    this.nValley = new Simplex(s());
+    this.nMask = new Simplex(s());
+    this.nForest = new Simplex(s());
+    this.nForest2 = new Simplex(s());
+    this.nRock = new Simplex(s());
+    this.nMisc = new Simplex(s());
+  }
+
+  // ---------------------------------------------------------------- terrain
+
+  /** Land factor 0 (open sea) .. 1 (inland). */
+  landAt(x: number, z: number): number {
+    const c = this.nCont.fbm(x / 5600 + 3.1, z / 5600 - 1.7, 4);
+    return smoothstep(-0.2, 0.1, c + 0.08);
+  }
+
+  /** Height without POI flattening. */
+  baseHeight(x: number, z: number): number {
+    const nw = this.nWarp;
+    const wx = x + 220 * nw.fbm(x / 1500, z / 1500, 3);
+    const wz = z + 220 * nw.fbm(x / 1500 + 41.3, z / 1500 - 17.9, 3);
+
+    const land = this.landAt(wx, wz);
+    let h = lerp(-34, 5, land);
+
+    // Gently rolling hills everywhere on land, softer at sea.
+    const hills = this.nHills.fbm(wx / 560, wz / 560, 4);
+    h += hills * 30 * (0.3 + 0.7 * land);
+
+    // Highland massifs: rounded mounds, squared for soft bases.
+    const hlRaw = this.nHigh.fbm(wx / 3200 + 11, wz / 3200 - 7, 3);
+    const hl = smoothstep(-0.02, 0.4, hlRaw) * land;
+    const mound = this.nMound.fbm(wx / 1250, wz / 1250, 4) * 0.5 + 0.55;
+    h += hl * mound * mound * 230;
+
+    // Small undulation so near ground is never glassy-flat.
+    h += this.nHills.fbm(wx / 120 + 5, wz / 120 + 9, 2) * 2.2;
+
+    // A few dominant peaks (landmarks visible from far away).
+    h += this.peaks(wx, wz) * (0.35 + 0.65 * land);
+
+    // Valley network -> fjords in the highlands, rivers/lakes in lowlands.
+    const vx = wx + 300 * nw.noise(wz / 2600, wx / 2600);
+    const vz = wz + 300 * nw.noise(wx / 2600 + 9, wz / 2600 + 3);
+    const v = Math.abs(this.nValley.fbm(vx / 2600, vz / 2600, 3));
+    const mask = smoothstep(-0.12, 0.2, this.nMask.fbm(x / 5200 - 7, z / 5200 + 2, 2));
+    const width = 0.035 + 0.035 * mask;
+    // U profile: k = (1 - t^2)^2 -> flat floor, smooth rim, steepest mid-wall.
+    const t = Math.min(1, v / (width * 3));
+    const k = (1 - t * t) * (1 - t * t) * mask;
+    if (k > 0) {
+      const floor = -8 - 22 * hl;
+      h = lerp(h, Math.min(h, floor), k);
+    }
+    return h;
+  }
+
+  private peakInCell(cx: number, cz: number): Peak | null {
+    const key = cx * 73856093 + cz * 19349663;
+    const cached = this.peakCache.get(key);
+    if (cached !== undefined) return cached;
+    let p: Peak | null = null;
+    if (hash01(cx, cz, this.seed, 11) < 0.55) {
+      p = {
+        x: (cx + 0.2 + 0.6 * hash01(cx, cz, this.seed, 12)) * PEAK_CELL,
+        z: (cz + 0.2 + 0.6 * hash01(cx, cz, this.seed, 13)) * PEAK_CELL,
+        h: 230 + 360 * hash01(cx, cz, this.seed, 14),
+        r: 650 + 450 * hash01(cx, cz, this.seed, 15),
+      };
+    }
+    this.peakCache.set(key, p);
+    return p;
+  }
+
+  private peaks(x: number, z: number): number {
+    const cx = Math.floor(x / PEAK_CELL);
+    const cz = Math.floor(z / PEAK_CELL);
+    let sum = 0;
+    for (let dz = -1; dz <= 1; dz++) {
+      for (let dx = -1; dx <= 1; dx++) {
+        const p = this.peakInCell(cx + dx, cz + dz);
+        if (!p) continue;
+        const ddx = x - p.x;
+        const ddz = z - p.z;
+        const d2 = ddx * ddx + ddz * ddz;
+        if (d2 > p.r * p.r * 1.6) continue;
+        // Irregular radius so peaks get ridges and shoulders, not cones.
+        const ang = Math.atan2(ddz, ddx);
+        const wob = 1 + 0.22 * Math.sin(ang * 3 + p.h) + 0.12 * Math.sin(ang * 5 + p.r);
+        const s = Math.sqrt(d2) / (p.r * wob);
+        // Concave flanks, softly rounded summit.
+        sum += p.h * Math.exp(-Math.pow(s * 2.3, 1.45));
+      }
+    }
+    return sum;
+  }
+
+  /** Final ground height including flattened pads under cabins. */
+  height(x: number, z: number): number {
+    let h = this.baseHeight(x, z);
+    const cx = Math.floor(x / POI_CELL);
+    const cz = Math.floor(z / POI_CELL);
+    for (let dz = -1; dz <= 1; dz++) {
+      for (let dx = -1; dx <= 1; dx++) {
+        const pois = this.poisInCell(cx + dx, cz + dz);
+        for (let i = 0; i < pois.length; i++) {
+          const p = pois[i];
+          if (p.kind !== 'cabin') continue;
+          const ddx = x - p.x;
+          const ddz = z - p.z;
+          const d2 = ddx * ddx + ddz * ddz;
+          if (d2 > 900) continue;
+          const w = 1 - smoothstep(7, 24, Math.sqrt(d2));
+          h = lerp(h, p.y, w);
+        }
+      }
+    }
+    return h;
+  }
+
+  // ---------------------------------------------------------------- biomes
+
+  /** 0..1 grove density. Clustered, with hard-ish edges and inner clearings. */
+  forestDensity(x: number, z: number, h: number): number {
+    const f = this.nForest.fbm(x / 460, z / 460, 4) + 0.25 * this.nForest2.noise(x / 90, z / 90);
+    let d = smoothstep(0.0, 0.16, f + 0.02);
+    d *= 1 - smoothstep(TREE_LINE - 45, TREE_LINE, h);
+    d *= smoothstep(1.8, 4.5, h);
+    return d;
+  }
+
+  /** 0..1 boulder field strength. */
+  rockiness(x: number, z: number, h: number): number {
+    const r = this.nRock.fbm(x / 300, z / 300, 3);
+    return clamp(smoothstep(0.12, 0.45, r) + smoothstep(90, 200, h) * 0.6, 0, 1);
+  }
+
+  /** 0..1 meadow flower patches. */
+  flowers(x: number, z: number): number {
+    return smoothstep(0.25, 0.55, this.nMisc.noise(x / 70, z / 70));
+  }
+
+  // ---------------------------------------------------------------- POIs
+
+  poisInCell(cx: number, cz: number): Poi[] {
+    const key = cx * 73856093 + cz * 19349663;
+    const cached = this.poiCache.get(key);
+    if (cached) return cached;
+    const out: Poi[] = [];
+    this.poiCache.set(key, out); // set early: baseHeight never re-enters here
+    const rnd = mulberry32(hashInt(cx, cz, this.seed, 101));
+    const x0 = cx * POI_CELL;
+    const z0 = cz * POI_CELL;
+    const inCell = () => [x0 + 50 + rnd() * (POI_CELL - 100), z0 + 50 + rnd() * (POI_CELL - 100)];
+
+    const flatEnough = (x: number, z: number, h: number, lim: number) => {
+      const a = this.baseHeight(x + 7, z) - this.baseHeight(x - 7, z);
+      const b = this.baseHeight(x, z + 7) - this.baseHeight(x, z - 7);
+      const c = this.baseHeight(x + 5, z + 5) - h;
+      return Math.abs(a) < lim && Math.abs(b) < lim && Math.abs(c) < lim;
+    };
+
+    // Cabins: on gentle ground above the shore, below the high moors.
+    if (rnd() < 0.5) {
+      for (let tries = 0; tries < 5; tries++) {
+        const [x, z] = inCell();
+        const h = this.baseHeight(x, z);
+        if (h < 3 || h > 150 || !flatEnough(x, z, h, 3.2)) continue;
+        // Meadow or a grove's edge, never deep forest.
+        if (this.forestDensity(x, z, h) > 0.45) continue;
+        out.push({ kind: 'cabin', x, z, y: h + 0.05, rot: rnd() * Math.PI * 2, clear: 22, variant: Math.floor(rnd() * 3) });
+        // Occasionally a neighbour: a tiny hamlet.
+        if (rnd() < 0.3) {
+          const a = rnd() * Math.PI * 2;
+          const d = 24 + rnd() * 12;
+          const x2 = x + Math.cos(a) * d;
+          const z2 = z + Math.sin(a) * d;
+          const h2 = this.baseHeight(x2, z2);
+          if (h2 > 3 && Math.abs(h2 - h) < 5 && flatEnough(x2, z2, h2, 3.2)) {
+            out.push({ kind: 'cabin', x: x2, z: z2, y: h2 + 0.05, rot: rnd() * Math.PI * 2, clear: 14, variant: Math.floor(rnd() * 3) });
+          }
+        }
+        break;
+      }
+    }
+
+    // Tors: stacked rounded boulders; landmarks on hills and moors.
+    if (rnd() < 0.34) {
+      // Best of a few candidates: prefer high, open ground (visible from afar).
+      let x = 0, z = 0, h = -1, score = -Infinity;
+      for (let k = 0; k < 4; k++) {
+        const [cx2, cz2] = inCell();
+        const ch = this.baseHeight(cx2, cz2);
+        const sc = ch - 400 * this.forestDensity(cx2, cz2, ch);
+        if (sc > score) { score = sc; x = cx2; z = cz2; h = ch; }
+      }
+      if (h > 6 && this.forestDensity(x, z, h) < 0.3) {
+        const boulders: Boulder[] = [];
+        const stacks = 1 + Math.floor(rnd() * 3);
+        for (let s = 0; s < stacks; s++) {
+          const sx = x + (s === 0 ? 0 : (rnd() - 0.5) * 16);
+          const sz = z + (s === 0 ? 0 : (rnd() - 0.5) * 16);
+          const base = this.baseHeight(sx, sz);
+          let y = base - 1.2;
+          let r = (s === 0 ? 5.5 : 3.2) + rnd() * 3;
+          const n = 2 + Math.floor(rnd() * (s === 0 ? 4 : 3));
+          let ox = 0;
+          let oz = 0;
+          for (let k = 0; k < n; k++) {
+            const sy = r * (0.55 + rnd() * 0.25);
+            y += sy * 0.85;
+            boulders.push({ x: sx + ox, y, z: sz + oz, sx: r, sy, rot: rnd() * Math.PI });
+            y += sy * 0.7;
+            r *= 0.68 + rnd() * 0.2;
+            ox += (rnd() - 0.5) * r * 0.5;
+            oz += (rnd() - 0.5) * r * 0.5;
+          }
+        }
+        out.push({ kind: 'tor', x, z, y: h, rot: 0, clear: 18, boulders });
+      }
+    }
+
+    // Standing stone circles on open meadow.
+    if (rnd() < 0.08) {
+      const [x, z] = inCell();
+      const h = this.baseHeight(x, z);
+      if (h > 4 && h < 130 && flatEnough(x, z, h, 3)) {
+        const boulders: Boulder[] = [];
+        const n = 7 + Math.floor(rnd() * 4);
+        const R = 7 + rnd() * 3;
+        for (let k = 0; k < n; k++) {
+          if (rnd() < 0.12) continue; // a fallen gap
+          const a = (k / n) * Math.PI * 2;
+          const bx = x + Math.cos(a) * R;
+          const bz = z + Math.sin(a) * R;
+          const sy = 1.6 + rnd() * 1.2;
+          boulders.push({ x: bx, y: this.baseHeight(bx, bz) + sy * 0.6, z: bz, sx: 0.75 + rnd() * 0.3, sy, rot: a });
+        }
+        out.push({ kind: 'circle', x, z, y: h, rot: 0, clear: R + 4, boulders });
+      }
+    }
+
+    // Lone glacial erratics: one huge pebble in the open.
+    if (rnd() < 0.18) {
+      const [x, z] = inCell();
+      const h = this.baseHeight(x, z);
+      if (h > 3) {
+        const r = 3.5 + rnd() * 4;
+        out.push({
+          kind: 'erratic', x, z, y: h, rot: 0, clear: r + 3,
+          boulders: [{ x, y: h + r * 0.25, z, sx: r, sy: r * (0.6 + rnd() * 0.2), rot: rnd() * Math.PI }],
+        });
+      }
+    }
+    return out;
+  }
+
+  poiCellRange(x0: number, z0: number, x1: number, z1: number, cb: (p: Poi) => void) {
+    const c0x = Math.floor(x0 / POI_CELL);
+    const c0z = Math.floor(z0 / POI_CELL);
+    const c1x = Math.floor(x1 / POI_CELL);
+    const c1z = Math.floor(z1 / POI_CELL);
+    for (let cz = c0z; cz <= c1z; cz++) for (let cx = c0x; cx <= c1x; cx++) {
+      for (const p of this.poisInCell(cx, cz)) cb(p);
+    }
+  }
+
+  // ---------------------------------------------------------------- paths
+
+  /**
+   * Footpaths join each cabin to its nearest neighbour cabin. Each cell owns
+   * the paths leaving its own cabins, so the network is deterministic and
+   * independent of which chunk asks first.
+   */
+  pathsFromCell(cx: number, cz: number): PathSeg[] {
+    const key = cx * 73856093 + cz * 19349663;
+    const cached = this.pathCache.get(key);
+    if (cached) return cached;
+    const segs: PathSeg[] = [];
+    const mine = this.poisInCell(cx, cz).filter((p) => p.kind === 'cabin');
+    for (const a of mine) {
+      const cands: Poi[] = [];
+      for (let dz = -2; dz <= 2; dz++) for (let dx = -2; dx <= 2; dx++) {
+        for (const p of this.poisInCell(cx + dx, cz + dz)) {
+          if (p !== a && (p.kind === 'cabin' || p.kind === 'circle' || p.kind === 'tor')) cands.push(p);
+        }
+      }
+      cands.sort((p, q) => Math.hypot(p.x - a.x, p.z - a.z) - Math.hypot(q.x - a.x, q.z - a.z));
+      // Nearest two destinations: gives a loose network, not a tree of stubs.
+      let made = 0;
+      for (const b of cands) {
+        if (made >= 2) break;
+        const d = Math.hypot(b.x - a.x, b.z - a.z);
+        if (d > 950 || d < 20) continue;
+        const pts = this.tracePath(a.x, a.z, b.x, b.z);
+        if (!pts) continue;
+        for (let i = 0; i + 1 < pts.length; i++) {
+          segs.push({ ax: pts[i][0], az: pts[i][1], bx: pts[i + 1][0], bz: pts[i + 1][1] });
+        }
+        made++;
+      }
+    }
+    this.pathCache.set(key, segs);
+    return segs;
+  }
+
+  /** Meandering polyline between two points, or null if it would cross water. */
+  private tracePath(ax: number, az: number, bx: number, bz: number): [number, number][] | null {
+    // Canonical direction so A->B and B->A trace the identical line.
+    if (ax > bx || (ax === bx && az > bz)) {
+      [ax, bx] = [bx, ax];
+      [az, bz] = [bz, az];
+    }
+    const d = Math.hypot(bx - ax, bz - az);
+    const n = Math.max(4, Math.ceil(d / 10));
+    const px = -(bz - az) / d;
+    const pz = (bx - ax) / d;
+    const pts: [number, number][] = [];
+    const amp = Math.min(40, d * 0.12);
+    for (let i = 0; i <= n; i++) {
+      const t = i / n;
+      const env = Math.sin(t * Math.PI);
+      const wig = this.nMisc.noise(ax * 0.01 + t * d / 90, az * 0.01 + 3.3) * amp * env;
+      const x = lerp(ax, bx, t) + px * wig;
+      const z = lerp(az, bz, t) + pz * wig;
+      if (i % 3 === 0) {
+        const h = this.baseHeight(x, z);
+        if (h < 1.2 || h > 190) return null;
+      }
+      pts.push([x, z]);
+    }
+    return pts;
+  }
+
+  pathsInRange(x0: number, z0: number, x1: number, z1: number, margin: number): PathSeg[] {
+    const out: PathSeg[] = [];
+    const c0x = Math.floor((x0 - 1000) / POI_CELL);
+    const c0z = Math.floor((z0 - 1000) / POI_CELL);
+    const c1x = Math.floor((x1 + 1000) / POI_CELL);
+    const c1z = Math.floor((z1 + 1000) / POI_CELL);
+    for (let cz = c0z; cz <= c1z; cz++) for (let cx = c0x; cx <= c1x; cx++) {
+      for (const s of this.pathsFromCell(cx, cz)) {
+        const minx = Math.min(s.ax, s.bx) - margin;
+        const maxx = Math.max(s.ax, s.bx) + margin;
+        const minz = Math.min(s.az, s.bz) - margin;
+        const maxz = Math.max(s.az, s.bz) + margin;
+        if (maxx < x0 || minx > x1 || maxz < z0 || minz > z1) continue;
+        out.push(s);
+      }
+    }
+    return out;
+  }
+}
+
+export function segDist(x: number, z: number, s: PathSeg): number {
+  const vx = s.bx - s.ax;
+  const vz = s.bz - s.az;
+  const wx = x - s.ax;
+  const wz = z - s.az;
+  const l2 = vx * vx + vz * vz;
+  const t = l2 > 0 ? clamp((wx * vx + wz * vz) / l2, 0, 1) : 0;
+  const dx = wx - vx * t;
+  const dz = wz - vz * t;
+  return Math.sqrt(dx * dx + dz * dz);
+}
