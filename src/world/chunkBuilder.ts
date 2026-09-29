@@ -116,7 +116,8 @@ export function buildChunk(gen: WorldGen, req: ChunkRequest): ChunkResult {
       normals[v * 3 + 2] = nz;
       biome[v * 4] = gen.forestDensity(wx, wz, h);
       biome[v * 4 + 1] = gen.rockiness(wx, wz, h);
-      biome[v * 4 + 2] = paths.length ? pathDist(wx, wz) : 30;
+      // Brook banks read as sand/shingle (the path colour) a couple of metres out.
+      biome[v * 4 + 2] = Math.min(paths.length ? pathDist(wx, wz) : 30, gen.brookDist(wx, wz) - 2.6);
       biome[v * 4 + 3] = gen.flowers(wx, wz);
       if (h < minY) minY = h;
       if (h > maxY) maxY = h;
@@ -204,6 +205,7 @@ export function buildChunk(gen: WorldGen, req: ChunkRequest): ChunkResult {
         if (hash01(gi, gj, seed, 3) > p) continue;
         if (paths.length && pathDist(x, z) < 3.2) continue;
         if (inClearing(x, z, 2)) continue;
+        if (gen.storyBlock(x, z, 1.2, 'tree')) continue;
         const sc = (0.72 + 0.45 * hash01(gi, gj, seed, 4) + 0.25 * fd) * farScale;
         trees.push(lx, h - 0.4, lz, sc, hash01(gi, gj, seed, 5) * 6.283,
           0.88 + 0.3 * hash01(gi, gj, seed, 6), (hash01(gi, gj, seed, 7) - 0.5), hash01(gi, gj, seed, 8));
@@ -232,6 +234,7 @@ export function buildChunk(gen: WorldGen, req: ChunkRequest): ChunkResult {
         if (hash01(gi, gj, seed, 23) > p) continue;
         if (paths.length && pathDist(x, z) < 2.2) continue;
         if (inClearing(x, z, -2)) continue;
+        if (gen.storyBlock(x, z, 1.4, 'bush')) continue;
         const sc = (0.7 + 0.8 * hash01(gi, gj, seed, 24)) * (bStep > 1 ? 1.2 : 1);
         bushes.push(lx, h - 0.15, lz, sc, hash01(gi, gj, seed, 25) * 6.283, 0.7 + 0.3 * hash01(gi, gj, seed, 26), 0, hash01(gi, gj, seed, 27));
       }
@@ -259,6 +262,7 @@ export function buildChunk(gen: WorldGen, req: ChunkRequest): ChunkResult {
         if (paths.length && pathDist(x, z) < 1.8) continue;
         const big = hash01(gi, gj, seed, 34);
         const sc = (0.35 + 1.4 * big * big * big + rk * 0.6) * (rStep > 1 ? 1.4 : 1);
+        if (gen.storyBlock(x, z, sc * 0.9, 'rock')) continue;
         rocks.push(lx, h - sc * 0.25, lz, sc, hash01(gi, gj, seed, 35) * 6.283, 0.55 + 0.25 * hash01(gi, gj, seed, 36), 0, hash01(gi, gj, seed, 37));
       }
     }
@@ -280,6 +284,7 @@ export function buildChunk(gen: WorldGen, req: ChunkRequest): ChunkResult {
         const r = hash01(gi, gj, seed, 43);
         const pd = paths.length ? pathDist(x, z) : 30;
         if (pd < 1.4) continue;
+        if (gen.storyBlock(x, z, 0, 'tuft')) continue;
         if (r < 0.32) {
           tufts.push(lx, h - 0.05, lz, 0.7 + 0.7 * hash01(gi, gj, seed, 47), hash01(gi, gj, seed, 48) * 6.283,
             0.7 + 0.6 * hash01(gi, gj, seed, 49), 0, hash01(gi, gj, seed, 50));
@@ -311,6 +316,7 @@ export function buildChunk(gen: WorldGen, req: ChunkRequest): ChunkResult {
     for (const p of pois) {
       if (p.x < x0 || p.z < z0 || p.x >= x0 + size || p.z >= z0 + size) continue;
       if (p.kind === 'cabin') {
+        if (p.story === 'ruin') continue; // drawn by the story (it has states)
         cabins.push(p.x - x0, p.y, p.z - z0, 1, p.rot, 1, p.variant ?? 0, 0.5);
       } else if (p.boulders) {
         for (const b of p.boulders) {

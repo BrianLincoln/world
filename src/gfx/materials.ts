@@ -145,7 +145,7 @@ export const KIND_COLORS: THREE.Color[] = [
   col(BIOME.tuft), col(BIOME.flower), col(BIOME.flowerCore), col(BIOME.cabinWall),
   col(BIOME.cabinRoof), col(BIOME.cabinTrim), col(BIOME.cabinWindow), col(BIOME.cabinDoor),
   col(BIOME.stone), col(BIOME.cabinWall2), col(BIOME.snow), col(BIOME.harebell),
-  col(BIOME.buttercup),
+  col(BIOME.buttercup), col(BIOME.cutWood), col(BIOME.steel), col(BIOME.soot), col(BIOME.ember),
 ];
 export const PROP_U = {
   uKind: { value: KIND_COLORS },
@@ -164,6 +164,9 @@ export function makePropMaterial(opts: { bend?: number; wind?: number; heightRef
     uFlip: { value: opts.flipBack ? 1 : 0 },
     // 1 = discard near the camera; 2 = also hide whole instances blocking the player.
     uCutaway: { value: opts.cutaway === 'occluders' ? 2 : opts.cutaway === 'near' ? 1 : 0 },
+    uGlint: { value: 0 },
+    uWin: { value: -1 },
+    uFire: { value: 0 },
   }, { side: opts.doubleSide ? THREE.DoubleSide : THREE.FrontSide });
 }
 
@@ -178,7 +181,7 @@ export function makeCloudMaterial() {
 /** `keep` = how much of its own colour survives the monochrome grade (0..1). */
 export function makeSolidMaterial(hex: string, emissive = 0, opts: { keep?: number; doubleSide?: boolean; flat?: number } = {}) {
   return mat(SOLID_VERT, SOLID_FRAG, {
-    ...U, uIsProp: { value: 1 }, uColor: { value: col(hex) }, uEmissive: { value: emissive }, uKeep: { value: opts.keep ?? 0.7 }, uFlat: { value: opts.flat ?? 0 },
+    ...U, uIsProp: { value: 1 }, uColor: { value: col(hex) }, uEmissive: { value: emissive }, uKeep: { value: opts.keep ?? 0.7 }, uFlat: { value: opts.flat ?? 0 }, uGlint: { value: 0 },
   }, { side: opts.doubleSide ? THREE.DoubleSide : THREE.FrontSide });
 }
 
@@ -218,6 +221,7 @@ export function makeCreatureMaterial(o: CreatureLook = {}) {
     uBlush: { value: new THREE.Vector4(...(o.blush ?? [0, 0, 0, 0])) },
     uBlushCol: { value: col(o.blushCol ?? '#ef9c93') },
     uGlow: PROP_U.uGlow,
+    uEmber: { value: 0 },
   }, { side: o.doubleSide ? THREE.DoubleSide : THREE.FrontSide });
 }
 

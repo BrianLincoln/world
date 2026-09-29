@@ -9,6 +9,7 @@ import { Puffs } from './gfx/puffs';
 import { Sky } from './gfx/sky';
 import { CharacterRig } from './player/character';
 import { Input } from './player/input';
+import { TouchControls, isTouchDevice } from './ui/touch';
 import { BikeMode, BODY_RADIUS, FlyMode, GlideMode, MovementController, RideMode, SwimMode, WalkMode, type MoveContext, type WorldQuery } from './player/movement';
 import { Crow, crowStyle } from './mobs/crow';
 import { Mobs } from './mobs/manager';
@@ -156,6 +157,17 @@ function dismountBike() {
 }
 const orbit = new OrbitCamera(camera);
 const input = new Input(renderer.domElement);
+// Touch controls: up front on phones and tablets, or on the first touch of a
+// hybrid screen.
+let touch: TouchControls | null = isTouchDevice() ? new TouchControls(input, renderer.domElement) : null;
+if (!touch) {
+  const firstTouch = (e: PointerEvent) => {
+    if (e.pointerType !== 'touch') return;
+    renderer.domElement.removeEventListener('pointerdown', firstTouch, true);
+    touch = new TouchControls(input, renderer.domElement);
+  };
+  renderer.domElement.addEventListener('pointerdown', firstTouch, true);
+}
 const post = new PostPipeline(renderer);
 
 /** Find dry, gentle ground near a point: spiral search. */
@@ -520,6 +532,12 @@ function updateAimHud() {
   if (bike) tips.push('<b>E</b> ride the bicycle');
   if (cycling) tips.push('<b>E</b> hop off · <b>Shift</b> pedal hard · <b>Space</b> hop');
   if (riding) tips.push(riding.species.mount.walk ? '<b>E</b> hop off · <b>Space</b> take off / climb · <b>C</b> descend' : '<b>E</b> hop off · <b>Space</b> climb · <b>C</b> descend');
+  touch?.setContext({
+    ride: riding || cycling ? 'Hop off' : mountable || bike ? 'Ride' : null,
+    lasso: a ? (a.action === 'lasso' ? 'Lasso' : a.action === 'lead' ? 'Lead' : 'Let go') : null,
+    down: !!riding || player.current.name === 'fly',
+    fly: !riding && !cycling,
+  });
   const html = tips.join(' · ');
   if (promptEl.innerHTML !== html) promptEl.innerHTML = html;
   promptEl.style.opacity = html ? '1' : '0';

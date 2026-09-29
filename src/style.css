@@ -39,3 +39,41 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: #efd6c3; }
 }
 #aim.lead::before, #aim.unlead::before { border-style: solid; border-color: #f0c26a; }
 @keyframes aimspin { to { transform: rotate(360deg); } }
+
+/* Touch controls: a floating stick on the left, inked buttons on the right. */
+body.touch { touch-action: none; -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
+body.touch #app canvas { touch-action: none; }
+body.touch #help, body.touch #prompt, body.touch #fps { display: none; }
+#touch { position: fixed; inset: 0; pointer-events: none; z-index: 5; }
+#touch .stick {
+  position: absolute; left: -64px; top: -64px; width: 128px; height: 128px; border-radius: 50%;
+  border: 2.5px solid rgba(92, 58, 62, 0.55); background: rgba(250, 240, 228, 0.28);
+  opacity: 0; transition: opacity 0.15s;
+}
+#touch .stick.on { opacity: 1; }
+#touch .knob {
+  position: absolute; left: 36px; top: 36px; width: 56px; height: 56px; border-radius: 50%;
+  background: rgba(250, 240, 228, 0.88); border: 2.5px solid #5c3a3e; box-sizing: border-box;
+}
+#touch .knob.sprint { background: #f0c26a; }
+#touch .tbtn {
+  position: absolute; pointer-events: auto; touch-action: none; -webkit-tap-highlight-color: transparent;
+  width: 62px; height: 62px; border-radius: 50%; padding: 0;
+  font: 600 13px/1 Georgia, 'Times New Roman', serif; color: #3d2a2a;
+  background: rgba(250, 240, 228, 0.82); border: 2.5px solid #5c3a3e;
+  box-shadow: 0 2px 0 rgba(92, 58, 62, 0.35);
+}
+#touch .tbtn.held { background: #f0c26a; transform: translateY(1px); box-shadow: none; }
+#touch .tbtn[hidden] { display: none; }
+#touch .jump {
+  width: 84px; height: 84px; font-size: 16px;
+  right: calc(22px + env(safe-area-inset-right)); bottom: calc(26px + env(safe-area-inset-bottom));
+}
+#touch .ride { right: calc(118px + env(safe-area-inset-right)); bottom: calc(30px + env(safe-area-inset-bottom)); }
+#touch .lasso { right: calc(34px + env(safe-area-inset-right)); bottom: calc(122px + env(safe-area-inset-bottom)); }
+#touch .down { right: calc(118px + env(safe-area-inset-right)); bottom: calc(104px + env(safe-area-inset-bottom)); font-size: 18px; }
+#touch .fly {
+  width: 48px; height: 48px; font-size: 12px;
+  right: calc(24px + env(safe-area-inset-right)); bottom: calc(196px + env(safe-area-inset-bottom));
+}
+#touch .jump.climb { font-size: 22px; }

@@ -580,3 +580,17 @@ that uncertainty.
   climb-on animation). If a jump lands you in deep water, the bike returns
   to your last dry spot. Ideas: a bell (the geometry is there), panniers,
   towing a floof in a trailer, and remembering moved bikes across reloads.
+
+## Touch controls (`src/ui/touch.ts`)
+- Shown when `(hover: none) and (pointer: coarse)` matches, or on the first
+  touch of a hybrid screen. Everything feeds `Input` as virtual keys
+  (`virtualKey`), an analog stick (`setStick`), look deltas and zoom, so
+  movement modes and the camera don't change.
+- The left 45% of the screen is a floating stick. Under about half a push it
+  walks; past the rim (115%) it sprints and the knob turns gold. Anywhere else,
+  drag to look; a second finger pinches to zoom.
+- Buttons are contextual and mirror the keyboard prompt: Jump (▲ while flying
+  or riding), Ride / Hop off (E), Lasso / Lead / Let go (R), ▼ (C) and Fly (F).
+  On touch, the keyboard help, the prompt and the stats HUD are hidden.
+- Verify with `node scripts/touch.mjs`, which drives real CDP touch events
+  in a phone-landscape context and writes `shots/touch-*.png`.

@@ -183,4 +183,8 @@ export const BIOME = {
   windowGlow: '#ffd27a',
   cabinDoor: '#5a3c30',
   stone: '#9d918a',
+  cutWood: '#e9cf9c',  // fresh-cut log ends, the axe handle
+  steel: '#8e9cab',
+  soot: '#3e3238',
+  ember: '#ffb45a',
 };

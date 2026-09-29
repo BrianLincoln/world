@@ -1,0 +1,269 @@
+import * as THREE from 'three';
+
+// Every icon in the story is drawn here with canvas paths, in the storybook
+// look: flat cream/wood/stone fills, a warm plum ink line, no text. The same
+// canvases feed the HUD (as data URLs) and the in-world billboards (as
+// textures), so an icon always looks the same wherever it appears.
+
+export type IconName = 'axe' | 'log' | 'stone' | 'flame' | 'heart' | 'home';
+
+const INK = '#4a2e36';
+const SIZE = 128;
+const cache = new Map<string, HTMLCanvasElement>();
+
+function canvas(): [HTMLCanvasElement, CanvasRenderingContext2D] {
+  const c = document.createElement('canvas');
+  c.width = c.height = SIZE;
+  const g = c.getContext('2d')!;
+  g.lineJoin = 'round';
+  g.lineCap = 'round';
+  return [c, g];
+}
+
+function ink(g: CanvasRenderingContext2D, w = 6) {
+  g.strokeStyle = INK;
+  g.lineWidth = w;
+  g.stroke();
+}
+
+function drawAxe(g: CanvasRenderingContext2D) {
+  g.save();
+  g.translate(64, 66);
+  g.rotate(-0.62);
+  // Handle.
+  g.beginPath();
+  g.roundRect(-7, -44, 14, 92, 7);
+  g.fillStyle = '#d9b27a';
+  g.fill();
+  ink(g);
+  // Head: a rounded wedge with a bright bevelled edge.
+  g.beginPath();
+  g.moveTo(-6, -40);
+  g.quadraticCurveTo(26, -46, 36, -52);
+  g.quadraticCurveTo(46, -30, 36, -8);
+  g.quadraticCurveTo(26, -16, -6, -18);
+  g.closePath();
+  g.fillStyle = '#9aa8b8';
+  g.fill();
+  ink(g);
+  g.beginPath();
+  g.moveTo(34, -47);
+  g.quadraticCurveTo(42, -30, 34, -13);
+  g.strokeStyle = '#eef3f6';
+  g.lineWidth = 5;
+  g.stroke();
+  g.restore();
+}
+
+function drawLog(g: CanvasRenderingContext2D) {
+  g.save();
+  g.translate(64, 66);
+  g.rotate(-0.18);
+  // Bark body.
+  g.beginPath();
+  g.moveTo(-44, -22);
+  g.lineTo(30, -22);
+  g.ellipse(30, 0, 14, 22, 0, -Math.PI / 2, Math.PI / 2);
+  g.lineTo(-44, 22);
+  g.ellipse(-44, 0, 14, 22, 0, Math.PI / 2, -Math.PI / 2);
+  g.closePath();
+  g.fillStyle = '#9a6248';
+  g.fill();
+  ink(g);
+  // Bark lines.
+  g.beginPath();
+  g.moveTo(-26, -9); g.lineTo(8, -9);
+  g.moveTo(-18, 9); g.lineTo(18, 9);
+  g.strokeStyle = '#6f4232';
+  g.lineWidth = 4;
+  g.stroke();
+  // Cut end with rings.
+  g.beginPath();
+  g.ellipse(30, 0, 14, 22, 0, 0, Math.PI * 2);
+  g.fillStyle = '#f0d6a2';
+  g.fill();
+  ink(g, 5);
+  g.beginPath();
+  g.ellipse(30, 0, 7, 12, 0, 0, Math.PI * 2);
+  g.strokeStyle = '#c99a62';
+  g.lineWidth = 3.5;
+  g.stroke();
+  g.restore();
+}
+
+function drawStone(g: CanvasRenderingContext2D) {
+  g.beginPath();
+  g.moveTo(22, 80);
+  g.bezierCurveTo(14, 50, 40, 30, 66, 32);
+  g.bezierCurveTo(96, 32, 112, 56, 106, 80);
+  g.bezierCurveTo(100, 98, 30, 100, 22, 80);
+  g.closePath();
+  g.fillStyle = '#b3a8a4';
+  g.fill();
+  ink(g);
+  // Lit top.
+  g.beginPath();
+  g.moveTo(40, 52);
+  g.bezierCurveTo(52, 40, 76, 38, 88, 46);
+  g.strokeStyle = '#e4dcd6';
+  g.lineWidth = 6;
+  g.stroke();
+}
+
+function flamePath(g: CanvasRenderingContext2D, s: number, oy: number) {
+  g.beginPath();
+  g.moveTo(64, 18 * s + oy);
+  g.bezierCurveTo(78 * s + 64 * (1 - s), 46, 98 * s + 64 * (1 - s), 62, 92 * s + 64 * (1 - s), 84);
+  g.bezierCurveTo(88 * s + 64 * (1 - s), 104, 40 * s + 64 * (1 - s), 104, 36 * s + 64 * (1 - s), 84);
+  g.bezierCurveTo(32 * s + 64 * (1 - s), 64, 54 * s + 64 * (1 - s), 52, 64, 18 * s + oy);
+  g.closePath();
+}
+
+function drawFlame(g: CanvasRenderingContext2D) {
+  flamePath(g, 1, 0);
+  g.fillStyle = '#f08a4b';
+  g.fill();
+  ink(g);
+  flamePath(g, 0.55, 30);
+  g.fillStyle = '#ffd36e';
+  g.fill();
+}
+
+function drawHeart(g: CanvasRenderingContext2D) {
+  g.beginPath();
+  g.moveTo(64, 104);
+  g.bezierCurveTo(20, 76, 14, 48, 30, 34);
+  g.bezierCurveTo(44, 22, 60, 30, 64, 44);
+  g.bezierCurveTo(68, 30, 84, 22, 98, 34);
+  g.bezierCurveTo(114, 48, 108, 76, 64, 104);
+  g.closePath();
+  g.fillStyle = '#e8837a';
+  g.fill();
+  ink(g);
+  g.beginPath();
+  g.moveTo(36, 46);
+  g.quadraticCurveTo(40, 38, 48, 38);
+  g.strokeStyle = '#fbd3c8';
+  g.lineWidth = 5;
+  g.stroke();
+}
+
+function drawHome(g: CanvasRenderingContext2D) {
+  g.beginPath();
+  g.moveTo(28, 62); g.lineTo(64, 28); g.lineTo(100, 62); g.lineTo(100, 102); g.lineTo(28, 102); g.closePath();
+  g.fillStyle = '#b8574a';
+  g.fill();
+  ink(g);
+  g.beginPath();
+  g.moveTo(20, 66); g.lineTo(64, 24); g.lineTo(108, 66);
+  g.strokeStyle = '#5c3a3e';
+  g.lineWidth = 12;
+  g.stroke();
+  g.beginPath();
+  g.roundRect(54, 70, 20, 32, 3);
+  g.fillStyle = '#ffd27a';
+  g.fill();
+  ink(g, 4);
+}
+
+const DRAW: Record<IconName, (g: CanvasRenderingContext2D) => void> = {
+  axe: drawAxe, log: drawLog, stone: drawStone, flame: drawFlame, heart: drawHeart, home: drawHome,
+};
+
+/** The bare icon on a transparent ground. */
+export function iconCanvas(name: IconName): HTMLCanvasElement {
+  const key = 'i:' + name;
+  let c = cache.get(key);
+  if (!c) {
+    const [cc, g] = canvas();
+    DRAW[name](g);
+    cache.set(key, (c = cc));
+  }
+  return c;
+}
+
+/**
+ * A slot badge: `filled` = a cream disc with the icon; empty = a dashed ink
+ * ring with a faint ghost of the icon (matching the dashed sketch lines).
+ */
+export function slotCanvas(name: IconName, filled: boolean): HTMLCanvasElement {
+  const key = `s:${name}:${filled}`;
+  let c = cache.get(key);
+  if (!c) {
+    const [cc, g] = canvas();
+    g.beginPath();
+    g.arc(64, 64, 54, 0, Math.PI * 2);
+    if (filled) {
+      g.fillStyle = '#fbf1de';
+      g.fill();
+      ink(g, 7);
+    } else {
+      g.fillStyle = 'rgba(251, 241, 222, 0.35)';
+      g.fill();
+      g.setLineDash([16, 12]);
+      ink(g, 7);
+      g.setLineDash([]);
+    }
+    g.save();
+    g.translate(64, 64);
+    g.scale(0.72, 0.72);
+    g.translate(-64, -64);
+    g.globalAlpha = filled ? 1 : 0.3;
+    DRAW[name](g);
+    g.restore();
+    cache.set(key, (c = cc));
+  }
+  return c;
+}
+
+/** The spirit's thought bubble with an icon inside. */
+export function bubbleCanvas(name: IconName): HTMLCanvasElement {
+  const key = 'b:' + name;
+  let c = cache.get(key);
+  if (!c) {
+    const [cc, g] = canvas();
+    const blob = (x: number, y: number, r: number) => {
+      g.beginPath();
+      g.arc(x, y, r, 0, Math.PI * 2);
+      g.fillStyle = '#fbf3e4';
+      g.fill();
+      ink(g, 5);
+    };
+    blob(30, 118, 5);
+    blob(42, 104, 8);
+    // Cloud-ish bubble: a circle with soft scallops.
+    g.beginPath();
+    for (let i = 0; i <= 40; i++) {
+      const a = (i / 40) * Math.PI * 2;
+      const r = 46 + 3 * Math.cos(a * 7);
+      const x = 68 + Math.cos(a) * r, y = 54 + Math.sin(a) * r * 0.9;
+      if (i === 0) g.moveTo(x, y); else g.lineTo(x, y);
+    }
+    g.closePath();
+    g.fillStyle = '#fbf3e4';
+    g.fill();
+    ink(g, 6);
+    g.save();
+    g.translate(68, 54);
+    g.scale(0.58, 0.58);
+    g.translate(-64, -64);
+    DRAW[name](g);
+    g.restore();
+    cache.set(key, (c = cc));
+  }
+  return c;
+}
+
+const texCache = new Map<HTMLCanvasElement, THREE.CanvasTexture>();
+export function tex(c: HTMLCanvasElement): THREE.CanvasTexture {
+  let t = texCache.get(c);
+  if (!t) {
+    t = new THREE.CanvasTexture(c);
+    t.colorSpace = THREE.NoColorSpace;
+    t.generateMipmaps = true;
+    t.minFilter = THREE.LinearMipmapLinearFilter;
+    t.magFilter = THREE.LinearFilter;
+    texCache.set(c, t);
+  }
+  return t;
+}

@@ -25,6 +25,7 @@ export class Input {
   private lookY = 0;
   private wheel = 0;
   private dragging = false;
+  private stick = { x: 0, y: 0, walk: false, run: false };
 
   constructor(private el: HTMLElement) {
     const typing = (e: Event) => {
@@ -40,6 +41,7 @@ export class Input {
     window.addEventListener('keyup', (e) => this.keys.delete(e.code));
     window.addEventListener('blur', () => this.keys.clear());
     el.addEventListener('pointerdown', (e) => {
+      if (e.pointerType === 'touch') return; // handled by TouchControls
       if (e.button === 0 && !document.pointerLockElement) {
         el.requestPointerLock?.();
       }
@@ -63,16 +65,40 @@ export class Input {
 
   state(): InputState {
     const k = (c: string) => this.keys.has(c);
+    const clamp = (v: number) => Math.max(-1, Math.min(1, v));
+    const st = this.stick;
     return {
-      x: (k('KeyD') || k('ArrowRight') ? 1 : 0) - (k('KeyA') || k('ArrowLeft') ? 1 : 0),
-      y: (k('KeyW') || k('ArrowUp') ? 1 : 0) - (k('KeyS') || k('ArrowDown') ? 1 : 0),
-      run: k('ShiftLeft') || k('ShiftRight'),
-      walk: k('AltLeft') || k('AltRight'),
+      x: clamp((k('KeyD') || k('ArrowRight') ? 1 : 0) - (k('KeyA') || k('ArrowLeft') ? 1 : 0) + st.x),
+      y: clamp((k('KeyW') || k('ArrowUp') ? 1 : 0) - (k('KeyS') || k('ArrowDown') ? 1 : 0) + st.y),
+      run: k('ShiftLeft') || k('ShiftRight') || st.run,
+      walk: k('AltLeft') || k('AltRight') || st.walk,
       jump: k('Space'),
       jumpPressed: this.edges.has('Space'),
       up: k('Space'),
       down: k('KeyC') || k('KeyQ') || k('ControlLeft'),
     };
+  }
+
+  /** A held on-screen button, reported as the key it stands in for. */
+  virtualKey(code: string, down: boolean) {
+    if (down) {
+      if (!this.keys.has(code)) this.edges.add(code);
+      this.keys.add(code);
+    } else this.keys.delete(code);
+  }
+
+  /** Analog stick, -1..1 each axis (forward +). */
+  setStick(x: number, y: number, walk: boolean, run: boolean) {
+    this.stick = { x, y, walk, run };
+  }
+
+  addLook(dx: number, dy: number) {
+    this.lookX += dx;
+    this.lookY += dy;
+  }
+
+  addZoom(delta: number) {
+    this.wheel += delta;
   }
 
   /** True once per key press. */

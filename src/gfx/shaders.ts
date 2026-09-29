@@ -20,6 +20,20 @@ vec3 toonLight(vec3 n) {
   float d = dot(n, uLightDir);
   return d > uBand1 ? uLightCol : (d > uBand2 ? uMidCol : uShadeCol);
 }
+
+// The one "you can use this" signal (story interactables): a hard-edged warm
+// rim that breathes, plus a slow shimmer that sweeps across the form now and
+// then. Returns (rim amount, shimmer amount); callers tint and add emissive.
+vec2 glintAmt(vec3 n, vec3 viewDir, vec3 world, float k) {
+  if (k <= 0.0) return vec2(0.0);
+  float fres = 1.0 - abs(dot(n, viewDir));
+  float pulse = 0.62 + 0.38 * sin(uTime * 2.4);
+  float rim = step(0.62 - 0.1 * k, fres) * pulse;
+  float sweep = fract((world.x + world.z) * 0.18 + world.y * 0.3 - uTime * 0.42);
+  float shimmer = step(0.93, sweep) * step(sweep, 0.985);
+  return vec2(rim, shimmer) * min(k, 1.5);
+}
+const vec3 GLINT_COL = vec3(1.0, 0.94, 0.72);
 `;
 
 export const GBUF_OUT = /* glsl */ `
@@ -244,7 +258,8 @@ void main() {
   nrm = normalize(vec3(c * nrm.x + s * nrm.z, nrm.y / max(sy, 0.3), -s * nrm.x + c * nrm.z));
   vec4 wp = modelMatrix * vec4(p + aI0.xyz, 1.0);
   vWorld = wp.xyz;
-  vN = nrm;
+  // Chunk groups are translation-only; story props may rotate (a falling tree).
+  vN = normalize(mat3(modelMatrix) * nrm);
   vKind = aKind;
   vTone = aI1.w;
   vec4 vp = viewMatrix * wp;
@@ -262,15 +277,22 @@ in vec3 vLocal;
 in float vKind;
 in float vTone;
 in vec3 vWorld;
-uniform vec3 uKind[17];
+uniform vec3 uKind[21];
 uniform vec3 uGlow;
+/** Story interactable signal strength (0 = none). */
+uniform float uGlint;
+/** Window glow override: < 0 = follow the night (every world cabin); else a lit/unlit story cabin. */
+uniform float uWin;
+/** Firelight on story interiors (0..1). */
+uniform float uFire;
 uniform float uToneVar;
 uniform float uFlip;
 uniform float uCutaway;
 uniform vec3 uFocus;
 // Kinds: 0 foliage, 1 trunk, 2 rock, 3 bush, 4 tuft, 5 flower petal, 6 flower core,
 // 7 wall, 8 roof, 9 trim, 10 window, 11 door, 12 stone, 13 wall alt, 14 snowcap(rock),
-// 15 harebell, 16 buttercup (petals of kind 5 with instance tone > 0.6)
+// 15 harebell, 16 buttercup (petals of kind 5 with instance tone > 0.6),
+// 17 cut wood, 18 axe steel, 19 soot, 20 ember glow
 void main() {
   int k = int(vKind + 0.5);
   if (uCutaway > 0.5) {
@@ -293,13 +315,28 @@ void main() {
     float line = step(0.84, fract((vLocal.y + abs(vLocal.z) * 0.9) * 2.2));
     base *= 1.0 - 0.2 * line;
   } else if (k == 10) {
-    base = mix(base, uGlow, uNight);
-    emissive = uNight;
+    float w = uWin < 0.0 ? uNight : uWin;
+    base = mix(base, uGlow, w);
+    emissive = w;
+  } else if (k == 20) {
+    emissive = 0.9;
   }
-  vec3 col = k == 10 ? base : base * toonLight(n);
+  vec3 col = k == 10 || k == 20 ? base : base * toonLight(n);
+  // Firelight: interior faces warm up and flicker when the hearth is lit.
+  if (uFire > 0.0 && k != 10 && k != 20) {
+    float fl = 0.85 + 0.15 * sin(uTime * 9.0 + vWorld.x * 2.0) * sin(uTime * 5.3);
+    col = mix(col, base * vec3(1.25, 0.86, 0.55), uFire * 0.55 * fl);
+  }
   // Negative alpha = partial opt-out of the monochrome grade (accent colours).
   if (emissive == 0.0 && (k == 7 || k == 8)) emissive = -0.45;
+  if (emissive == 0.0 && (k == 17 || k == 18)) emissive = -0.3;
   if (petal) emissive = -0.35;
+  if (uGlint > 0.0) {
+    vec2 g = glintAmt(n, normalize(-vView), vWorld, uGlint);
+    col = mix(col, GLINT_COL, max(g.x * 0.85, g.y * 0.55));
+    if (g.x > 0.0) emissive = max(emissive, 0.55 * g.x);
+    else if (g.y > 0.0) emissive = max(emissive, 0.25);
+  }
   writeG(col, emissive, n, vView);
 }
 `;
@@ -522,12 +559,19 @@ uniform vec3 uColor;
 uniform float uEmissive;
 uniform float uKeep;
 uniform float uFlat;
+uniform float uGlint;
 void main() {
   vec3 n = normalize(vN);
   if (!gl_FrontFacing) n = -n;
   vec3 col = uEmissive > 0.0 ? uColor : uColor * mix(toonLight(n), uLightCol, uFlat);
+  float em = uEmissive > 0.0 ? uEmissive : -uKeep;
+  if (uGlint > 0.0) {
+    vec2 g = glintAmt(n, normalize(-vView), vView, uGlint);
+    col = mix(col, GLINT_COL, max(g.x * 0.85, g.y * 0.55));
+    if (g.x > 0.0) em = max(em, 0.55 * g.x);
+  }
   // The explorer keeps most of their colour so they read against the land.
-  writeG(col, uEmissive > 0.0 ? uEmissive : -uKeep, n, vView);
+  writeG(col, em, n, vView);
 }
 `;
 
@@ -593,6 +637,8 @@ uniform vec3 uMouthW;
 uniform vec4 uBlush;
 uniform vec3 uBlushCol;
 uniform vec3 uGlow;
+/** Hearth-spirit warmth glow (0 = none): flattens shading and blooms. */
+uniform float uEmber;
 
 float fillE(float d, float aa) { return 1.0 - smoothstep(-0.5 * aa, 0.5 * aa, d); }
 vec2 sphereUV(vec3 d) { return vec2(atan(d.x, d.z), asin(clamp(d.y, -1.0, 1.0))); }
@@ -674,6 +720,13 @@ void main() {
     // A lamp (bicycles): lit warm at night, like the cabin windows.
     col = mix(col, uGlow, uNight);
     glow = uNight;
+  }
+  if (uEmber > 0.0 && tag < 2.5) {
+    // A warm spirit glows from within: less shade, a soft bloom. Painted
+    // eyes (ink/white) stay crisp.
+    float paint = clamp(1.0 - length(col - vCol.rgb * toonLight(n)) * 4.0, 0.0, 1.0);
+    col = mix(col, vCol.rgb * mix(uLightCol, vec3(1.0), 0.4), uEmber * 0.7 * paint);
+    glow = max(glow, (0.5 + 0.1 * sin(uTime * 3.0)) * smoothstep(0.35, 1.0, uEmber) * paint);
   }
   writeG(col, glow > 0.02 ? glow : -keep, n, vView);
 }

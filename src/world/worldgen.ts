@@ -1,5 +1,6 @@
 import { Simplex } from '../core/noise';
 import { clamp, hash01, hashInt, lerp, mulberry32, smoothstep } from '../core/rng';
+import { brookQuery, findStorySite, RUIN_D, RUIN_W, siteToLocal, type StorySite } from './storySite';
 
 // The world is a pure function of (seed, x, z). Nothing here touches three.js
 // so it runs identically inside chunk workers and on the main thread.
@@ -24,6 +25,8 @@ export interface Poi {
   clear: number;
   boulders?: Boulder[];
   variant?: number;
+  /** Story POIs: the broken start cabin (drawn by the story, not the chunks) and the next cabin. */
+  story?: 'ruin' | 'far';
 }
 
 export interface PathSeg { ax: number; az: number; bx: number; bz: number }
@@ -46,6 +49,8 @@ export class WorldGen {
   private peakCache = new Map<number, Peak | null>();
   private poiCache = new Map<number, Poi[]>();
   private pathCache = new Map<number, PathSeg[]>();
+  private _story: StorySite | null = null;
+  private bq = { d: 0, bed: 0, t: 0, i: 0 };
 
   constructor(seed: number) {
     this.seed = seed >>> 0;
@@ -62,6 +67,11 @@ export class WorldGen {
     this.nForest2 = new Simplex(s());
     this.nRock = new Simplex(s());
     this.nMisc = new Simplex(s());
+  }
+
+  /** The guaranteed start area (see storySite.ts). Lazily built from the base height field. */
+  get story(): StorySite {
+    return (this._story ??= findStorySite(this.seed, { base: (x, z) => this.baseHeight(x, z), forest: (x, z, h) => this.forestDensity(x, z, h) }));
   }
 
   // ---------------------------------------------------------------- terrain
@@ -173,7 +183,42 @@ export class WorldGen {
         }
       }
     }
+    // The story brook: a channel with sandy banks, carved into whatever is there.
+    const st = this.story;
+    if (st.brook.length && x > st.box[0] && x < st.box[2] && z > st.box[1] && z < st.box[3]) {
+      const q = brookQuery(st.brook, x, z, this.bq);
+      if (q.d < 5.2) h = Math.min(h, q.bed + (h - q.bed) * smoothstep(1.2, 5.2, q.d));
+    }
     return h;
+  }
+
+  /** Distance to the story brook's centre line (Infinity when far). */
+  brookDist(x: number, z: number): number {
+    const st = this.story;
+    if (!st.brook.length || x < st.box[0] || x > st.box[2] || z < st.box[1] || z > st.box[3]) return Infinity;
+    return brookQuery(st.brook, x, z, this.bq).d;
+  }
+
+  /**
+   * Keeps world scatter out of the story set: the cabin and its yard, the
+   * brook channel, the choppable trees, the axe stump and the spawn.
+   * `kind`: 'tree' | 'bush' | 'rock' | 'tuft'. `r` = the prop's radius.
+   */
+  storyBlock(x: number, z: number, r: number, kind: 'tree' | 'bush' | 'rock' | 'tuft'): boolean {
+    const st = this.story;
+    if (x < st.box[0] || x > st.box[2] || z < st.box[1] || z > st.box[3]) return false;
+    const l = siteToLocal(st, x, z);
+    const pad = kind === 'tuft' ? 0.4 : kind === 'rock' ? 3 : 1.5;
+    if (Math.abs(l.x) < RUIN_W / 2 + pad + r + (kind === 'tuft' ? 0 : 1.2) && Math.abs(l.z) < RUIN_D / 2 + pad + r) return true;
+    const bd = this.brookDist(x, z);
+    if (bd < (kind === 'tuft' ? 2.7 : kind === 'rock' ? 5.5 : 4.6) + r) return true;
+    if (kind === 'tuft') return false;
+    for (const t of st.trees) if (Math.hypot(t.x - x, t.z - z) < 3.4 + r) return true;
+    if (Math.hypot(st.stump.x - x, st.stump.z - z) < 2.5 + r) return true;
+    if (Math.hypot(st.spawn.x - x, st.spawn.z - z) < 3 + r) return true;
+    if (Math.hypot(st.bank.x - x, st.bank.z - z) < 3.5 + r) return true;
+    if (kind === 'rock') for (const p of st.paths) if (segDist(x, z, p) < 2 + r) return true;
+    return false;
   }
 
   // ---------------------------------------------------------------- biomes
@@ -310,6 +355,31 @@ export class WorldGen {
         });
       }
     }
+
+    // The story set: nothing natural too close to it, plus its own POIs.
+    const st = this.story;
+    const keep = out.filter((p) => Math.hypot(p.x - st.x, p.z - st.z) > 110 && Math.hypot(p.x - st.far.x, p.z - st.far.z) > 45 &&
+      !(p.x > st.box[0] - 20 && p.x < st.box[2] + 20 && p.z > st.box[1] - 20 && p.z < st.box[3] + 20));
+    out.length = 0;
+    out.push(...keep);
+    const inThis = (x: number, z: number) => Math.floor(x / POI_CELL) === cx && Math.floor(z / POI_CELL) === cz;
+    if (inThis(st.x, st.z)) out.push({ kind: 'cabin', story: 'ruin', x: st.x, z: st.z, y: st.y, rot: st.rot, clear: 13, variant: 0 });
+    if (inThis(st.far.x, st.far.z)) out.push({ kind: 'cabin', story: 'far', x: st.far.x, z: st.far.z, y: st.far.y, rot: st.far.rot, clear: 20, variant: 0 });
+    if (inThis(st.spring.x, st.spring.z) && st.brook.length) {
+      // A couple of mossy boulders where the brook wells up.
+      const sx = st.spring.x, sz = st.spring.z;
+      const bh = this.baseHeight(sx, sz);
+      const dx = st.brook[1].x - st.brook[0].x, dz = st.brook[1].z - st.brook[0].z;
+      const l = Math.hypot(dx, dz) || 1;
+      out.push({
+        kind: 'erratic', x: sx, z: sz, y: bh, rot: 0, clear: 0,
+        boulders: [
+          { x: sx - (dz / l) * 1.6, y: bh + 0.3, z: sz + (dx / l) * 1.6, sx: 1.7, sy: 1.25, rot: 0.4 },
+          { x: sx + (dz / l) * 1.9, y: bh + 0.1, z: sz - (dx / l) * 1.9, sx: 1.25, sy: 0.9, rot: 1.9 },
+          { x: sx - (dx / l) * 0.9, y: bh + 0.2, z: sz - (dz / l) * 0.9, sx: 1.1, sy: 0.85, rot: 2.7 },
+        ],
+      });
+    }
     return out;
   }
 
@@ -335,12 +405,12 @@ export class WorldGen {
     const cached = this.pathCache.get(key);
     if (cached) return cached;
     const segs: PathSeg[] = [];
-    const mine = this.poisInCell(cx, cz).filter((p) => p.kind === 'cabin');
+    const mine = this.poisInCell(cx, cz).filter((p) => p.kind === 'cabin' && p.story !== 'ruin');
     for (const a of mine) {
       const cands: Poi[] = [];
       for (let dz = -2; dz <= 2; dz++) for (let dx = -2; dx <= 2; dx++) {
         for (const p of this.poisInCell(cx + dx, cz + dz)) {
-          if (p !== a && (p.kind === 'cabin' || p.kind === 'circle' || p.kind === 'tor')) cands.push(p);
+          if (p !== a && p.story !== 'ruin' && (p.kind === 'cabin' || p.kind === 'circle' || p.kind === 'tor')) cands.push(p);
         }
       }
       cands.sort((p, q) => Math.hypot(p.x - a.x, p.z - a.z) - Math.hypot(q.x - a.x, q.z - a.z));
@@ -405,6 +475,11 @@ export class WorldGen {
         if (maxx < x0 || minx > x1 || maxz < z0 || minz > z1) continue;
         out.push(s);
       }
+    }
+    // The story cabin's own little worn paths.
+    for (const s of this.story.paths) {
+      if (Math.max(s.ax, s.bx) + margin < x0 || Math.min(s.ax, s.bx) - margin > x1 || Math.max(s.az, s.bz) + margin < z0 || Math.min(s.az, s.bz) - margin > z1) continue;
+      out.push(s);
     }
     return out;
   }
