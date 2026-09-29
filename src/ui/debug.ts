@@ -1,7 +1,8 @@
 import GUI from 'lil-gui';
 import { postSettings } from '../gfx/post';
 import { SKY_PRESETS } from '../gfx/palette';
-import { KIND_COLORS, TERRAIN_U, U } from '../gfx/materials';
+import { CASTER_U, KIND_COLORS, TERRAIN_U, U } from '../gfx/materials';
+import { groundShadowSettings } from '../gfx/groundShadow';
 import { FACE_PARAMS } from '../gfx/shaders';
 import type { Environment } from '../gfx/environment';
 import type { Terrain } from '../world/terrain';
@@ -103,6 +104,9 @@ export class DebugUI {
     fr.add(h.colliders, 'enabled').name('prop collision');
     const strokes = { on: TERRAIN_U.uStrokes.value > 0.5 };
     fr.add(strokes, 'on').name('ground strokes').onChange((v: boolean) => (TERRAIN_U.uStrokes.value = v ? 1 : 0));
+    fr.add(groundShadowSettings, 'enabled').name('cast shadows');
+    fr.add(groundShadowSettings, 'strength', 0, 1, 0.01).name('shadow strength');
+    fr.add(CASTER_U.uShadowReach, 'value', 0.3, 4, 0.05).name('shadow reach');
     fr.close();
 
     const fc = this.gui.addFolder('Creatures');

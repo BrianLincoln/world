@@ -2,7 +2,8 @@ import * as THREE from 'three';
 import { CHUNK_RES, INST_STRIDE, type ChunkRequest, type ChunkResult } from './chunkBuilder';
 import ChunkWorker from './chunk.worker.ts?worker';
 import { buildBoulder, buildBush, buildCabin, buildConifer, buildFlower, buildTuft, TREE_HEIGHT } from '../gfx/geometry';
-import { makePropMaterial, makeTerrainMaterial, makeWaterMaterial } from '../gfx/materials';
+import { SHADOW_LAYER } from '../gfx/groundShadow';
+import { makeCasterMaterial, makePropMaterial, makeTerrainMaterial, makeWaterMaterial } from '../gfx/materials';
 
 // Streams terrain as a camera-centred quadtree. Every node is a fixed
 // CHUNK_RES grid, so distant nodes are physically large and coarse: far
@@ -39,7 +40,14 @@ interface PropKind {
   geos: THREE.BufferGeometry[]; // [lod] variants
   material: THREE.ShaderMaterial;
   lodFor: (size: number) => number;
+  /** Ground shadow caster: its material and which LOD it flattens. */
+  caster?: { material: THREE.ShaderMaterial; lod: number };
 }
+
+/** Nodes up to this size carry shadow casters (the mask only covers ~90 m). */
+const CASTER_MAX_SIZE = 128;
+/** Longest shadow run (m) past a node's bounds, for culling the casters. */
+const CASTER_MARGIN = 45;
 
 function buildSharedIndex(): THREE.BufferAttribute {
   const R = CHUNK_RES;
@@ -128,18 +136,21 @@ export class Terrain {
         geos: [...treeLods, ...treeLods2],
         material: makePropMaterial({ bend: 0.24, wind: 0.012, heightRef: TREE_HEIGHT, toneVar: 0.22, doubleSide: true, cutaway: 'occluders' }),
         lodFor: (s) => (s <= 64 ? 0 : s <= 128 ? 1 : 2),
+        caster: { material: makeCasterMaterial({ bend: 0.24, wind: 0.012, heightRef: TREE_HEIGHT }), lod: 2 },
       },
       bushes: {
         name: 'bushes',
         geos: [buildBush(3, 2), buildBush(3, 1), buildBush(3, 1)],
         material: makePropMaterial({ wind: 0.01, heightRef: 1.6, toneVar: 0.25, cutaway: 'near' }),
         lodFor: (s) => (s <= 64 ? 0 : 1),
+        caster: { material: makeCasterMaterial({ wind: 0.01, heightRef: 1.6 }), lod: 1 },
       },
       rocks: {
         name: 'rocks',
         geos: [buildBoulder(5, 3), buildBoulder(5, 2), buildBoulder(5, 1)],
         material: makePropMaterial({ toneVar: 0.18 }),
         lodFor: (s) => (s <= 128 ? 0 : s <= 512 ? 1 : 2),
+        caster: { material: makeCasterMaterial({}), lod: 1 },
       },
       tufts: {
         name: 'tufts',
@@ -158,6 +169,7 @@ export class Terrain {
         geos: [buildCabin(0), buildCabin(1), buildCabin(2)],
         material: makePropMaterial({ toneVar: 0.1, doubleSide: true, flipBack: true }),
         lodFor: () => 0,
+        caster: { material: makeCasterMaterial({}), lod: 0 },
       },
     };
   }
@@ -247,6 +259,7 @@ export class Terrain {
     const near = d < this.nearLodDistance + n.size * 0.5;
     for (const c of g.children) {
       if (c.name === 'ground' || c.name === 'water') c.visible = this.settings.showGround;
+      else if (c.userData.lod === 'caster') c.visible = this.settings.showProps;
       else if (c.userData.lod === 'near') c.visible = this.settings.showProps && near;
       else if (c.userData.lod === 'mid') c.visible = this.settings.showProps && !near;
       else c.visible = this.settings.showProps;
@@ -372,10 +385,31 @@ export class Terrain {
     }
 
     const sphere = new THREE.Sphere(new THREE.Vector3(n.size / 2, (r.minY + r.maxY) / 2 + 8, n.size / 2), n.size * 0.75 + (r.maxY - r.minY) / 2 + 30);
+    const casterSphere = new THREE.Sphere(sphere.center, sphere.radius + CASTER_MARGIN);
     const addInstances = (kind: PropKind, data: Float32Array, variants: number, variantOf?: (i: number) => number) => {
       const count = data.length / INST_STRIDE;
       if (!count) return;
       const lod = kind.lodFor(n.size);
+      if (kind.caster && n.size <= CASTER_MAX_SIZE) {
+        // Drawn only by the ground shadow camera (SHADOW_LAYER). One draw
+        // covers every variant (they're indistinguishable as flat shadows),
+        // reading the chunk's instance rows directly: stride 8 = aI0 | aI1.
+        const base = kind.geos[Math.min(kind.caster.lod, kind.geos.length / variants - 1)];
+        const rows = new THREE.InstancedInterleavedBuffer(data, INST_STRIDE);
+        const ig = new THREE.InstancedBufferGeometry();
+        ig.index = base.index;
+        ig.setAttribute('position', base.attributes.position);
+        ig.setAttribute('aI0', new THREE.InterleavedBufferAttribute(rows, 4, 0));
+        ig.setAttribute('aI1', new THREE.InterleavedBufferAttribute(rows, 4, 4));
+        ig.instanceCount = count;
+        ig.boundingSphere = casterSphere;
+        const m = new THREE.Mesh(ig, kind.caster.material);
+        m.name = `${kind.name}-caster`;
+        m.userData.lod = 'caster';
+        m.layers.set(SHADOW_LAYER);
+        m.matrixAutoUpdate = false;
+        g.add(m);
+      }
       // Split into per-variant buckets.
       const buckets: number[][] = Array.from({ length: variants }, () => []);
       for (let i = 0; i < count; i++) {
@@ -437,7 +471,7 @@ export class Terrain {
     n.group.removeFromParent();
     for (const c of n.group.children) {
       const geo = (c as THREE.Mesh).geometry;
-      if (geo instanceof THREE.InstancedBufferGeometry) this.stats.instances -= geo.instanceCount;
+      if (geo instanceof THREE.InstancedBufferGeometry && c.userData.lod !== 'caster') this.stats.instances -= geo.instanceCount;
       // Detach shared buffers first: dispose() frees every attribute the
       // geometry references, and prop meshes / the grid index are shared.
       geo.index = null;

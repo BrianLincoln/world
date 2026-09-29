@@ -3,6 +3,7 @@ import * as THREE from 'three';
 import './style.css';
 import { seedFromString } from './core/rng';
 import { Environment } from './gfx/environment';
+import { GroundShadow, groundShadowSettings } from './gfx/groundShadow';
 import { initMaterials, TERRAIN_U, U } from './gfx/materials';
 import { PostPipeline, postSettings } from './gfx/post';
 import { Puffs } from './gfx/puffs';
@@ -17,6 +18,7 @@ import type { Mob, MobCtx } from './mobs/types';
 import { Floof } from './mobs/floof';
 import { OrbitCamera } from './player/orbitCamera';
 import { DebugUI } from './ui/debug';
+import { StoryHost } from './story/host';
 import { Bikes, type Bike } from './vehicles/bikes';
 import { Colliders } from './world/colliders';
 import { Terrain } from './world/terrain';
@@ -40,6 +42,8 @@ let seedText = params.get('seed') ?? 'hilda';
 let gen = new WorldGen(seedFromString(seedText));
 const terrain = new Terrain(gen.seed);
 scene.add(terrain.root);
+const groundShadow = new GroundShadow();
+if (params.get('shadows') === '0') groundShadowSettings.enabled = false;
 const sky = new Sky(gen.seed);
 scene.add(sky.group);
 
@@ -50,12 +54,15 @@ if (params.get('palette')) env.paletteOverride = params.get('palette');
 
 const colliders = new Colliders(gen);
 const bikes = new Bikes(gen, colliders);
+// The story's opening (the broken cabin, the hearth spirit): see src/story/.
+let storyHost: StoryHost | null = null;
 const world: WorldQuery = {
   groundHeight: (x, z) => gen.height(x, z),
-  floorHeight: (x, z, feetY, r) => Math.max(gen.height(x, z), colliders.surface(x, z, feetY, r)),
+  floorHeight: (x, z, feetY, r) => Math.max(gen.height(x, z), colliders.surface(x, z, feetY, r), storyHost?.story?.surface(x, z, feetY, r, 0.5) ?? -Infinity),
   collide: (pos, vel, r, rampMax) => {
     colliders.push(pos, vel, r, rampMax);
     bikes.push(pos, vel, r);
+    storyHost?.story?.collide(pos, vel, r);
   },
   ramp: (x, z, r, maxRise) => colliders.ramp(x, z, r, maxRise),
   waterLevel: SEA_LEVEL,
@@ -128,6 +135,8 @@ const lastDry = new THREE.Vector3();
 let lookIdle = 0;
 /** Debug framing: lowers the camera focus (bike close-ups with the explorer hidden). */
 let focusShift = 0;
+/** Debug framing: orbit this point instead of the explorer (story close-ups). */
+let focusOverride: THREE.Vector3 | null = null;
 /** Debug: steer input relative to this yaw instead of the camera's (scripted shots orbit freely). */
 let inputYaw: number | null = null;
 
@@ -155,6 +164,38 @@ function dismountBike() {
     player.set('walk', ctx);
   }
 }
+
+/**
+ * The nearest thing to climb onto from where you are: a tamed creature or a
+ * parked bike (never the one you're on). From a mount the reach is wider,
+ * so a floof trailing on its lead counts.
+ */
+function nextMount(): { mob: Mob } | { bike: Bike } | null {
+  const p = player.body.pos;
+  const mounted = !!riding || !!cycling;
+  const mode = player.current.name;
+  const m = mobs.mountable(p, mounted ? 6.5 : undefined);
+  // Bikes from the ground, another bike, or a mount low enough to step down from.
+  const low = riding && p.y - gen.height(p.x, p.z) < 3;
+  const k = mode === 'walk' || cycling || low ? bikes.mountable(p, mounted ? 4.5 : undefined, low ? 3.2 : undefined) : null;
+  if (m && (!k || m.pos.distanceTo(p) < k.pos.distanceTo(p) + 1)) return { mob: m };
+  return k ? { bike: k } : null;
+}
+
+/** Leave whatever you're on (it stays put: no hop-off) and climb onto `next`. */
+function switchTo(next: { mob: Mob } | { bike: Bike }) {
+  if (cycling) {
+    bikes.park(cycling);
+    cycling = null;
+  }
+  if (riding) {
+    mobs.dismount(riding);
+    riding = null;
+  }
+  if ('mob' in next) mount(next.mob);
+  else mountBike(next.bike);
+}
+
 const orbit = new OrbitCamera(camera);
 const input = new Input(renderer.domElement);
 // Touch controls: up front on phones and tablets, or on the first touch of a
@@ -169,6 +210,13 @@ if (!touch) {
   renderer.domElement.addEventListener('pointerdown', firstTouch, true);
 }
 const post = new PostPipeline(renderer);
+// The wordless opening runs on a plain start; shots and debug views that set
+// a time, a position or flight get the sandbox (?story=1 forces it on,
+// ?story=0 off; ?fresh=1 forgets saved progress for this seed).
+const storyActive = params.get('story') === '1' || (params.get('story') !== '0' && !params.has('t') && !params.has('x') && params.get('mode') !== 'fly');
+storyHost = new StoryHost({ scene, post, env, rig, body: player.body, camera, puffs: (at, n, size, spread) => puffs.emit(at, n, size, spread) }, storyActive);
+if (params.has('fresh')) try { localStorage.removeItem(`fjellheim.story.${seedText}`); } catch { /* ignore */ }
+storyHost.build(gen, seedText);
 
 /** Find dry, gentle ground near a point: spiral search. */
 function findSpawn(x0: number, z0: number): [number, number] {
@@ -192,7 +240,14 @@ function placePlayer(x: number, z: number) {
 
 function spawn() {
   if (params.has('x') && params.has('z')) placePlayer(parseFloat(params.get('x')!), parseFloat(params.get('z')!));
-  else {
+  else if (storyHost?.active && storyHost.story) {
+    // The start (or, once its hearth is lit, the cabin's doorstep).
+    const s = storyHost.story.spawnPoint();
+    placePlayer(s.x, s.z);
+    orbit.yaw = s.yaw;
+    player.body.heading = s.yaw + Math.PI;
+    orbit.snap();
+  } else {
     const [x, z] = findSpawn(0, 0);
     placePlayer(x, z);
   }
@@ -201,7 +256,7 @@ spawn();
 if (params.has('yaw')) orbit.yaw = parseFloat(params.get('yaw')!);
 {
   const [sx, sz] = findSpawn(0, 0);
-  bikes.reset(gen, sx, sz, orbit.yaw);
+  bikes.reset(gen, sx, sz, orbit.yaw, !storyHost?.active);
 }
 if (params.has('pitch')) orbit.pitch = parseFloat(params.get('pitch')!);
 if (params.has('dist')) orbit.targetDistance = parseFloat(params.get('dist')!);
@@ -222,10 +277,12 @@ function setSeed(s: string) {
   mobs.reset(gen);
   mobCtx.gen = gen;
   sky.setSeed(gen.seed);
-  const [x, z] = findSpawn(0, 0);
+  const story = storyHost?.build(gen, s);
+  const [x, z] = storyHost?.active && story ? [story.spawnPoint().x, story.spawnPoint().z] : findSpawn(0, 0);
   player.set('walk', ctx);
   placePlayer(x, z);
-  bikes.reset(gen, x, z, orbit.yaw);
+  if (storyHost?.active && story) { orbit.yaw = story.spawnPoint().yaw; orbit.snap(); }
+  bikes.reset(gen, x, z, orbit.yaw, !storyHost?.active);
   const u = new URL(location.href);
   u.searchParams.set('seed', s);
   history.replaceState(null, '', u);
@@ -270,6 +327,8 @@ const ui = new DebugUI({
   },
 });
 if (params.has('capture')) postSettings.adaptive = false;
+// No text during the story: the panel and FPS stay hidden (H shows them, or ?debug=1).
+if (storyHost.active && params.get('debug') !== '1') ui.hide();
 if (params.get('ui') === '0') {
   ui.hide();
   document.getElementById('help')?.remove();
@@ -281,6 +340,15 @@ if (params.get('ui') === '0') {
 // other apps grabbing the GPU), and gives everything back, in reverse order,
 // once there's headroom again.
 let autoScale = 1;
+// Phones and tablets: iOS caps requestAnimationFrame at 30 fps in Low Power
+// Mode (and some browsers throttle it too), which the 50 fps test read as "GPU
+// too slow", dropping to the lowest resolution and least detail. On touch
+// devices only a real slowdown below ~27 fps sheds quality. Their small,
+// dense screens also get a higher pixel-ratio cap: 1.5 on a 3x phone looks
+// soft and makes the outlines look chunky.
+const touchDevice = isTouchDevice();
+const slowFrame = touchDevice ? 1 / 27 : 1 / 50;
+const maxPixelRatio = touchDevice ? 2 : 1.5;
 let frameAcc = 0;
 let frameN = 0;
 let slowWindows = 0;
@@ -297,11 +365,13 @@ function adaptResolution(rawDt: number) {
   const avg = frameAcc / frameN;
   frameAcc = 0;
   frameN = 0;
-  if (avg > 1 / 50) {
+  if (avg > slowFrame) {
     if (++slowWindows < 2) return;
     slowWindows = 0;
-    // First shed pixels; once at the floor, shed geometry (vertex-bound GPUs).
+    // First shed pixels, then cast shadows; once at the floor, shed geometry
+    // (vertex-bound GPUs).
     if (autoScale > 0.7) autoScale = Math.max(0.7, autoScale - 0.1);
+    else if (!groundShadow.shed && groundShadowSettings.enabled) groundShadow.shed = true;
     else if (terrain.settings.splitFactor > 1.4) {
       terrain.settings.splitFactor = Math.max(1.4, terrain.settings.splitFactor - 0.15);
       terrain.nearLodDistance = Math.max(45, terrain.nearLodDistance - 10);
@@ -310,18 +380,19 @@ function adaptResolution(rawDt: number) {
   }
   slowWindows = 0;
   if (avg > 1 / 55) return;
-  // Headroom: restore in reverse (low-res floor, then geometry, then pixels).
+  // Headroom: restore in reverse (low-res floor, geometry, shadows, pixels).
   if (autoScale < 0.7) autoScale = Math.min(0.7, autoScale + 0.05);
   else if (terrain.settings.splitFactor < fullSplit) {
     terrain.settings.splitFactor = Math.min(fullSplit, terrain.settings.splitFactor + 0.15);
     terrain.nearLodDistance = Math.min(fullNearLod, terrain.nearLodDistance + 10);
-  } else if (autoScale < 1) autoScale = Math.min(1, autoScale + 0.05);
+  } else if (groundShadow.shed) groundShadow.shed = false;
+  else if (autoScale < 1) autoScale = Math.min(1, autoScale + 0.05);
 }
 
 function resize() {
   const w = window.innerWidth;
   const h = window.innerHeight;
-  const pr = Math.min(window.devicePixelRatio || 1, 1.5) * postSettings.renderScale * autoScale;
+  const pr = Math.min(window.devicePixelRatio || 1, maxPixelRatio) * postSettings.renderScale * autoScale;
   renderer.setPixelRatio(1);
   renderer.setSize(w, h, false);
   renderer.domElement.style.width = w + 'px';
@@ -355,15 +426,14 @@ function frame(ts?: number) {
   }
 
   if (input.pressed('KeyF') && !riding && !cycling) player.set(player.current.name === 'fly' ? 'walk' : 'fly', ctx);
+  storyHost?.story?.handleAction(input);
   if (input.pressed('KeyE')) {
-    if (riding) dismount();
+    // Something else in reach? Climb straight across; otherwise E hops off.
+    const next = nextMount();
+    if (next && (riding || cycling)) switchTo(next);
+    else if (riding) dismount();
     else if (cycling) dismountBike();
-    else {
-      const m = mobs.mountable(player.body.pos);
-      const k = player.current.name === 'walk' ? bikes.mountable(player.body.pos) : null;
-      if (m && (!k || m.pos.distanceTo(player.body.pos) < k.pos.distanceTo(player.body.pos))) mount(m);
-      else if (k) mountBike(k);
-    }
+    else if (next) switchTo(next);
   }
   const lassoKey = input.pressed('KeyR') || input.pressed('Mouse2');
   if (lassoKey && mobs.act() === 'throw') rig.throwLasso();
@@ -455,10 +525,12 @@ function frame(ts?: number) {
   rig.hand(hand);
   mobs.updateRopes(mobCtx, hand);
   puffs.update(dt);
+  storyHost?.story?.update(dt, input, mode);
   for (const ev of body.events) if (ev.type === 'land' && ev.impact > 6) orbit.bump(Math.min(2.2, (ev.impact - 6) * 0.14));
   const focus = body.pos.clone();
   focus.y += mode === 'swim' ? 1.1 : mode === 'glide' ? 2.0 : mode === 'ride' && riding ? riding.species.seat(riding).pos.y - body.pos.y + 1.1 : mode === 'bike' ? 1.55 : 1.4;
   focus.y += focusShift;
+  if (focusOverride) focus.copy(focusOverride);
   // Speed feel: FOV kick + pull-back when sprinting, diving, gliding.
   const hs = Math.hypot(body.vel.x, body.vel.z);
   const sprint = mode === 'walk' ? THREE.MathUtils.clamp((hs - 6.5) / 4, 0, 1) : 0;
@@ -491,6 +563,7 @@ function frame(ts?: number) {
   terrain.update(camera.position);
 
   renderer.info.reset();
+  groundShadow.update(renderer, terrain.root, camera.position);
   const s = env.sky;
   post.render(scene, camera, s.fog, s.outline, s.tint, s.tintAmt, s.lift);
 
@@ -537,8 +610,9 @@ function followOnTouch(dt: number) {
 const aimV = new THREE.Vector3();
 function updateAimHud() {
   const a = mobs.aim;
-  const mountable = !riding && !cycling ? mobs.mountable(player.body.pos) : null;
-  const bike = !riding && !cycling && !mountable && player.current.name === 'walk' ? bikes.mountable(player.body.pos) : null;
+  const next = nextMount();
+  const onto = next ? ('mob' in next ? `ride the ${next.mob.species.name}` : 'ride the bicycle') : '';
+  const mounted = !!riding || !!cycling;
   const tips: string[] = [];
   if (a) {
     aimV.copy(a.mob.pos).setY(a.mob.pos.y + a.mob.species.centreY).project(camera);
@@ -548,19 +622,19 @@ function updateAimHud() {
     aimEl.className = aimV.z < 1 ? 'on ' + a.action : '';
     tips.push(a.action === 'lasso' ? '<b>R</b> lasso' : a.action === 'lead' ? '<b>R</b> lead' : '<b>R</b> let go');
   } else aimEl.className = '';
-  if (mountable) tips.push('<b>E</b> ride');
-  if (bike) tips.push('<b>E</b> ride the bicycle');
-  if (cycling) tips.push('<b>E</b> hop off · <b>Shift</b> pedal hard · <b>Space</b> hop');
-  if (riding) tips.push(riding.species.mount.walk ? '<b>E</b> hop off · <b>Space</b> take off / climb · <b>C</b> descend' : '<b>E</b> hop off · <b>Space</b> climb · <b>C</b> descend');
+  const e = next ? `<b>E</b> ${onto}` : '<b>E</b> hop off';
+  if (next && !mounted) tips.push(e);
+  if (cycling) tips.push(`${e} · <b>Shift</b> pedal hard · <b>Space</b> hop`);
+  if (riding) tips.push(riding.species.mount.walk ? `${e} · <b>Space</b> take off / climb · <b>C</b> descend` : `${e} · <b>Space</b> climb · <b>C</b> descend`);
   touch?.setContext({
-    ride: riding || cycling ? 'Hop off' : mountable || bike ? 'Ride' : null,
+    ride: next ? (mounted ? 'Switch' : 'Ride') : mounted ? 'Hop off' : null,
     lasso: a ? (a.action === 'lasso' ? 'Lasso' : a.action === 'lead' ? 'Lead' : 'Let go') : null,
     down: !!riding || player.current.name === 'fly',
     fly: !riding && !cycling,
   });
   const html = tips.join(' · ');
   if (promptEl.innerHTML !== html) promptEl.innerHTML = html;
-  promptEl.style.opacity = html ? '1' : '0';
+  promptEl.style.opacity = html && !storyHost?.story?.silent ? '1' : '0';
 }
 
 let veil = document.getElementById('veil');
@@ -633,6 +707,8 @@ window.__ow = {
   },
 
   input,
+  story: () => storyHost?.story,
+  storyHost,
   body: player.body,
   post: postSettings,
   // debug handles for the probe scripts
@@ -640,6 +716,7 @@ window.__ow = {
   _p: post,
   _scene: scene,
   _terrain: terrain,
+  _shadow: groundShadow,
   _colliders: colliders,
   _body: player.body,
   _cam: camera,
@@ -677,6 +754,8 @@ window.__ow = {
   },
   dismountBike,
   lockInput: (yaw: number | null) => { inputYaw = yaw; },
+  /** Orbit the camera round a world point instead of the explorer (null = back to normal). */
+  focusAt: (x: number | null, y = 0, z = 0) => { focusOverride = x === null ? null : new THREE.Vector3(x, y, z); orbit.snap(); },
   /** Frame the nearest bicycle from `dist` m, from `side` (rad around it, 0 = its left). */
   lookAtBike: (dist = 4, side = 0, pitch = 0.12, hide = true) => {
     let best: Bike | null = null, bd = Infinity;

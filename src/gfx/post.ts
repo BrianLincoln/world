@@ -268,6 +268,12 @@ export class PostPipeline {
   private composite: FullscreenPass;
   private fxaa: FullscreenPass;
   readonly uniforms: Record<string, THREE.IUniform>;
+  /**
+   * Drawn over the composited frame (before FXAA) with blending: story
+   * sketches and icons. Its shaders get the G-buffer normal+depth texture
+   * and the render size, to fade behind solid geometry.
+   */
+  overlay: { scene: THREE.Scene; tND: THREE.IUniform; uRes: THREE.IUniform } | null = null;
   private w = 1;
   private h = 1;
 
@@ -282,7 +288,9 @@ export class PostPipeline {
     this.bloomB = new THREE.WebGLRenderTarget(1, 1, half);
     this.comp = new THREE.WebGLRenderTarget(1, 1, { depthBuffer: false, minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter });
 
-    this.layerRT = new THREE.WebGLRenderTarget(1, 1, { type: THREE.FloatType, depthBuffer: false, minFilter: THREE.NearestFilter, magFilter: THREE.NearestFilter });
+    // Half float: depths stay well under 65504 and only need ~8% relative
+    // accuracy, and 16F targets are renderable on more GPUs (iOS) than 32F.
+    this.layerRT = new THREE.WebGLRenderTarget(1, 1, { type: THREE.HalfFloatType, depthBuffer: false, minFilter: THREE.NearestFilter, magFilter: THREE.NearestFilter });
     this.layer = new FullscreenPass(fsMat(LAYER_FRAG, { tND: { value: null }, uStep: { value: new THREE.Vector2() }, uCamWorld: { value: new THREE.Matrix4() } }));
     this.extract = new FullscreenPass(fsMat(EXTRACT_FRAG, { tColor: { value: null }, uTexel: { value: new THREE.Vector2() } }));
     this.blur = new FullscreenPass(fsMat(BLUR_FRAG, { tSrc: { value: null }, uDir: { value: new THREE.Vector2() } }));
@@ -381,12 +389,25 @@ export class PostPipeline {
     u.uBloom.value = s.bloom;
     u.uLift.value = lift;
 
+    const drawOverlay = (target: THREE.WebGLRenderTarget | null) => {
+      const o = this.overlay;
+      if (!o || !o.scene.children.some((c) => c.visible)) return;
+      o.tND.value = this.gbuf.textures[1];
+      (o.uRes.value as THREE.Vector2).set(this.w, this.h);
+      const auto = r.autoClear;
+      r.autoClear = false;
+      r.setRenderTarget(target);
+      r.render(o.scene, camera);
+      r.autoClear = auto;
+    };
     if (s.fxaa) {
       this.composite.render(r, this.comp);
+      drawOverlay(this.comp);
       this.fxaa.material.uniforms.tDiffuse.value = this.comp.texture;
       this.fxaa.render(r, null);
     } else {
       this.composite.render(r, null);
+      drawOverlay(null);
     }
   }
 }

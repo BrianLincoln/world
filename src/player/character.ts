@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { makeFaceMaterial, makeSolidMaterial } from '../gfx/materials';
+import { buildAxe } from '../story/geometry';
 import type { BikeRider } from '../vehicles/bikes';
 import type { Body } from './movement';
 
@@ -311,6 +312,23 @@ export class CharacterRig {
     this.throwT = 0;
   }
 
+  private axe = new THREE.Group();
+  private chopT = 9;
+  private giveT = 9;
+  /** What's in the right mitten (story tools). */
+  get tool(): 'axe' | null { return this.axe.visible ? 'axe' : null; }
+  set tool(t: 'axe' | null) { this.axe.visible = t === 'axe'; }
+
+  /** A two-handed overhead axe swing (the blow lands ~0.3 s in). */
+  chop() {
+    this.chopT = 0;
+  }
+
+  /** Both hands forward: handing something over. */
+  give() {
+    if (this.giveT > 0.3) this.giveT = 0;
+  }
+
   /** The right mitten, world space (where ropes start). */
   hand(out: THREE.Vector3): THREE.Vector3 {
     return this.elR.localToWorld(out.set(0, -0.27, 0.02));
@@ -337,7 +355,46 @@ export class CharacterRig {
     this.buildHead();
     this.buildArms();
     this.buildLegs();
+    this.buildAxe();
   }
+
+  private buildAxe() {
+    // Handle forward and a little up from the grip, blade down.
+    const geo = buildAxe();
+    const handle = new THREE.Mesh(geo, makeSolidMaterial('#e3c48f', 0, { keep: 0.6 }));
+    // One mesh, two looks: steel is drawn by a second mesh clipped to the head.
+    const head = new THREE.Mesh(geo, makeSolidMaterial('#9aa8b8', 0, { keep: 0.6 }));
+    const kinds = geo.getAttribute('aKind') as THREE.BufferAttribute;
+    const split = (want: number) => {
+      const g = new THREE.BufferGeometry();
+      const pos = geo.getAttribute('position') as THREE.BufferAttribute, nrm = geo.getAttribute('normal') as THREE.BufferAttribute;
+      const P: number[] = [], N: number[] = [];
+      for (let i = 0; i < pos.count; i += 3) {
+        if (Math.round(kinds.getX(i)) !== want) continue;
+        for (let k = 0; k < 3; k++) { P.push(pos.getX(i + k), pos.getY(i + k), pos.getZ(i + k)); N.push(nrm.getX(i + k), nrm.getY(i + k), nrm.getZ(i + k)); }
+      }
+      g.setAttribute('position', new THREE.Float32BufferAttribute(P, 3));
+      g.setAttribute('normal', new THREE.Float32BufferAttribute(N, 3));
+      return g;
+    };
+    handle.geometry = split(17);
+    head.geometry = split(18);
+    // Carried by the throat: head forward, handle trailing down and back.
+    // Swinging: gripped at the end, the head out along the forearm, edge
+    // leading (-z is the direction an arm swinging forward travels).
+    const basis = (h: THREE.Vector3, b: THREE.Vector3) => new THREE.Quaternion().setFromRotationMatrix(new THREE.Matrix4().makeBasis(b.normalize(), h.normalize(), new THREE.Vector3().crossVectors(b, h)));
+    this.axeCarry = basis(new THREE.Vector3(0, 0.55, 0.83), new THREE.Vector3(0, -0.83, 0.55));
+    this.axeSwing = basis(new THREE.Vector3(0, -1, 0.12), new THREE.Vector3(0, -0.12, -1));
+    this.axe.position.set(0, -0.25, 0.03);
+    this.axe.add(handle, head);
+    this.axeParts = [handle, head];
+    this.axe.visible = false;
+    this.elR.add(this.axe);
+  }
+  private axeCarry = new THREE.Quaternion();
+  private axeSwing = new THREE.Quaternion();
+  private axeParts: THREE.Object3D[] = [];
+  private swingW = 0;
 
   private buildTorso() {
     const sp = this.spine;
@@ -835,6 +892,49 @@ export class CharacterRig {
       P.elR = lerp(P.elR, lerp(-1.3, -0.1, snap), out);
       P.spYaw += (0.3 * wind - 0.55 * snap) * out;
       P.hdYaw -= (0.3 * wind - 0.55 * snap) * out * 0.5;
+    }
+
+    // Carrying the axe: the right arm holds it a little out in front.
+    if (this.axe.visible) {
+      P.shRx -= 0.25 * wg;
+      P.elR -= 0.45 * wg;
+      P.shRz -= 0.08 * wg;
+    }
+    // Axe swing: wind up overhead and twist, then a hard downward chop with
+    // both hands, a little crouch into it, and recover.
+    this.chopT += dt;
+    if (this.chopT < 0.6) {
+      const k = this.chopT;
+      const wind = sat(k / 0.2);
+      const hit = sat((k - 0.2) / 0.1);
+      const back = sat((k - 0.34) / 0.26);
+      const w = (1 - back) * (1 - back * 0.2);
+      const shx = lerp(lerp(P.shRx, -2.75, wind), -0.75, hit);
+      P.shRx = lerp(P.shRx, shx, w);
+      P.shLx = lerp(P.shLx, shx + 0.1, w);
+      P.shRz = lerp(P.shRz, 0.42, w);
+      P.shLz = lerp(P.shLz, -0.38, w);
+      P.elR = lerp(P.elR, lerp(-1.0, -0.25, hit), w);
+      P.elL = lerp(P.elL, lerp(-1.1, -0.35, hit), w);
+      P.spX += (-0.18 * wind * (1 - hit) + 0.32 * hit) * w;
+      P.spYaw += (0.35 * wind * (1 - hit) - 0.25 * hit) * w;
+      P.hipY -= 0.06 * hit * w;
+      P.hdX += 0.15 * hit * w;
+    }
+    // The axe changes grip for the swing.
+    if (this.axe.visible) {
+      this.swingW += ((this.chopT < 0.5 ? 1 : 0) - this.swingW) * e(this.chopT < 0.5 ? 30 : 10);
+      this.axe.quaternion.slerpQuaternions(this.axeCarry, this.axeSwing, this.swingW);
+      const grip = lerp(0.52, 0.06, this.swingW);
+      for (const p of this.axeParts) p.position.set(0, -grip, 0);
+    }
+    this.giveT += dt;
+    if (this.giveT < 0.35) {
+      const w = Math.sin((this.giveT / 0.35) * Math.PI);
+      P.shRx = lerp(P.shRx, -1.25, w);
+      P.shLx = lerp(P.shLx, -1.25, w);
+      P.elR = lerp(P.elR, -0.2, w);
+      P.elL = lerp(P.elL, -0.2, w);
     }
 
     // Apply.

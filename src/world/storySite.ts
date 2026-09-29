@@ -1,4 +1,4 @@
-import { clamp, hash01, lerp, mulberry32, smoothstep } from '../core/rng';
+import { clamp, hash01, lerp, mulberry32 } from '../core/rng';
 
 // The guaranteed start area for the story: a broken cabin, an axe on a stump,
 // a small grove of trees to chop, a brook with stones on its bank and, far
@@ -33,6 +33,8 @@ export interface StorySite {
   spring: SitePoint;
   /** The next cabin, far across the valley (visible from here). */
   far: { x: number; z: number; y: number; rot: number };
+  /** Where the far cabin's light is seen from at night (the doorstep, or a knoll nearby). */
+  lookout: SitePoint;
   /** Short worn footpaths: door -> yard, yard -> brook bank. */
   paths: { ax: number; az: number; bx: number; bz: number }[];
   /** Bounding box of everything above (quick rejects). */
@@ -120,6 +122,8 @@ function traceBrook(f: Field, x0: number, z0: number, fallback: [number, number]
 
 export function findStorySite(seed: number, f: Field): StorySite {
   let fallback: StorySite | null = null;
+  let bestView: { s: StorySite; m: number } | null = null;
+  let tried = 0;
   const tryAt = (x: number, z: number, strict: boolean): StorySite | null => {
     const h = f.base(x, z);
     if (h < 7 || h > 95) return null;
@@ -198,8 +202,8 @@ export function findStorySite(seed: number, f: Field): StorySite {
       const spring = { x: src.x - (brook[1].x - src.x) * 0.6, z: src.z - (brook[1].z - src.z) * 0.6 };
 
       // Spawn in front of the door, looking at the cabin with the axe in view.
-      const sp = L(1.4, RUIN_D / 2 + 12.5);
-      const look = L(-1.5, 0);
+      const sp = L(3.4, RUIN_D / 2 + 10.5);
+      const look = L(1.2, -1.5);
       const spawn = { x: sp.x, z: sp.z, yaw: Math.atan2(sp.x - look.x, sp.z - look.z) };
       const stump = L(-RUIN_W / 2 - 2.4, RUIN_D / 2 + 2.6);
 
@@ -210,14 +214,43 @@ export function findStorySite(seed: number, f: Field): StorySite {
         { ax: L(RUIN_W / 2 + 1.5, 0.5).x, az: L(RUIN_W / 2 + 1.5, 0.5).z, bx: bank.x, bz: bank.z },
       ];
 
-      const far = findFarCabin(seed, f, x, z, y, rot);
+      // The far light: seen from the doorstep if possible, else from the best
+      // open knoll within ~70 m (the spirit walks you there at night).
+      const ds = L(-0.4, RUIN_D / 2 + 2.2);
+      let view = findFarCabin(seed, f, ds.x, ds.z, y, rot);
+      let lookout: SitePoint = ds;
+      if (view.margin < 4) {
+        let bx = ds.x, bz = ds.z, bs = -Infinity;
+        for (let ri = 0; ri < 7; ri++) for (let ai = 0; ai < 20; ai++) {
+          const r = 18 + ri * 8, a = (ai / 20) * Math.PI * 2;
+          const px = x + Math.cos(a) * r, pz = z + Math.sin(a) * r;
+          const ph = f.base(px, pz);
+          if (ph < 3 || f.forest(px, pz, ph) > 0.15 || flatness(f, px, pz, 3) > 1.6) continue;
+          if (trees.some((t) => Math.hypot(t.x - px, t.z - pz) < 6)) continue;
+          if (brook.some((b) => Math.hypot(b.x - px, b.z - pz) < 7)) continue;
+          const sc = ph - r * 0.04;
+          if (sc > bs) { bs = sc; bx = px; bz = pz; }
+        }
+        const alt = findFarCabin(seed, f, bx, bz, f.base(bx, bz), rot);
+        if (alt.margin > view.margin + 1) { view = alt; lookout = { x: bx, z: bz }; }
+      }
+      const far = view.far;
       let x0 = x - 30, z0 = z - 30, x1 = x + 30, z1 = z + 30;
-      for (const p of [...brook, ...trees, spring]) {
+      const fd = Math.hypot(far.x - lookout.x, far.z - lookout.z);
+      const vEnd = { x: lookout.x + ((far.x - lookout.x) / fd) * 130, z: lookout.z + ((far.z - lookout.z) / fd) * 130 };
+      for (const p of [...brook, ...trees, spring, lookout, vEnd]) {
         x0 = Math.min(x0, p.x - 12); z0 = Math.min(z0, p.z - 12);
         x1 = Math.max(x1, p.x + 12); z1 = Math.max(z1, p.z + 12);
       }
-      const site: StorySite = { x, z, y, rot, spawn, stump, trees, seat, brook, bank, stones, spring, far, paths, box: [x0, z0, x1, z1] };
-      if (ok) return site;
+      const site: StorySite = { x, z, y, rot, spawn, stump, trees, seat, brook, bank, stones, spring, far, lookout, paths, box: [x0, z0, x1, z1] };
+      // Strict: the next cabin's light must be clearly visible from here.
+      if (ok && (!strict || view.margin >= 4)) return site;
+      if (ok && strict) {
+        // Keep the best-seen view; give up looking after 30 good sites.
+        tried++;
+        if (!bestView || view.margin > bestView.m) bestView = { s: site, m: view.margin };
+        if (tried >= 30) return bestView.s;
+      }
       fallback ??= site;
     }
     return null;
@@ -233,13 +266,15 @@ export function findStorySite(seed: number, f: Field): StorySite {
         if (s) return s;
       }
     }
+    const bv = bestView as { s: StorySite; m: number } | null;
+    if (bv) return bv.s;
     if (fallback) return fallback;
   }
   // Nothing anywhere (an all-sea seed?): build it at the origin regardless.
   const y = Math.max(f.base(0, 0), 4) + 0.05;
   return {
     x: 0, z: 0, y, rot: 0, spawn: { x: 1.4, z: 15, yaw: 0 }, stump: { x: -5.7, z: 5.1 }, trees: [], seat: { x: -20, z: 0 },
-    brook: [], bank: { x: 36, z: 0 }, stones: [], spring: { x: 36, z: -40 }, far: findFarCabin(seed, f, 0, 0, y, 0), paths: [], box: [-40, -40, 40, 40],
+    brook: [], bank: { x: 36, z: 0 }, stones: [], spring: { x: 36, z: -40 }, far: findFarCabin(seed, f, 0, 0, y, 0).far, lookout: { x: 0, z: 5 }, paths: [], box: [-40, -40, 40, 40],
   };
 }
 
@@ -250,36 +285,48 @@ export function findStorySite(seed: number, f: Field): StorySite {
  */
 function findFarCabin(seed: number, f: Field, x: number, z: number, y: number, rot: number) {
   let best = { x: x + 900, z, y: f.base(x + 900, z) + 0.05, rot: 0 };
-  let bestScore = -Infinity;
-  const eye = y + 3.5;
+  let bestScore = -Infinity, bestMargin = -Infinity;
+  // Seen by someone standing at (x, z) on ground height y.
+  const eye = y + 1.6;
   const doorX = Math.sin(rot), doorZ = Math.cos(rot);
-  for (let ai = 0; ai < 24; ai++) {
-    for (let ri = 0; ri < 6; ri++) {
-      const a = (ai / 24) * Math.PI * 2 + hash01(ai, ri, seed, 931) * 0.2;
-      const r = 600 + ri * 160;
-      const cx = x + Math.cos(a) * r, cz = z + Math.sin(a) * r;
-      const h = f.base(cx, cz);
-      if (h < 6 || h > 170) continue;
-      if (flatness(f, cx, cz, 8) > 2.5) continue;
-      if (f.forest(cx, cz, h) > 0.4) continue;
-      // Line of sight: the worst clearance along the ray.
-      let margin = Infinity;
-      const top = h + 3;
-      for (let t = 0.03; t < 0.97; t += 0.02) {
-        const px = lerp(x, cx, t), pz = lerp(z, cz, t);
-        const ly = lerp(eye, top, t);
-        const g = f.base(px, pz);
-        margin = Math.min(margin, ly - g - 10 * f.forest(px, pz, g) * smoothstep(0.85, 0.97, t));
-      }
-      const facing = (Math.cos(a) * doorX + Math.sin(a) * doorZ) * 0.5 + 0.5;
-      const score = Math.min(margin, 12) * 3 + facing * 14 - Math.abs(r - 950) * 0.01 + (h > y ? 4 : 0);
-      if (score > bestScore) {
-        bestScore = score;
-        best = { x: cx, z: cz, y: h + 0.05, rot: Math.atan2(x - cx, z - cz) + (hash01(ai, ri, seed, 932) - 0.5) * 0.6 };
-      }
+  const test = (a: number, r: number, jit: number) => {
+    const cx = x + Math.cos(a) * r, cz = z + Math.sin(a) * r;
+    const h = f.base(cx, cz);
+    if (h < 6 || h > 170) return;
+    if (flatness(f, cx, cz, 8) > 2.5) return;
+    if (f.forest(cx, cz, h) > 0.4) return;
+    // Line of sight: the worst clearance along the ray. Any woodland (even
+    // sparse edge trees) counts as a 14 m wall, except inside the far
+    // cabin's own 40 m clearing and the story cabin's yard.
+    let margin = Infinity;
+    const top = h + 2.0; // the window
+    const dt = Math.min(0.0125, 14 / r);
+    for (let t = 0.004; t < 0.99; t += dt) {
+      if (margin < -2) break; // clearly blocked; don't bother
+      const px = lerp(x, cx, t), pz = lerp(z, cz, t);
+      const ly = lerp(eye, top, t);
+      const g = f.base(px, pz);
+      const d0 = t * r, d1 = (1 - t) * r;
+      // Near the viewer a corridor is kept clear of trees (see storyBlock).
+      const trees = d1 < 40 || d0 < 120 ? 0 : 14 * Math.min(1, f.forest(px, pz, g) / 0.1);
+      margin = Math.min(margin, ly - g - trees);
+    }
+    const facing = (Math.cos(a) * doorX + Math.sin(a) * doorZ) * 0.5 + 0.5;
+    // A clear sightline matters most; then in front of the door, across the
+    // valley (higher than here) and neither too near nor too far.
+    const score = (margin > 3 ? 80 : 0) + Math.min(margin, 25) * 2 + facing * 18 - Math.abs(r - 1100) * 0.008 + (h > y + 10 ? 6 : 0);
+    if (score > bestScore) {
+      bestScore = score;
+      bestMargin = margin;
+      best = { x: cx, z: cz, y: h + 0.05, rot: Math.atan2(x - cx, z - cz) + (jit - 0.5) * 0.6 };
+    }
+  };
+  for (let ai = 0; ai < 36; ai++) {
+    for (let ri = 0; ri < 11; ri++) {
+      test((ai / 36) * Math.PI * 2 + hash01(ai, ri, seed, 931) * 0.14, 480 + ri * 220, hash01(ai, ri, seed, 932));
     }
   }
-  return best;
+  return { far: best, margin: bestMargin };
 }
 
 /** Distance to the brook's centre line and the bed height there (d = Infinity if far). */

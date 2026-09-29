@@ -22,6 +22,12 @@ const LEAD_RANGE = 9;
 const MOUNT_RANGE = 3.6;
 const LEASH_LEN = 5.2;
 const TAME_TIME = 1.8;
+/** The walker's contact cylinder (m) for nudging creatures aside. */
+const PLAYER_R = 0.4;
+const PLAYER_H = 1.7;
+/** How quickly overlap eases out (1/s), and the spring that keeps them clear. */
+const NUDGE_RATE = 12;
+const NUDGE_SPRING = 18;
 
 
 export interface Aim {
@@ -250,9 +256,9 @@ export class Mobs {
   }
 
   /** A tamed mob close enough to climb onto. */
-  mountable(p: THREE.Vector3): Mob | null {
+  mountable(p: THREE.Vector3, range = MOUNT_RANGE): Mob | null {
     let best: Mob | null = null;
-    let bd = MOUNT_RANGE;
+    let bd = range;
     for (const m of this.tamed) {
       if (m.ridden) continue;
       const d = Math.hypot(m.pos.x - p.x, m.pos.z - p.z);
@@ -309,6 +315,7 @@ export class Mobs {
       m.species.think(m, ctx, m.leashed ? lead++ : 0);
       if (m.state === 'caught' && m.stateT > TAME_TIME) this.tame(m, ctx);
     }
+    if (!this.settings.freeze) this.nudge(ctx);
 
     // Draw.
     camera.updateMatrixWorld();
@@ -353,6 +360,63 @@ export class Mobs {
     }
 
     this.aim = canAct ? this.pick(camera, p) : null;
+  }
+
+  // ------------------------------------------------------------ contact
+
+  /**
+   * Soft bodies: you (or your mount, or your bike) shoulder creatures aside
+   * instead of passing through them, and tamed ones don't stack up on each
+   * other. Overlap is eased out over a few frames, not snapped, and the mob
+   * gets a push along the contact so it drifts off rather than jitters.
+   */
+  private nudge(ctx: MobCtx) {
+    const pl = ctx.player;
+    const dt = ctx.dt;
+    const k = 1 - Math.exp(-NUDGE_RATE * dt);
+    const mount = pl.mode === 'ride' ? this.tamed.find((m) => m.ridden) : undefined;
+    const pr = mount ? mount.species.radius : pl.mode === 'bike' ? 0.6 : PLAYER_R;
+    const top = pl.pos.y + (mount ? mount.species.centreY + mount.species.radius + 1.2 : PLAYER_H);
+    for (const m of this.all()) {
+      if (m.ridden) continue;
+      const r = m.species.radius;
+      const cy = m.pos.y + m.species.centreY;
+      if (cy - r > top || cy + r < pl.pos.y) continue;
+      const dx = m.pos.x - pl.pos.x, dz = m.pos.z - pl.pos.z;
+      const reach = pr + r;
+      const d2 = dx * dx + dz * dz;
+      if (d2 >= reach * reach) continue;
+      const d = Math.sqrt(d2);
+      // Dead centre (dropped on top of one): shove it out ahead of you.
+      const nx = d > 1e-4 ? dx / d : Math.sin(pl.heading);
+      const nz = d > 1e-4 ? dz / d : Math.cos(pl.heading);
+      const pen = reach - d;
+      m.pos.x += nx * pen * k;
+      m.pos.z += nz * pen * k;
+      // Match your speed into it, plus a little spring so it keeps clear.
+      const closing = (pl.vel.x * nx + pl.vel.z * nz) - (m.vel.x * nx + m.vel.z * nz);
+      const dv = Math.max(0, closing) + pen * NUDGE_SPRING * dt;
+      m.vel.x += nx * dv;
+      m.vel.z += nz * dv;
+    }
+    // Tamed creatures keep a little personal space from each other.
+    const t = this.tamed;
+    for (let i = 0; i < t.length; i++) for (let j = i + 1; j < t.length; j++) {
+      const a = t[i], b = t[j];
+      const dy = (a.pos.y + a.species.centreY) - (b.pos.y + b.species.centreY);
+      const reach = a.species.radius + b.species.radius;
+      if (Math.abs(dy) > reach) continue;
+      const dx = b.pos.x - a.pos.x, dz = b.pos.z - a.pos.z;
+      const d2 = dx * dx + dz * dz;
+      if (d2 >= reach * reach) continue;
+      const d = Math.sqrt(d2);
+      const nx = d > 1e-4 ? dx / d : 1, nz = d > 1e-4 ? dz / d : 0;
+      const push = (reach - d) * k;
+      // A ridden mount is driven by you: the other one gives way entirely.
+      const wa = a.ridden ? 0 : b.ridden ? 1 : 0.5;
+      a.pos.x -= nx * push * wa; a.pos.z -= nz * push * wa;
+      b.pos.x += nx * push * (1 - wa); b.pos.z += nz * push * (1 - wa);
+    }
   }
 
   private tame(m: Mob, ctx: MobCtx) {

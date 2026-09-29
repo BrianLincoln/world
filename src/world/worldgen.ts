@@ -218,6 +218,13 @@ export class WorldGen {
     if (Math.hypot(st.spawn.x - x, st.spawn.z - z) < 3 + r) return true;
     if (Math.hypot(st.bank.x - x, st.bank.z - z) < 3.5 + r) return true;
     if (kind === 'rock') for (const p of st.paths) if (segDist(x, z, p) < 2 + r) return true;
+    // A view corridor from the lookout toward the far cabin's light.
+    if (kind === 'tree' || kind === 'bush') {
+      const lx = st.lookout.x, lz = st.lookout.z;
+      const dx = st.far.x - lx, dz = st.far.z - lz, dl = Math.hypot(dx, dz);
+      const t = ((x - lx) * dx + (z - lz) * dz) / dl;
+      if (t > -2 && t < 125 && Math.abs((x - lx) * dz - (z - lz) * dx) / dl < 3.5 + r + t * 0.03) return true;
+    }
     return false;
   }
 
@@ -364,7 +371,7 @@ export class WorldGen {
     out.push(...keep);
     const inThis = (x: number, z: number) => Math.floor(x / POI_CELL) === cx && Math.floor(z / POI_CELL) === cz;
     if (inThis(st.x, st.z)) out.push({ kind: 'cabin', story: 'ruin', x: st.x, z: st.z, y: st.y, rot: st.rot, clear: 13, variant: 0 });
-    if (inThis(st.far.x, st.far.z)) out.push({ kind: 'cabin', story: 'far', x: st.far.x, z: st.far.z, y: st.far.y, rot: st.far.rot, clear: 20, variant: 0 });
+    if (inThis(st.far.x, st.far.z)) out.push({ kind: 'cabin', story: 'far', x: st.far.x, z: st.far.z, y: st.far.y, rot: st.far.rot, clear: 40, variant: 0 });
     if (inThis(st.spring.x, st.spring.z) && st.brook.length) {
       // A couple of mossy boulders where the brook wells up.
       const sx = st.spring.x, sz = st.spring.z;

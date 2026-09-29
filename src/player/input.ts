@@ -45,6 +45,8 @@ export class Input {
       if (e.button === 0 && !document.pointerLockElement) {
         el.requestPointerLock?.();
       }
+      // Left click while looking around is the story's "use" (like E).
+      if (e.button === 0 && document.pointerLockElement === el) this.edges.add('Mouse0');
       // Right button is an action (lasso), reported like a key: 'Mouse2'.
       if (e.button === 2) this.edges.add('Mouse2');
       else this.dragging = true;

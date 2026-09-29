@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { BIOME } from './palette';
 import {
-  CLOUD_FRAG, CLOUD_VERT, CREATURE_FRAG, CREATURE_VERT, FACE_FRAG, FACE_PARAMS, FACE_VERT, FS_VERT, PROP_FRAG, PROP_VERT, SKY_FRAG, SOLID_FRAG, SOLID_VERT,
+  CASTER_FRAG, CASTER_VERT, CLOUD_FRAG, CLOUD_VERT, CREATURE_FRAG, CREATURE_VERT, FACE_FRAG, FACE_PARAMS, FACE_VERT, FS_VERT, PROP_FRAG, PROP_VERT, SKY_FRAG, SOLID_FRAG, SOLID_VERT,
   TERRAIN_FRAG, TERRAIN_VERT, WATER_FRAG, WATER_VERT,
 } from './shaders';
 
@@ -88,6 +88,9 @@ export const TERRAIN_U = {
   uPlayerFeet: { value: new THREE.Vector3(0, -1e4, 0) },
   uPlayerLift: { value: 0 },
   uMobShadow: { value: Array.from({ length: 12 }, () => new THREE.Vector4()) },
+  uGroundShadow: { value: null as THREE.Texture | null },
+  uShadowRect: { value: new THREE.Vector4(0, 0, 1, 0) },
+  uShadowFade: { value: new THREE.Vector2(55, 85) },
 };
 
 export const WATER_U = {
@@ -145,7 +148,7 @@ export const KIND_COLORS: THREE.Color[] = [
   col(BIOME.tuft), col(BIOME.flower), col(BIOME.flowerCore), col(BIOME.cabinWall),
   col(BIOME.cabinRoof), col(BIOME.cabinTrim), col(BIOME.cabinWindow), col(BIOME.cabinDoor),
   col(BIOME.stone), col(BIOME.cabinWall2), col(BIOME.snow), col(BIOME.harebell),
-  col(BIOME.buttercup), col(BIOME.cutWood), col(BIOME.steel), col(BIOME.soot), col(BIOME.ember),
+  col(BIOME.buttercup), col(BIOME.cutWood), col(BIOME.steel), col(BIOME.soot), col(BIOME.ember), col(BIOME.cabinRoof),
 ];
 export const PROP_U = {
   uKind: { value: KIND_COLORS },
@@ -169,6 +172,24 @@ export function makePropMaterial(opts: { bend?: number; wind?: number; heightRef
     uFire: { value: 0 },
   }, { side: opts.doubleSide ? THREE.DoubleSide : THREE.FrontSide });
 }
+
+export const CASTER_U = {
+  /** Longest shadow, in metres of run per metre of height. */
+  uShadowReach: { value: 1.5 },
+};
+
+/** Flattens a prop kind into the ground shadow mask (see CASTER_VERT). */
+export function makeCasterMaterial(opts: { bend?: number; wind?: number; heightRef?: number }) {
+  return mat(CASTER_VERT, CASTER_FRAG, {
+    uTime: U.uTime,
+    uLightDir: U.uLightDir,
+    uShadowReach: CASTER_U.uShadowReach,
+    uBend: { value: opts.bend ?? 0 },
+    uWind: { value: opts.wind ?? 0 },
+    uHeightRef: { value: opts.heightRef ?? 1 },
+  }, { side: THREE.DoubleSide, depthTest: false, depthWrite: false });
+}
+
 
 export function makeSkyMaterial() {
   return mat(FS_VERT, SKY_FRAG, { ...U, ...SKY_U }, { depthTest: false, depthWrite: false });

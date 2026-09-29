@@ -27,10 +27,10 @@ vec3 toonLight(vec3 n) {
 vec2 glintAmt(vec3 n, vec3 viewDir, vec3 world, float k) {
   if (k <= 0.0) return vec2(0.0);
   float fres = 1.0 - abs(dot(n, viewDir));
-  float pulse = 0.62 + 0.38 * sin(uTime * 2.4);
-  float rim = step(0.62 - 0.1 * k, fres) * pulse;
-  float sweep = fract((world.x + world.z) * 0.18 + world.y * 0.3 - uTime * 0.42);
-  float shimmer = step(0.93, sweep) * step(sweep, 0.985);
+  float pulse = 0.55 + 0.45 * sin(uTime * 2.4);
+  float rim = step(0.8 - 0.08 * k, fres) * pulse;
+  float sweep = fract((world.x + world.z) * 0.11 + world.y * 0.16 - uTime * 0.32);
+  float shimmer = step(0.955, sweep) * step(sweep, 0.978);
   return vec2(rim, shimmer) * min(k, 1.5);
 }
 const vec3 GLINT_COL = vec3(1.0, 0.94, 0.72);
@@ -101,6 +101,21 @@ uniform vec3 uPlayerFeet;
 uniform float uPlayerLift;
 // Creature contact shadows: xyz = ground point under it, w = radius (0 = off).
 uniform vec4 uMobShadow[12];
+// Cast shadows from props (gfx/groundShadow.ts): a top-down coverage mask.
+uniform sampler2D uGroundShadow;
+uniform vec4 uShadowRect;   // min x, min z, 1 / size, strength
+uniform vec2 uShadowFade;   // camera distance where shadows fade out
+
+float groundShadow(vec2 xz, float dist) {
+  if (uShadowRect.w <= 0.0) return 0.0;
+  vec2 uv = (xz - uShadowRect.xy) * uShadowRect.z;
+  float edge = min(min(uv.x, uv.y), min(1.0 - uv.x, 1.0 - uv.y));
+  if (edge <= 0.0) return 0.0;
+  // Threshold the filtered mask: crisp, hard-edged shapes at any texel size.
+  float k = smoothstep(0.38, 0.62, texture(uGroundShadow, uv).r);
+  k *= smoothstep(0.0, 0.06, edge) * (1.0 - smoothstep(uShadowFade.x, uShadowFade.y, dist));
+  return k * uShadowRect.w;
+}
 
 // Storybook ground marks: short curved dashes scattered in world space,
 // only near the camera (they'd shimmer further out).
@@ -162,6 +177,8 @@ void main() {
 
   vec3 lightBand = toonLight(n);
   lightBand = mix(lightBand, mix(uMidCol, uLightCol, 0.6), smoothstep(350.0, 1300.0, dist));
+  // Cast shadows drop the ground into the shade band, like a hill's far side.
+  lightBand = mix(lightBand, uShadeCol, groundShadow(vWorld.xz, dist));
   vec3 col = c * lightBand;
   // Contact shadow under the explorer: a flat ellipse in the shade tone.
   // uPlayerFeet.y is the ground under them; it shrinks as they rise.
@@ -176,7 +193,7 @@ void main() {
   }
   if (grass) {
     float s = strokes(vWorld.xz, dist);
-    col = mix(col, cStroke * toonLight(n), s * 0.8);
+    col = mix(col, cStroke * lightBand, s * 0.8);
   }
   // Snow caps resist the monochrome grade: they stay the brightest thing.
   writeG(col, snow ? -0.55 : 0.0, n, vView);
@@ -187,14 +204,33 @@ void main() {
 
 // Instanced props: trees, bushes, rocks, tufts, flowers, cabins.
 // aI0 = (x, y, z, scale), aI1 = (rotY, yScale, lean, tone), aKind per vertex.
-export const PROP_VERT = /* glsl */ `
+// The instance pose (scale, wind sway, bend, yaw) is shared with the ground
+// shadow casters so shadows sway with their trees.
+const PROP_POSE = /* glsl */ `
 in vec4 aI0;
 in vec4 aI1;
-in float aKind;
 uniform float uTime;
 uniform float uBend;
 uniform float uWind;
 uniform float uHeightRef;
+// Local-space vertex after scale, bend and yaw. hN = normalised height.
+vec3 propPose(vec3 p, vec3 base, out float hN) {
+  float sc = aI0.w;
+  hN = clamp(p.y / uHeightRef, 0.0, 1.0);
+  p.xz *= sc;
+  p.y *= sc * aI1.y;
+  float sway = sin(uTime * 1.1 + base.x * 0.045 + base.z * 0.06) * uWind
+             + sin(uTime * 2.3 + base.z * 0.11) * uWind * 0.35;
+  p.x += (aI1.z * uBend + sway) * hN * hN * uHeightRef * sc;
+  float c = cos(aI1.x);
+  float s = sin(aI1.x);
+  return vec3(c * p.x + s * p.z, p.y, -s * p.x + c * p.z);
+}
+`;
+
+export const PROP_VERT = /* glsl */ `
+${PROP_POSE}
+in float aKind;
 uniform float uCutaway;
 uniform vec3 uFocus;
 out vec3 vN;
@@ -204,13 +240,9 @@ out float vKind;
 out float vTone;
 out vec3 vWorld;
 void main() {
-  vec3 p = position;
   float sc = aI0.w;
   float sy = aI1.y;
-  vLocal = p;
-  float hN = clamp(p.y / uHeightRef, 0.0, 1.0);
-  p.xz *= sc;
-  p.y *= sc * sy;
+  vLocal = position;
   vec3 base = (modelMatrix * vec4(aI0.xyz, 1.0)).xyz;
   if (uCutaway > 1.5) {
     // Hide whole trees whose canopy actually blocks the camera->player
@@ -245,13 +277,10 @@ void main() {
       }
     }
   }
-  float sway = sin(uTime * 1.1 + base.x * 0.045 + base.z * 0.06) * uWind
-             + sin(uTime * 2.3 + base.z * 0.11) * uWind * 0.35;
-  float bendAmt = (aI1.z * uBend + sway) * hN * hN * uHeightRef * sc;
-  p.x += bendAmt;
+  float hN;
+  vec3 p = propPose(position, base, hN);
   float c = cos(aI1.x);
   float s = sin(aI1.x);
-  p = vec3(c * p.x + s * p.z, p.y, -s * p.x + c * p.z);
   vec3 nrm = normal;
   // Tilt normals with the bend so lit sides follow the curve.
   nrm.x -= aI1.z * uBend * hN * 1.5;
@@ -268,6 +297,36 @@ void main() {
 }
 `;
 
+// Ground shadow casters: the prop, posed exactly as drawn, flattened along
+// the key light onto the plane of its own base and seen from straight above.
+// This fills a top-down coverage mask that the terrain samples (see
+// gfx/groundShadow.ts). Only the ground receives, so there's no acne or bias.
+export const CASTER_VERT = /* glsl */ `
+${PROP_POSE}
+uniform vec3 uLightDir;
+uniform float uShadowReach;
+void main() {
+  vec3 base = (modelMatrix * vec4(aI0.xyz, 1.0)).xyz;
+  float hN;
+  vec3 p = propPose(position, base, hN);
+  vec3 w = (modelMatrix * vec4(p + aI0.xyz, 1.0)).xyz;
+  // Horizontal run per metre of height, capped so low sun can't smear
+  // shadows across the whole mask.
+  vec2 run = uLightDir.xz / max(uLightDir.y, 0.05);
+  float r = length(run);
+  if (r > uShadowReach) run *= uShadowReach / r;
+  w.xz -= run * max(w.y - base.y, 0.0);
+  w.y = base.y;
+  gl_Position = projectionMatrix * viewMatrix * vec4(w, 1.0);
+}
+`;
+
+export const CASTER_FRAG = /* glsl */ `
+precision highp float;
+out vec4 oMask;
+void main() { oMask = vec4(1.0); }
+`;
+
 export const PROP_FRAG = /* glsl */ `
 ${COMMON}
 ${GBUF_OUT}
@@ -277,7 +336,7 @@ in vec3 vLocal;
 in float vKind;
 in float vTone;
 in vec3 vWorld;
-uniform vec3 uKind[21];
+uniform vec3 uKind[22];
 uniform vec3 uGlow;
 /** Story interactable signal strength (0 = none). */
 uniform float uGlint;
@@ -292,7 +351,7 @@ uniform vec3 uFocus;
 // Kinds: 0 foliage, 1 trunk, 2 rock, 3 bush, 4 tuft, 5 flower petal, 6 flower core,
 // 7 wall, 8 roof, 9 trim, 10 window, 11 door, 12 stone, 13 wall alt, 14 snowcap(rock),
 // 15 harebell, 16 buttercup (petals of kind 5 with instance tone > 0.6),
-// 17 cut wood, 18 axe steel, 19 soot, 20 ember glow
+// 17 cut wood, 18 axe steel, 19 soot, 20 ember glow, 21 roof boards (real planks, no drawn lines)
 void main() {
   int k = int(vKind + 0.5);
   if (uCutaway > 0.5) {
@@ -307,7 +366,11 @@ void main() {
   if (k == 5 && vTone > 0.6) base = uKind[16];
   base *= 1.0 - uToneVar * 0.5 + uToneVar * vTone;
   float emissive = 0.0;
-  if (k == 7 || k == 13) {
+  if ((k == 7 || k == 13) && abs(n.y) > 0.9) {
+    // floorboards
+    float line = step(0.9, fract(vLocal.z * 3.2));
+    base *= 1.0 - 0.16 * line;
+  } else if (k == 7 || k == 13) {
     // clapboard lines
     float line = step(0.86, fract(vLocal.y * 2.4));
     base *= 1.0 - 0.18 * line;
@@ -328,7 +391,7 @@ void main() {
     col = mix(col, base * vec3(1.25, 0.86, 0.55), uFire * 0.55 * fl);
   }
   // Negative alpha = partial opt-out of the monochrome grade (accent colours).
-  if (emissive == 0.0 && (k == 7 || k == 8)) emissive = -0.45;
+  if (emissive == 0.0 && (k == 7 || k == 8 || k == 21)) emissive = -0.45;
   if (emissive == 0.0 && (k == 17 || k == 18)) emissive = -0.3;
   if (petal) emissive = -0.35;
   if (uGlint > 0.0) {
@@ -725,8 +788,12 @@ void main() {
     // A warm spirit glows from within: less shade, a soft bloom. Painted
     // eyes (ink/white) stay crisp.
     float paint = clamp(1.0 - length(col - vCol.rgb * toonLight(n)) * 4.0, 0.0, 1.0);
-    col = mix(col, vCol.rgb * mix(uLightCol, vec3(1.0), 0.4), uEmber * 0.7 * paint);
-    glow = max(glow, (0.5 + 0.1 * sin(uTime * 3.0)) * smoothstep(0.35, 1.0, uEmber) * paint);
+    // Self-lit: its own colour with a soft two-band form, whatever the sky does.
+    vec3 self = vCol.rgb * (dot(n, uLightDir) > uBand2 ? 1.0 : 0.84);
+    col = mix(col, self, min(1.0, uEmber * 1.3) * paint);
+    // Emissive >= 0.5 also exempts it from the monochrome grade (see post),
+    // which is the point: a warm spirit stays warm under a blue night.
+    if (uEmber > 0.3 && paint > 0.5) glow = max(glow, 0.52 + 0.06 * sin(uTime * 3.0));
   }
   writeG(col, glow > 0.02 ? glow : -keep, n, vView);
 }

@@ -198,9 +198,9 @@ export function slotCanvas(name: IconName, filled: boolean): HTMLCanvasElement {
       g.fill();
       ink(g, 7);
     } else {
-      g.fillStyle = 'rgba(251, 241, 222, 0.35)';
+      g.fillStyle = 'rgba(251, 241, 222, 0.62)';
       g.fill();
-      g.setLineDash([16, 12]);
+      g.setLineDash([15, 11]);
       ink(g, 7);
       g.setLineDash([]);
     }
@@ -208,7 +208,7 @@ export function slotCanvas(name: IconName, filled: boolean): HTMLCanvasElement {
     g.translate(64, 64);
     g.scale(0.72, 0.72);
     g.translate(-64, -64);
-    g.globalAlpha = filled ? 1 : 0.3;
+    g.globalAlpha = filled ? 1 : 0.38;
     DRAW[name](g);
     g.restore();
     cache.set(key, (c = cc));
@@ -249,6 +249,32 @@ export function bubbleCanvas(name: IconName): HTMLCanvasElement {
     g.translate(-64, -64);
     DRAW[name](g);
     g.restore();
+    cache.set(key, (c = cc));
+  }
+  return c;
+}
+
+/** A soft warm glow with a little four-point twinkle (the far window at night). */
+export function glowCanvas(): HTMLCanvasElement {
+  const key = 'glow';
+  let c = cache.get(key);
+  if (!c) {
+    const [cc, g] = canvas();
+    const grd = g.createRadialGradient(64, 64, 0, 64, 64, 60);
+    grd.addColorStop(0, 'rgba(255, 244, 205, 1)');
+    grd.addColorStop(0.12, 'rgba(255, 214, 128, 0.95)');
+    grd.addColorStop(0.35, 'rgba(255, 190, 100, 0.35)');
+    grd.addColorStop(1, 'rgba(255, 170, 90, 0)');
+    g.fillStyle = grd;
+    g.fillRect(0, 0, 128, 128);
+    g.globalCompositeOperation = 'lighter';
+    for (const [w, h] of [[3, 44], [44, 3]]) {
+      const lg = g.createRadialGradient(64, 64, 0, 64, 64, Math.max(w, h));
+      lg.addColorStop(0, 'rgba(255, 236, 190, 0.8)');
+      lg.addColorStop(1, 'rgba(255, 236, 190, 0)');
+      g.fillStyle = lg;
+      g.fillRect(64 - w, 64 - h, w * 2, h * 2);
+    }
     cache.set(key, (c = cc));
   }
   return c;

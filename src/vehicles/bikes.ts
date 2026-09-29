@@ -88,12 +88,13 @@ export class Bikes {
    * New world (or first start): forget every bike and place the starter one
    * near the spawn, side-on to a camera looking along `camYaw`.
    */
-  reset(gen: WorldGen, spawnX: number, spawnZ: number, camYaw: number) {
+  reset(gen: WorldGen, spawnX: number, spawnZ: number, camYaw: number, starter = true) {
     this.gen = gen;
     this.bikes.clear();
     this.empty.clear();
     this.scanT = 0;
-    this.start = this.startSpot(spawnX, spawnZ, camYaw);
+    // The story's opening has no starter bike (the bike comes in a later phase).
+    this.start = starter ? this.startSpot(spawnX, spawnZ, camYaw) : null;
   }
 
   // ------------------------------------------------------------ placement
@@ -228,14 +229,14 @@ export class Bikes {
   // ------------------------------------------------------------ riding
 
   /** The parked bike you could climb onto from `p`, if any. */
-  mountable(p: THREE.Vector3): Bike | null {
+  mountable(p: THREE.Vector3, range = MOUNT_R, reachY = 1.6): Bike | null {
     if (!this.settings.enabled) return null;
     let best: Bike | null = null;
-    let bd = MOUNT_R;
+    let bd = range;
     for (const k of this.bikes.values()) {
       if (k.ridden) continue;
       const d = Math.hypot(k.pos.x - p.x, k.pos.z - p.z);
-      if (d < bd && Math.abs(k.pos.y - p.y) < 1.2) { bd = d; best = k; }
+      if (d < bd && Math.abs(k.pos.y - p.y) < reachY) { bd = d; best = k; }
     }
     return best;
   }
