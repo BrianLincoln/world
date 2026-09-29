@@ -64,6 +64,7 @@ for (const s of shots) {
       while ((Date.now() - s0) / 1000 < at) await W(10);
       await page.screenshot({ path: `${out}/${seed}-${name}.png` });
     }
+    { const b0 = Date.now(); while (Date.now() - b0 < 20000 && (await page.evaluate(() => window.__ow.beacons.busy))) await W(100); }
     await W(1500);
     // Walk into the doorway.
     await page.evaluate(([t]) => {
@@ -86,6 +87,30 @@ for (const s of shots) {
     await page.keyboard.press('KeyE');
     await W(1600); await page.screenshot({ path: `${out}/${seed}-u12-out.png` });
     console.log('out', await page.evaluate(() => ({ busy: window.__ow.beacons.busy, visible: window.__ow.rig.root.visible })));
+  }
+  if (s === 'free') {
+    // The freeing sequence, frame-stepped: break the lock, then frames at set times.
+    await set('none');
+    await page.evaluate((id) => { window.__ow.focusAt(null); window.__ow.goToTower(id); }, tower);
+    const t = await page.evaluate((id) => { const t = window.__ow.gen().towers.towers[id]; return { yaw: t.yaw, g: t.door.ground }; }, tower);
+    await page.evaluate(([t]) => {
+      const fx = Math.sin(t.yaw), fz = Math.cos(t.yaw);
+      window.__ow.teleport(t.g.x + fx * 0.3, t.g.z + fz * 0.3);
+      window.__ow._body.heading = t.yaw + Math.PI;
+      window.__ow.view(t.yaw + 0.7, 0.15, 7);
+    }, [t]);
+    await idle();
+    await page.evaluate(() => { window.__ow.manual(true); window.__ow.advance(30); window.__ow.beacons.debugBreak(); });
+    const times = (opt('at', '0.35,0.6,1.0,1.8,2.6,3.4,4.4,5.0,5.8,6.6,7.4,8.4,9.6,10.6,11.4,12.2,13.0,13.8,14.6,15.4,16.2,17.2,18.6,19.6')).split(',').map(Number);
+    let now = 0;
+    for (const at of times) {
+      const n = Math.max(1, Math.round((at - now) * 60));
+      await page.evaluate((n) => window.__ow.advance(n), n);
+      now += n / 60;
+      await page.screenshot({ path: `${out}/${seed}-f${String(Math.round(at * 10)).padStart(3, '0')}.png` });
+      if (opt('dbg', '0') === '1') console.log(at, await page.evaluate(() => { const B = window.__ow.beacons; return { lock: !!B.lock, fly: B.lock?.flyT, id: B.lock?.tower.id, free: B.free?.tower.id, n: B.group.children.length }; }));
+    }
+    await page.evaluate(() => window.__ow.manual(false));
   }
   if (s === 'variety') {
     await set('none');

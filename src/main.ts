@@ -241,6 +241,9 @@ if (params.get('towers') === '1') towerDebug.settings.links = towerDebug.setting
 // Beacon towers: drawn at any distance, their spirits lift you up and down.
 if (params.has('fresh')) try { localStorage.removeItem(`fjellheim.towers.${seedText}`); } catch { /* ignore */ }
 let hadCine = false;
+/** Easing the camera between a cinematic and the orbit: where it came from, and how far along (1 = done). */
+const camBlendPos = new THREE.Vector3(), camBlendQ = new THREE.Quaternion(), camLastPos = new THREE.Vector3(), camLastQ = new THREE.Quaternion();
+let camBlend = 1;
 /** Sandbox only: how long the pick stays in the mitten after a swing at a tower's lock. */
 let sandboxPickT = 0;
 const beacons = new Beacons({
@@ -493,9 +496,11 @@ let stepDt: number | null = null;
 let skipRender = false;
 
 function frame(ts?: number) {
+  // A browser frame that was already queued when stepping by hand began.
+  if (manualStep && stepDt === null) return;
   timer.update(ts);
   const rawDt = stepDt ?? timer.getDelta();
-  const dt = Math.min(rawDt, 0.05);
+  const dt = THREE.MathUtils.clamp(rawDt, 0, 0.05);
   adaptResolution(rawDt);
   elapsed += dt;
   if (postSettings.renderScale !== lastScale || autoScale !== lastAuto) {
@@ -649,24 +654,6 @@ function frame(ts?: number) {
   const rideK = mode === 'ride' ? THREE.MathUtils.clamp((body.vel.length() - 8) / 30, 0, 1) : 0;
   // Keeps building with speed: a mountain descent should feel like one.
   const bikeK = mode === 'bike' ? THREE.MathUtils.clamp((hs - 8) / 50, 0, 1.4) : 0;
-  // A tower's spirit being freed: the camera watches it, not you.
-  const cine = beacons.cinematic();
-  if (cine) {
-    focus.copy(cine.focus);
-    let dy = cine.yaw - orbit.yaw;
-    dy = Math.atan2(Math.sin(dy), Math.cos(dy));
-    orbit.yaw += dy * (1 - Math.exp(-2.5 * dt));
-    orbit.pitch += (cine.pitch - orbit.pitch) * (1 - Math.exp(-3 * dt));
-    orbit.targetDistance += (cine.dist - orbit.targetDistance) * (1 - Math.exp(-2.2 * dt));
-    if (cine.cut) { orbit.yaw = cine.yaw; orbit.pitch = cine.pitch; orbit.targetDistance = cine.dist; orbit.snap(); }
-  } else if (hadCine) {
-    // And cut back to you when it's over.
-    orbit.yaw = body.heading + Math.PI;
-    orbit.pitch = 0.18;
-    orbit.targetDistance = 10;
-    orbit.snap();
-  }
-  hadCine = !!cine;
   orbit.update(focus, dt, (x, z) => Math.max(gen.height(x, z), SEA_LEVEL), {
     fovKick: 3.5 * sprint + 7 * fall + (3 + THREE.MathUtils.clamp((hs - 9) / 6, 0, 1) * 4) * glide + 8 * flyK + 6 * rideK + 9 * bikeK,
     distScale: 1 + 0.12 * sprint + 0.15 * fall + 0.4 * glide + (mode === 'ride' ? 0.25 + 0.2 * rideK : 0) + 0.3 * bikeK,
@@ -686,6 +673,28 @@ function frame(ts?: number) {
   beacons.clampCamera(camera.position, focus, dt);
   beacons.camNow.copy(camera.position);
   // You are the tower's head: the camera looks out through its eyes.
+  // A tower's spirit being freed: the camera watches it, not you, easing
+  // in from where it was and back to you after (never a cut).
+  const cine = beacons.cinematic();
+  if (cine) {
+    if (!hadCine) { camBlendPos.copy(camera.position); camBlendQ.copy(camera.quaternion); camBlend = 0; }
+    camera.position.copy(cine.pos);
+    camera.lookAt(cine.at);
+    camLastPos.copy(camera.position); camLastQ.copy(camera.quaternion);
+  } else if (hadCine) {
+    orbit.yaw = body.heading + Math.PI;
+    orbit.pitch = 0.18;
+    orbit.targetDistance = 10;
+    camBlendPos.copy(camLastPos); camBlendQ.copy(camLastQ); camBlend = 0;
+  }
+  hadCine = !!cine;
+  if (camBlend < 1) {
+    camBlend = Math.min(1, camBlend + dt / 1.1);
+    const k = THREE.MathUtils.smootherstep(camBlend, 0, 1);
+    camera.position.lerpVectors(camBlendPos, camera.position, k);
+    camera.quaternion.slerpQuaternions(camBlendQ, camera.quaternion, k);
+    camera.updateMatrixWorld();
+  }
   const vc = beacons.viewCam();
   if (vc) {
     camera.position.copy(vc.pos);

@@ -40,9 +40,11 @@ const LOCK_REACH = 5.5;
 /** Where you stand to strike it (m from the lock, horizontally): a swing steps you in. */
 const LOCK_STAND = 1.5;
 /** The spirit's sequence (s after the lock breaks): out, happy, the climb, into the head. */
-const T_OUT = 0.45, T_LOOK = 1.05, T_HAPPY = 1.9, T_TURN = 3.8, T_REACH = 4.7;
-/** The climb: arms stretching up to the capstone, a tug on the grip, hauling up (s). */
-const ARMS_UP = 1.0, ARMS_HOLD = 0.35, HAUL = 2.6;
+const T_OUT = 0.7, T_LOOK = 1.3, T_HAPPY = 2.1, T_TURN = 4.0, T_REACH = 5.4;
+/** The climb: arms stretching up to the capstone, a tug on the grip, hauling up, over the lip, a look up, to the eyehole, in, and a beat after (s). */
+const ARMS_UP = 1.4, ARMS_HOLD = 0.4, HAUL = 4.2, OVER = 1.4, PEEK = 0.8, TO_EYE = 0.9, INTO = 0.9, AFTER = 2.2;
+/** Hanging arms reach this far at most (body units), and the spirit floats this high (m). */
+const ARM_HANG = 1.6, HOVER = 0.35;
 /** Tower rock collides within this distance of a tower's centre (m). */
 const SOLID_R = 90;
 /** Rock tops steeper than this (rise over run) aren't floor: you slide off. */
@@ -216,27 +218,46 @@ class Arm {
   private n0 = new THREE.Vector3();
   private b0 = new THREE.Vector3();
 
-  /** Shape the arm: a0 shoulder, a1/a2 controls, a3 wrist; `side` flips the thumb. */
-  set(a0: THREE.Vector3, a1: THREE.Vector3, a2: THREE.Vector3, a3: THREE.Vector3, r0: number, r1: number, handR: number, side: number, palm: THREE.Vector3) {
-    const S = Arm.SEG, R = Arm.RAD;
-    const bez = (u: number, out: THREE.Vector3) => {
-      const v = 1 - u;
-      return out.set(0, 0, 0).addScaledVector(a0, v * v * v).addScaledVector(a1, 3 * v * v * u).addScaledVector(a2, 3 * v * u * u).addScaledVector(a3, u * u * u);
-    };
-    const tan = (u: number, out: THREE.Vector3) => {
-      const v = 1 - u;
-      return out.set(0, 0, 0).addScaledVector(a1.clone().sub(a0), 3 * v * v).addScaledVector(a2.clone().sub(a1), 6 * v * u).addScaledVector(a3.clone().sub(a2), 3 * u * u).normalize();
-    };
+  private cs: THREE.Vector3[] = Array.from({ length: Arm.SEG + 1 }, () => new THREE.Vector3());
+  private cr = new THREE.CatmullRomCurve3([], false, 'centripetal');
+
+  /** Shape the arm along a cubic: a0 shoulder, a1/a2 controls, a3 wrist; `side` flips the thumb. */
+  set(a0: THREE.Vector3, a1: THREE.Vector3, a2: THREE.Vector3, a3: THREE.Vector3, r0: number, r1: number, handR: number, side: number, palm: THREE.Vector3, clear?: (p: THREE.Vector3, u: number) => void) {
+    const S = Arm.SEG;
+    for (let i = 0; i <= S; i++) {
+      const u = i / S, v = 1 - u;
+      this.cs[i].set(0, 0, 0).addScaledVector(a0, v * v * v).addScaledVector(a1, 3 * v * v * u).addScaledVector(a2, 3 * v * u * u).addScaledVector(a3, u * u * u);
+    }
+    this.build(r0, r1, handR, side, palm, clear);
+  }
+
+  /** Shape the arm through a list of points (shoulder first, wrist last). */
+  setPath(pts: THREE.Vector3[], r0: number, r1: number, handR: number, side: number, palm: THREE.Vector3, clear?: (p: THREE.Vector3, u: number) => void) {
+    this.cr.points = pts;
+    for (let i = 0; i <= Arm.SEG; i++) this.cr.getPoint(i / Arm.SEG, this.cs[i]);
+    this.build(r0, r1, handR, side, palm, clear);
+  }
+
+  /**
+   * The tube round the centre line in `cs`. `clear` moves any centre point
+   * that's in (or too near) rock back out, so the arm never passes through
+   * it; the frame is then taken from the corrected line.
+   */
+  private build(r0: number, r1: number, handR: number, side: number, palm: THREE.Vector3, clear?: (p: THREE.Vector3, u: number) => void) {
+    const S = Arm.SEG, R = Arm.RAD, cs = this.cs;
+    if (clear) for (let i = 1; i < S; i++) clear(cs[i], i / S);
+    const tan = (i: number, out: THREE.Vector3) => out.subVectors(cs[Math.min(S, i + 1)], cs[Math.max(0, i - 1)]).normalize();
     // A rotation-minimising frame down the curve, so the tube never twists.
     tan(0, this.t);
     this.n0.set(0, 1, 0);
     if (Math.abs(this.t.dot(this.n0)) > 0.9) this.n0.set(1, 0, 0);
-    this.n0.sub(this.t.clone().multiplyScalar(this.n0.dot(this.t))).normalize();
     for (let i = 0; i <= S; i++) {
       const u = i / S;
-      bez(u, this.p);
-      tan(u, this.t);
-      this.n0.sub(this.t.clone().multiplyScalar(this.n0.dot(this.t))).normalize();
+      this.p.copy(cs[i]);
+      tan(i, this.t);
+      this.n0.addScaledVector(this.t, -this.n0.dot(this.t));
+      if (this.n0.lengthSq() < 1e-8) this.n0.set(this.t.y, -this.t.x, 0);
+      this.n0.normalize();
       this.b0.crossVectors(this.t, this.n0);
       // Tapered, with a soft swell at the shoulder and the wrist.
       const r = THREE.MathUtils.lerp(r0, r1, u) * (1 + 0.18 * Math.exp(-u * 14) + 0.1 * Math.exp(-(1 - u) * 18));
@@ -252,8 +273,8 @@ class Arm {
     this.geo.attributes.position.needsUpdate = true;
     this.geo.attributes.normal.needsUpdate = true;
     // The mitten: a flattened ball at the wrist, its palm toward `palm`.
-    tan(1, this.t);
-    this.hand.position.copy(a3).addScaledVector(this.t, handR * 0.7);
+    tan(S, this.t);
+    this.hand.position.copy(cs[S]).addScaledVector(this.t, handR * 0.7);
     this.hand.scale.set(handR * 0.85, handR * 0.62, handR);
     this.hand.lookAt(this.hand.position.clone().add(this.t));
     const up = palm.clone().sub(this.hand.position).normalize();
@@ -264,8 +285,12 @@ class Arm {
 }
 
 
-/** The tower spirit's height scale (1 = a 1.1 m body). */
-const SPIRIT_SIZE = 1.8;
+/** The tower spirit's size: metres per unit of its 2-unit-tall body (so ~2.8 m tall, ~0.85 m wide). */
+const SPIRIT_SIZE = 1.4;
+/** Its body's height and radius in units. */
+const GHOST_H = 2.0, GHOST_R = 0.3;
+/** Glow colours: the same ember and core as a lit tower's eyes (HEAD_FRAG). */
+const EMBER = '#ff9a45', CORE = '#ffcf73';
 const IRON = '#5a4b52';
 const RUST = '#9a5d3e';
 
@@ -336,18 +361,18 @@ class Lock {
     this.pos.addScaledVector(fwd, 0.5 * s).setY(this.pos.y - 0.5 * s);
   }
 
-  hit() {
+  /** `side`: which way it flies off (1 = to the tower's right): away from the camera. */
+  hit(side = 1) {
     this.hits++;
     this.joltV += 5 + this.hits * 2;
-    if (this.hits >= LOCK_HP) this.break();
+    if (this.hits >= LOCK_HP) this.break(side);
   }
 
-  private break() {
+  private break(side: number) {
     this.broken = true;
     this.flyT = 0;
     const t = this.tower;
-    // Off to one side, clear of you.
-    const side = Math.random() < 0.5 ? -1 : 1;
+    // Off to one side, clear of you and away from the camera.
     this.flyV.set(Math.sin(t.yaw) * 2 + Math.cos(t.yaw) * side * 6, 8, Math.cos(t.yaw) * 2 - Math.sin(t.yaw) * side * 6);
     this.spin.set(Math.random() * 8 - 4, Math.random() * 8 - 4, Math.random() * 8 - 4);
   }
@@ -389,10 +414,11 @@ class Lock {
 }
 
 /**
- * A tower's spirit, out and about: a little glowing ghost (a round dome
- * over a skirt with a wavy hem, no legs, floating), the towers' tall dark
- * eyes, a smile, and two long stretchy arms that hang down to the ground.
- * It only exists outside the head while it's being freed.
+ * A tower's spirit, out and about: a tall, skinny glowing ghost (a rounded
+ * head over a long body with a softly waving hem, no legs, floating), the
+ * towers' tall dark eyes, a quiet smile, and two long stretchy arms that
+ * hang down to the ground. It only exists outside the head while it's being
+ * freed. `pos` is the bottom of its hem.
  */
 class TowerSpirit {
   readonly group = new THREE.Group();
@@ -405,25 +431,26 @@ class TowerSpirit {
   blink = 1;
   /** 0 = a small smile .. 1 = a big open grin. */
   grin = 0;
-  /** The glowing body, with the face painted in (see GHOST_FRAG). */
+  /** The glowing body, with the face painted in (see GHOST_FRAG). Emissive over 0.5 keeps its colour out of the grade. */
   readonly face = new THREE.ShaderMaterial({
     glslVersion: THREE.GLSL3, vertexShader: GHOST_VERT, fragmentShader: GHOST_FRAG, side: THREE.DoubleSide,
-    uniforms: { ...U, uIsProp: { value: 1 }, uColor: { value: new THREE.Color('#ffbd72') }, uInk: { value: new THREE.Color('#150e13') }, uEmissive: { value: 0.34 }, uBlink: { value: 1 }, uGrin: { value: 0 } },
+    uniforms: { ...U, uIsProp: { value: 1 }, uEmber: { value: new THREE.Color(EMBER) }, uCore: { value: new THREE.Color(CORE) }, uInk: { value: new THREE.Color('#150e13') }, uEmissive: { value: 0.62 }, uBlink: { value: 1 }, uGrin: { value: 0 } },
   });
   /** The arms: the same glow, no face. */
-  readonly mat = makeSolidMaterial('#ffbd72', 0.34, { doubleSide: true });
+  readonly mat = makeSolidMaterial('#ffae5c', 0.62, { doubleSide: true });
 
   constructor() {
-    // Dome, sides, a slight flare at the hem (unit height ~1.2).
-    const prof = [[0.64, 0.02], [0.6, 0.18], [0.57, 0.42], [0.55, 0.68], [0.48, 0.9], [0.34, 1.07], [0.17, 1.16], [0.001, 1.19]].map(([r, y]) => new THREE.Vector2(r, y));
-    const g = new THREE.LatheGeometry(prof, 40);
-    // The hem waves: seven soft scallops.
+    // A slim body that swells a touch at the hem, narrows a little at the
+    // shoulders and rounds over into the head.
+    const prof = [[0.33, 0.0], [0.31, 0.2], [0.29, 0.6], [0.275, 1.0], [0.27, 1.35], [0.275, 1.6], [0.25, 1.78], [0.19, 1.9], [0.1, 1.97], [0.001, 2.0]].map(([r, y]) => new THREE.Vector2(r, y));
+    const g = new THREE.LatheGeometry(prof, 36);
+    // The hem waves: five soft scallops.
     const p = g.attributes.position as THREE.BufferAttribute;
     for (let i = 0; i < p.count; i++) {
       const y = p.getY(i);
-      if (y > 0.3) continue;
+      if (y > 0.25) continue;
       const a = Math.atan2(p.getZ(i), p.getX(i));
-      p.setY(i, y + (0.3 - y) / 0.28 * 0.09 * Math.sin(a * 7));
+      p.setY(i, y + (0.25 - y) / 0.25 * 0.06 * Math.sin(a * 5));
     }
     g.computeVertexNormals();
     const shell = new THREE.Mesh(g, this.face);
@@ -433,15 +460,21 @@ class TowerSpirit {
     this.group.visible = false;
   }
 
+  /** Metres per body unit right now. */
+  get s() { return this.size * SPIRIT_SIZE; }
+  /** Its height (m). */
+  get height() { return GHOST_H * this.s * this.squash; }
+
   /** Where its shoulders are, in the world (side -1 left, 1 right). */
   shoulder(side: number, out: THREE.Vector3) {
-    const s = this.size * SPIRIT_SIZE;
+    const s = this.s;
     const c = Math.cos(this.yaw), sn = Math.sin(this.yaw);
-    return out.set(this.pos.x + c * side * 0.52 * s, this.pos.y + 0.6 * s * this.squash, this.pos.z - sn * side * 0.52 * s);
+    const w = GHOST_R * 0.95 * s / Math.sqrt(this.squash);
+    return out.set(this.pos.x + c * side * w, this.pos.y + 1.3 * s * this.squash, this.pos.z - sn * side * w);
   }
 
   place() {
-    const s = this.size * SPIRIT_SIZE;
+    const s = this.s;
     this.group.position.copy(this.pos);
     this.body.rotation.set(this.tilt, this.yaw, 0, 'YXZ');
     this.body.scale.set(s / Math.sqrt(this.squash), s * this.squash, s / Math.sqrt(this.squash));
@@ -450,7 +483,20 @@ class TowerSpirit {
   }
 }
 
-interface Freeing { tower: Tower; lock: Lock; t: number; spot: THREE.Vector3; grab: THREE.Vector3; lit: boolean; camYaw: number; cut?: boolean }
+/** Where the climb goes, worked out once when it starts (see planClimb). */
+interface ClimbPlan {
+  /** Across the face (m, to the tower's right) of the climb line, beside the doorway. */
+  lat: number;
+  /** Where it floats at the foot, and hangs at the top of the haul (hem positions). */
+  foot: THREE.Vector3; top: THREE.Vector3;
+  /** Its hands' grips on the capstone's top edge. */
+  grips: [THREE.Vector3, THREE.Vector3];
+  /** Up past the lip, then down onto the capstone in front of the head (hem positions). */
+  over: THREE.Vector3; land: THREE.Vector3;
+  /** The left eyehole: its centre on the head's surface and its outward axis. */
+  eye: THREE.Vector3; axis: THREE.Vector3;
+}
+interface Freeing { tower: Tower; lock: Lock; t: number; spot: THREE.Vector3; lit: boolean; camYaw: number; side: number; plan?: ClimbPlan }
 interface Slurp { tower: Tower; phase: 'reach' | 'pull' | 'rise' | 'view' | 'drop' | 'push'; t: number; from: THREE.Vector3; camFrom: THREE.Vector3 }
 interface Chunk { mesh: THREE.Mesh; vel: THREE.Vector3; spin: THREE.Vector3; rest: boolean; t: number }
 
@@ -604,31 +650,47 @@ export class Beacons {
   /** Debug: open the nearest sealed tower's lock at once (the spirit sequence plays). */
   debugBreak() {
     if (!this.lock) return;
-    while (!this.lock.broken) this.lock.hit();
+    while (!this.lock.broken) this.lock.hit(-this.freeSide());
     this.opened(this.lock);
   }
 
   // ------------------------------------------------------------ cameras
 
-  /** A shot the orbit camera should take instead of following the explorer, or null. */
-  cinematic(): { focus: THREE.Vector3; yaw: number; pitch: number; dist: number; cut: boolean } | null {
+  /**
+   * The camera while a spirit is freed (null otherwise): side on to you and
+   * the spirit with the doorway behind, then, as it turns to climb, a smooth
+   * pull back and round to the whole tower from the front, so the climb and
+   * the eyes lighting are seen face on. Always from the face side, well out
+   * from the rock.
+   */
+  cinematic(): { pos: THREE.Vector3; at: THREE.Vector3 } | null {
     const f = this.free;
     if (!f) return null;
-    const t = f.tower;
-    const b = this.d.body.pos;
-    // Side on, you and the spirit together with the doorway behind; then
-    // pull back in front of the tower and look up it as it climbs, and hold
-    // on the face as it lights.
-    const pair = this.spirit.pos.clone().add(b).multiplyScalar(0.5).setY(Math.max(this.spirit.pos.y, b.y) + 1.0);
-    if (f.t < T_REACH) return { focus: pair, yaw: f.camYaw, pitch: 0.12, dist: 11, cut: false };
-    // A cut (a glide back would pass through the rock) to the whole tower
-    // from the front, as its arms fling up.
+    const t = f.tower, sp = this.spirit, b = this.d.body.pos;
+    const u = f.t;
+    const dir = (yaw: number, pitch: number) => new THREE.Vector3(Math.sin(yaw) * Math.cos(pitch), Math.sin(pitch), Math.cos(yaw) * Math.cos(pitch));
+    const pair = new THREE.Vector3((sp.pos.x + b.x) / 2, Math.max(sp.pos.y + sp.height * 0.5, b.y + 1.2), (sp.pos.z + b.z) / 2);
+    if (u < T_OUT) pair.set(b.x, b.y + 1.4, b.z).lerp(new THREE.Vector3(t.door.x, t.door.y, t.door.z), 0.25);
     const h = t.head;
-    const tall = h.y - t.door.ground.y;
-    const mid = new THREE.Vector3(h.x, h.y - tall * 0.42, h.z);
-    const cut = !f.cut;
-    f.cut = true;
-    return { focus: mid, yaw: t.yaw + (f.camYaw - t.yaw) * 0.45, pitch: 0.05, dist: tall * 1.25 + 12, cut };
+    const tall = h.y + h.sy - t.door.ground.y;
+    const mid = new THREE.Vector3(h.x, t.door.ground.y + tall * 0.52, h.z);
+    const yawB = t.yaw + f.side * 0.4;
+    const distB = tall * 1.2 + 16;
+    const k = THREE.MathUtils.smootherstep(u, T_TURN + 0.5, T_REACH + 1.2);
+    const at = pair.clone().lerp(mid, k);
+    const yaw = THREE.MathUtils.lerp(f.camYaw, yawB, k);
+    const pitch = THREE.MathUtils.lerp(0.14, 0.05, k);
+    // The distance leads the focus, so the camera backs away before the
+    // focus moves in over the rock.
+    let dist = THREE.MathUtils.lerp(12, distB, Math.pow(k, 0.55));
+    // As it nears the top, closer in on the head for the slip into the eye.
+    const top = T_REACH + ARMS_UP + ARMS_HOLD;
+    const k2 = THREE.MathUtils.smootherstep(u, top + HAUL * 0.5, top + HAUL + OVER);
+    if (f.plan && k2 > 0) {
+      at.lerp(f.plan.eye.clone().setY(f.plan.eye.y - 3), k2 * 0.7);
+      dist *= 1 - 0.4 * k2;
+    }
+    return { pos: at.clone().addScaledVector(dir(yaw, pitch), dist), at };
   }
 
   /** While you're the head (or rising into it / dropping out), where the camera is and looks. */
@@ -727,7 +789,7 @@ export class Beacons {
       b.vel.z = ((p.z - b.pos.z) / dl) * sp;
     }
     if (this.swingT >= HIT_AT && this.swingT - dt < HIT_AT && !this.lock.broken) {
-      this.lock.hit();
+      this.lock.hit(-this.freeSide());
       this.d.sfx.smash();
       this.sparks.emit(p, 6, 0.08, 3, undefined, { life: 0.45, rise: -6, drag: 1.5, up: 2.5 });
       if (this.lock.broken) this.opened(this.lock);
@@ -743,14 +805,15 @@ export class Beacons {
     // It'll pop out and land between the door and you.
     // The camera watches from off to one side of the doorway; the spirit
     // lands beside you, side by side in that shot.
-    const side = Math.sin(this.time * 7.3) > 0 ? 1 : -1;
+    const side = this.freeSide();
     const camYaw = t.yaw + side * 0.95;
     const perp = new THREE.Vector3(Math.cos(camYaw), 0, -Math.sin(camYaw));
     const spot = b.pos.clone().addScaledVector(perp, -side * 3.4).addScaledVector(fwd, 1.5);
     spot.y = this.d.gen.height(spot.x, spot.z);
-    const s = t.slab;
-    const grab = new THREE.Vector3(s.x, s.y + s.sy * 0.55, s.z).addScaledVector(fwd, s.sx * 0.85);
-    this.free = { tower: t, lock, t: 0, spot, grab, lit: false, camYaw };
+    // Keep the landing spot off the rock.
+    for (let i = 0; i < 30 && this.solidAt(spot.clone().setY(spot.y + 1)); i++) spot.addScaledVector(fwd, 0.5);
+    spot.y = this.floorUnder(spot.x, spot.z, spot.y + 2);
+    this.free = { tower: t, lock, t: 0, spot, lit: false, camYaw, side };
     this.lit.add(t.id); // saved now: it's open and its spirit is out
     this.save();
     this.d.sfx.thud();
@@ -769,6 +832,9 @@ export class Beacons {
       this.group.add(mesh);
     }
   }
+
+  /** Which side of the doorway the freeing's camera watches from (fixed per tower, so the lock flies the other way). */
+  private freeSide() { return this.lock && this.lock.tower.id % 2 ? 1 : -1; }
 
   private updateRubble(dt: number) {
     this.rubble = this.rubble.filter((c) => { if (c.t > 9) { this.group.remove(c.mesh); return false; } return true; });
@@ -794,31 +860,90 @@ export class Beacons {
 
   // ------------------------------------------------------------ freeing the spirit
 
+  /** The floor under a point: the ground or an open rock top, whichever is higher (below `fromY`). */
+  private floorUnder(x: number, z: number, fromY: number): number {
+    return Math.max(this.d.gen.height(x, z), this.surface(x, z, fromY));
+  }
+
   /**
-   * How far the stack reaches out along the face direction at height y,
-   * measured from the tower's centre: the widest boulder at that height.
-   * The spirit climbs just outside this line, so it never passes through rock.
+   * How far out along the tower's face (from its centre line, `lat` m to its
+   * right) the rock reaches at height y. -Infinity if there's none.
    */
-  private frontAt(t: Tower, y: number): number {
+  private faceAt(t: Tower, y: number, lat: number): number {
     const fx = Math.sin(t.yaw), fz = Math.cos(t.yaw);
-    let out = 0;
-    const all = [...t.boulders.slice(0, t.boulders.indexOf(t.slab) + 1), t.head];
-    for (const b of all) {
-      const k = (y - b.y) / b.sy;
-      if (k < -0.55 || k > 1) continue;
-      const w = b.sx * Math.sqrt(Math.max(0, 1 - k * k)) * 1.04;
-      out = Math.max(out, (b.x - t.x) * fx + (b.z - t.z) * fz + w);
+    const bx = t.x + fz * lat, bz = t.z - fx * lat;
+    const p = this.tmpP;
+    let d = 45;
+    for (; d > -30; d -= 0.6) if (this.solidAt(p.set(bx + fx * d, y, bz + fz * d))) break;
+    if (d <= -30) return -Infinity;
+    let a = d, b = d + 0.6;
+    for (let i = 0; i < 6; i++) {
+      const m = (a + b) / 2;
+      if (this.solidAt(p.set(bx + fx * m, y, bz + fz * m))) a = m; else b = m;
     }
+    return b;
+  }
+  private tmpP = new THREE.Vector3();
+
+  /** The furthest the rock reaches out over a body spanning heights y0..y1 and lat ± halfW. */
+  private faceClear(t: Tower, y0: number, y1: number, lat: number, halfW: number): number {
+    let out = -Infinity;
+    for (let y = y0; y <= y1 + 1e-3; y += Math.max(0.4, (y1 - y0) / 7)) for (const l of [-halfW, 0, halfW]) out = Math.max(out, this.faceAt(t, y, lat + l));
     return out;
   }
 
-  /** The ledges it climbs: the upper shoulder of each boulder up the front, then the capstone's lip. */
-  private ledges(t: Tower): number[] {
-    const top = t.boulders.indexOf(t.slab);
-    const ys: number[] = [];
-    for (let k = 1; k < top; k++) ys.push(t.boulders[k].y + t.boulders[k].sy * 0.72);
-    ys.push(t.slab.y + t.slab.sy * 0.55);
-    return ys;
+  /** A point out from the face: `d` along the face direction, `lat` across, at height y. */
+  private facePoint(t: Tower, d: number, lat: number, y: number, out = new THREE.Vector3()) {
+    const fx = Math.sin(t.yaw), fz = Math.cos(t.yaw);
+    return out.set(t.x + fz * lat + fx * d, y, t.z - fx * lat + fz * d);
+  }
+
+  /** Work out the climb once: beside the doorway, up the face, over the capstone's lip, into the left eye. */
+  private planClimb(t: Tower, side: number): ClimbPlan {
+    const S = SPIRIT_SIZE, bodyH = GHOST_H * S, halfW = GHOST_R * S + 0.15;
+    const door = t.boulders[1];
+    const lat = side * (0.3 * door.sx + 2.4);
+    // The foot of the climb.
+    const g0 = this.floorUnder(this.facePoint(t, door.sx + 4, lat, 0).x, this.facePoint(t, door.sx + 4, lat, 0).z, t.door.ground.y + 6);
+    const fd = this.faceClear(t, g0 + HOVER, g0 + HOVER + bodyH, lat, halfW) + halfW + 0.45;
+    const foot = this.facePoint(t, fd, lat, 0);
+    foot.y = this.floorUnder(foot.x, foot.z, g0 + 3) + HOVER;
+    // The grips: over the capstone's top edge, either side of the climb line.
+    const slabRock = this.rocks.of(t)[t.boulders.indexOf(t.slab)];
+    const grip = (l: number) => {
+      let d = 0, last = -1;
+      const p = new THREE.Vector3();
+      for (; d < t.slab.sx * 2; d += 0.25) {
+        this.facePoint(t, d, l, 0, p);
+        if (span(slabRock, p.x, p.z)) last = d;
+      }
+      const gd = Math.max(0, last - 0.7);
+      this.facePoint(t, gd, l, 0, p);
+      span(slabRock, p.x, p.z);
+      p.y = SPAN.top + 0.12;
+      return p;
+    };
+    const grips: [THREE.Vector3, THREE.Vector3] = [grip(lat - 0.6), grip(lat + 0.6)];
+    const lipY = Math.max(grips[0].y, grips[1].y);
+    // Hanging at the top of the haul: its hands a short reach above its shoulders.
+    const y1 = Math.max(foot.y + 1, lipY - bodyH * 0.95);
+    const td = this.faceClear(t, y1, y1 + bodyH, lat, halfW) + halfW + 0.45;
+    const top = this.facePoint(t, td, lat, y1);
+    // Up past the lip, then in onto the capstone, in front of the left eye.
+    const over = top.clone().setY(lipY + 0.5);
+    const h = t.head;
+    const e = new THREE.Vector3(-0.27, 0.12, 0.955).normalize();
+    const fx = Math.sin(t.yaw), fz = Math.cos(t.yaw);
+    const right = new THREE.Vector3(fz, 0, -fx), fwd = new THREE.Vector3(fx, 0, fz);
+    const eye = new THREE.Vector3(h.x, h.y, h.z).addScaledVector(right, e.x * h.sx).addScaledVector(fwd, e.z * h.sx).add(new THREE.Vector3(0, e.y * h.sy, 0));
+    const axis = right.clone().multiplyScalar(e.x / h.sx).addScaledVector(fwd, e.z / h.sx).add(new THREE.Vector3(0, e.y / h.sy, 0)).normalize();
+    const eyeLat = (eye.x - t.x) * fz - (eye.z - t.z) * fx;
+    const headFront = this.faceAt(t, eye.y, eyeLat);
+    const slabFront = this.faceAt(t, lipY - 0.3, eyeLat);
+    const ld = Math.min(headFront + halfW + 1.3, slabFront - halfW - 0.3);
+    const land = this.facePoint(t, ld, eyeLat, 0);
+    land.y = this.floorUnder(land.x, land.z, lipY + 3) + HOVER;
+    return { lat, foot, top, grips, over, land, eye, axis };
   }
 
   private updateFreeing(dt: number) {
@@ -827,7 +952,6 @@ export class Beacons {
     const t = f.tower, sp = this.spirit, b = this.d.body;
     f.lock.update(dt, (x, z) => this.d.gen.height(x, z));
     const fwd = new THREE.Vector3(Math.sin(t.yaw), 0, Math.cos(t.yaw));
-    const right = new THREE.Vector3(fwd.z, 0, -fwd.x);
     const door = new THREE.Vector3(t.door.x, t.door.y, t.door.z);
     const u = f.t;
     // Watch it: the explorer turns to follow.
@@ -837,20 +961,18 @@ export class Beacons {
     if (u > 0.3) b.heading += dh * (1 - Math.exp(-5 * dt));
     b.vel.set(0, b.vel.y, 0);
 
-    const S = SPIRIT_SIZE;
-    const ledges = this.ledges(t);
-    const lipY = ledges[ledges.length - 1];
-    const reachEnd = T_REACH + ARMS_UP, holdEnd = reachEnd + ARMS_HOLD, climbEnd = holdEnd + HAUL;
-    const overEnd = climbEnd + 0.7, peekEnd = overEnd + 0.5, inEnd = peekEnd + 0.65, end = inEnd + 1.8;
-    let climbing = false;
-    // Along the front meridian, just clear of the rock at height y.
-    const outside = (y: number, gap: number) => new THREE.Vector3(t.x, y, t.z).addScaledVector(fwd, this.frontAt(t, y) + gap);
-    const hover = (p: THREE.Vector3) => { p.y = this.d.gen.height(p.x, p.z) + 0.35 + Math.sin(this.time * 2.6) * 0.12; return p; };
+    const P = f.plan ??= this.planClimb(t, f.side);
+    const reachEnd = T_REACH + ARMS_UP, holdEnd = reachEnd + ARMS_HOLD, haulEnd = holdEnd + HAUL, overEnd = haulEnd + OVER;
+    const peekEnd = overEnd + PEEK, eyeEnd = peekEnd + TO_EYE, inEnd = eyeEnd + INTO, end = inEnd + AFTER;
+    const bob = () => Math.sin(this.time * 2.6) * 0.1;
+    const hover = (p: THREE.Vector3) => { p.y = this.floorUnder(p.x, p.z, p.y + 2) + HOVER + bob(); return p; };
 
-    let armUp = 0; // 0 = hanging to the ground .. 1 = flung up (happy)
-    let hands: [THREE.Vector3, THREE.Vector3] | null = null; // hands on something
-    let handsK = 1;
-    sp.group.visible = u > 0.25 && u < inEnd;
+    let armUp = 0; // 0 = hanging .. 1 = flung up (happy)
+    let dive = 0; // 0 .. 1 = reaching ahead into the eyehole
+    let hands: [THREE.Vector3, THREE.Vector3] | null = null; // hands on the rock
+    let handsK = 0;
+    let climbing = false;
+    sp.group.visible = u > 0.2 && u < inEnd;
     sp.blink = 1;
     sp.tilt = 0;
     sp.squash = 1;
@@ -858,127 +980,142 @@ export class Beacons {
     sp.grin = 0;
     const toMe = Math.atan2(b.pos.x - sp.pos.x, b.pos.z - sp.pos.z);
     const toTower = t.yaw + Math.PI;
+    const turnTo = (a: number, to: number, k: number) => a + Math.atan2(Math.sin(to - a), Math.cos(to - a)) * k;
     if (u < T_OUT) {
-      // Swoops out of the doorway.
-      const k = THREE.MathUtils.clamp((u - 0.25) / (T_OUT - 0.25), 0, 1);
-      const land = hover(f.spot.clone());
-      sp.pos.lerpVectors(door.clone().addScaledVector(fwd, -1), land, k);
-      sp.pos.y += Math.sin(k * Math.PI) * 2.2;
-      sp.size = 0.4 + 0.6 * k;
+      // Out of the doorway, up over your head and down beside you.
+      const k = THREE.MathUtils.smootherstep(u, 0.2, T_OUT);
+      const p0 = door.clone().addScaledVector(fwd, -2);
+      p0.y = t.door.ground.y + HOVER;
+      const p1 = new THREE.Vector3(t.door.ground.x, t.door.ground.y + 3.4, t.door.ground.z).addScaledVector(fwd, 1.5);
+      const p2 = hover(f.spot.clone());
+      const v = 1 - k;
+      sp.pos.set(0, 0, 0).addScaledVector(p0, v * v).addScaledVector(p1, 2 * v * k).addScaledVector(p2, k * k);
+      sp.size = 0.55 + 0.45 * k;
       sp.yaw = t.yaw;
-      sp.tilt = (1 - k) * 1.2;
+      sp.tilt = (1 - k) * 0.9;
+      sp.squash = 1 + 0.25 * Math.sin(k * Math.PI);
     } else if (u < T_LOOK) {
-      // Settles, blinks.
+      // Lands, squashes, settles.
       const k = (u - T_OUT) / (T_LOOK - T_OUT);
       hover(sp.pos.copy(f.spot));
-      sp.squash = 1 - 0.3 * Math.sin(Math.min(1, k * 2) * Math.PI) * (1 - k);
+      sp.squash = 1 - 0.22 * Math.sin(Math.min(1, k * 2) * Math.PI) * (1 - k);
       sp.yaw = t.yaw;
       if (u - dt < T_OUT) { this.dust.emit(f.spot, 6, 0.35, 1.5); this.d.sfx.thud(); }
     } else if (u < T_HAPPY) {
       // Looks about, finds you. A slow blink.
       const k = (u - T_LOOK) / (T_HAPPY - T_LOOK);
       hover(sp.pos.copy(f.spot));
-      sp.yaw = THREE.MathUtils.lerp(t.yaw + Math.sin(k * 7) * 0.7 * (1 - k), toMe, THREE.MathUtils.smoothstep(k, 0.4, 1));
+      sp.yaw = THREE.MathUtils.lerp(t.yaw + Math.sin(k * 7) * 0.6 * (1 - k), turnTo(t.yaw, toMe, 1), THREE.MathUtils.smoothstep(k, 0.4, 1));
       sp.blink = Math.abs(k - 0.45) < 0.05 ? 0 : 1;
       sp.grin = THREE.MathUtils.smoothstep(k, 0.6, 1);
     } else if (u < T_TURN) {
       // Happy: two bouncy floats with its arms flung up, a little wiggle.
       const k = (u - T_HAPPY) / (T_TURN - T_HAPPY);
-      const hop = Math.abs(Math.sin(k * Math.PI * 2.5));
+      const hop = Math.abs(Math.sin(k * Math.PI * 2));
       hover(sp.pos.copy(f.spot));
-      sp.pos.y += hop * 0.9;
-      sp.squash = 1 + (hop - 0.5) * 0.18;
+      sp.pos.y += hop * 0.8;
+      sp.squash = 1 + (hop - 0.5) * 0.12;
       // Toward you and the camera both, so its face shows.
       let dc = f.camYaw - toMe;
       dc = Math.atan2(Math.sin(dc), Math.cos(dc));
-      sp.yaw = toMe + dc * 0.6 + Math.sin(u * 9) * 0.15;
+      sp.yaw = toMe + dc * 0.6 + Math.sin(u * 9) * 0.12;
       sp.grin = 1;
-      armUp = THREE.MathUtils.smoothstep(k, 0, 0.12) * (1 - THREE.MathUtils.smoothstep(k, 0.85, 1));
+      armUp = THREE.MathUtils.smoothstep(k, 0, 0.12) * (1 - THREE.MathUtils.smoothstep(k, 0.82, 1));
       if (u - dt < T_HAPPY) this.d.sfx.chirp(true);
-      if (u - dt < T_HAPPY + 0.75 && u >= T_HAPPY + 0.75) this.d.sfx.chirp(true);
-      if (Math.random() < dt * 10) this.sparks.emit(sp.pos.clone().setY(sp.pos.y + 1.5 * S), 1, 0.06, 1.2);
+      if (u - dt < T_HAPPY + 0.95 && u >= T_HAPPY + 0.95) this.d.sfx.chirp(true);
+      if (Math.random() < dt * 10) this.sparks.emit(sp.pos.clone().setY(sp.pos.y + sp.height), 1, 0.06, 1.2);
     } else if (u < T_REACH) {
-      // Floats to the foot of the tower's face and looks all the way up.
+      // Floats round to the foot of the climb, beside the doorway, turning to
+      // the tower, and looks all the way up.
       const k = (u - T_TURN) / (T_REACH - T_TURN);
-      const foot = hover(outside(t.door.ground.y + 1, 1.2));
-      sp.pos.lerpVectors(f.spot, foot, THREE.MathUtils.smoothstep(k, 0, 0.7));
+      sp.pos.lerpVectors(f.spot, P.foot, THREE.MathUtils.smootherstep(k, 0, 0.75));
       hover(sp.pos);
-      let dy = toTower - toMe;
-      dy = Math.atan2(Math.sin(dy), Math.cos(dy));
-      sp.yaw = toMe + dy * THREE.MathUtils.smoothstep(k, 0, 0.5);
-      sp.tilt = -0.5 * THREE.MathUtils.smoothstep(k, 0.4, 0.9);
-      sp.squash = 1 - 0.25 * THREE.MathUtils.smoothstep(k, 0.6, 1);
+      sp.yaw = turnTo(toMe, toTower, THREE.MathUtils.smoothstep(k, 0.1, 0.6));
+      sp.tilt = -0.35 * THREE.MathUtils.smoothstep(k, 0.5, 0.9);
       sp.grin = 1 - k;
-    } else if (u < climbEnd) {
-      // Both very long arms stretch all the way up the face of the tower to
-      // the capstone's lip and grab it; then it hauls itself up, slowly, in
-      // heaves, hanging just outside the rock the whole way.
+    } else if (u < haulEnd) {
+      // Both long arms stretch up the face to the capstone's lip and grab
+      // it; a tug; then it hauls itself up, slowly, in heaves, hanging just
+      // clear of the rock.
       climbing = true;
-      const y0 = t.door.ground.y + 1.2;
-      const y1 = lipY - 1.5 * S;
-      const gap = 1.1 * S * 0.6 + 0.4;
       sp.yaw = toTower;
-      sp.tilt = -0.3;
+      sp.tilt = -0.2;
       let reachK = 1, haul = 0;
       if (u < reachEnd) {
         const k = (u - T_REACH) / ARMS_UP;
-        reachK = 1 - Math.pow(1 - k, 2.2);
-        sp.squash = 1 - 0.2 * Math.sin(k * Math.PI);
+        reachK = THREE.MathUtils.smootherstep(k, 0, 1);
+        sp.squash = 1 - 0.12 * Math.sin(k * Math.PI);
+        sp.tilt = -0.35 + 0.15 * k;
         if (u - dt < T_REACH) this.d.sfx.whoosh();
       } else if (u < holdEnd) {
-        // A tug to test the grip.
         const k = (u - reachEnd) / ARMS_HOLD;
-        sp.squash = 1 - 0.15 * Math.sin(k * Math.PI);
-        if (u - dt < reachEnd) { this.d.sfx.thud(); this.sparks.emit(outside(lipY, 0.2), 5, 0.08, 1.4); }
+        sp.squash = 1 - 0.12 * Math.sin(k * Math.PI);
+        if (u - dt < reachEnd) { this.d.sfx.thud(); for (const g of P.grips) this.sparks.emit(g, 3, 0.07, 1.2); }
       } else {
-        // Three heaves: quick pulls with a pause between.
+        // Three heaves: a slow pull, then a breath.
         const k = (u - holdEnd) / HAUL;
         const n = 3;
         const i = Math.min(n - 1, Math.floor(k * n));
         const kk = k * n - i;
-        haul = (i + THREE.MathUtils.smootherstep(kk, 0.05, 0.75)) / n;
-        sp.squash = 1 + 0.3 * Math.sin(THREE.MathUtils.smoothstep(kk, 0.05, 0.75) * Math.PI);
+        haul = (i + THREE.MathUtils.smootherstep(kk, 0.05, 0.8)) / n;
+        sp.squash = 1 + 0.12 * Math.sin(THREE.MathUtils.smoothstep(kk, 0.05, 0.8) * Math.PI);
         if (kk - (dt * n) / HAUL < 0.05 && kk >= 0.05) this.d.sfx.whoosh();
-        if (Math.random() < dt * 14) this.sparks.emit(sp.pos.clone().setY(sp.pos.y + 0.6 * S), 1, 0.06, 0.5);
+        if (Math.random() < dt * 8) this.sparks.emit(sp.pos.clone().setY(sp.pos.y + sp.height * 0.6), 1, 0.06, 0.5);
       }
-      sp.pos.copy(outside(THREE.MathUtils.lerp(y0, y1, haul), gap));
-      // The hands climb the face ahead of it (never through it) up to the lip.
-      const hy = THREE.MathUtils.lerp(sp.pos.y + 0.6 * S, lipY, reachK);
-      const hp = outside(hy, 0.2);
-      hands = [hp.clone().addScaledVector(right, -0.8 * S), hp.clone().addScaledVector(right, 0.8 * S)];
-      handsK = 1;
+      if (haul <= 0) sp.pos.copy(P.foot).setY(P.foot.y + bob() * (1 - reachK));
+      else {
+        // Up the face, the body held just clear of the rock at every height.
+        const y = THREE.MathUtils.lerp(P.foot.y, P.top.y, haul);
+        const halfW = GHOST_R * SPIRIT_SIZE + 0.15;
+        const d = Math.max(this.faceClear(t, y, y + GHOST_H * SPIRIT_SIZE, P.lat, halfW) + halfW + 0.45, 0);
+        this.facePoint(t, d, P.lat, y, sp.pos);
+      }
+      hands = P.grips;
+      handsK = reachK;
     } else if (u < overEnd) {
-      // Over the lip and up onto the capstone, in front of the head.
-      const k = THREE.MathUtils.smootherstep(u, climbEnd, overEnd);
-      const from = outside(lipY - 1.5 * S, 1.1 * S * 0.6 + 0.4);
-      const s0 = t.slab;
-      const onTop = new THREE.Vector3(s0.x, s0.y + s0.sy * 0.95, s0.z).addScaledVector(fwd, s0.sx * 0.45);
-      sp.pos.lerpVectors(from, onTop, k);
-      sp.pos.y += Math.sin(k * Math.PI) * 1.5;
+      // Up past the lip, then in and down onto the capstone.
+      const k = (u - haulEnd) / OVER;
+      const a = THREE.MathUtils.smootherstep(k, 0, 0.5), c = THREE.MathUtils.smootherstep(k, 0.45, 1);
+      sp.pos.lerpVectors(P.top, P.over, a);
+      if (c > 0) {
+        sp.pos.lerpVectors(P.over, P.land, c);
+        sp.pos.y = THREE.MathUtils.lerp(P.over.y, P.land.y, c) + Math.sin(c * Math.PI) * 0.9;
+      }
       sp.yaw = toTower;
-      sp.tilt = -0.3 * (1 - k);
-      const lp = outside(lipY, 0.2);
-      hands = [lp.clone().addScaledVector(right, -0.8 * S), lp.clone().addScaledVector(right, 0.8 * S)];
-      handsK = 1 - THREE.MathUtils.smoothstep(k, 0.5, 1);
+      sp.tilt = -0.2 * (1 - k);
+      sp.squash = 1 + 0.18 * Math.sin(a * Math.PI) - 0.15 * Math.sin(c * Math.PI);
+      hands = P.grips;
+      // Let go once it's up, before it moves in over the top.
+      handsK = 1 - THREE.MathUtils.smoothstep(k, 0.25, 0.5);
+      climbing = handsK > 0;
+      if (u - dt < haulEnd + OVER * 0.95 && u >= haulEnd + OVER * 0.95) this.dust.emit(P.land, 4, 0.3, 1.2);
     } else if (u < peekEnd) {
       // A look up at its new home.
-      const s0 = t.slab;
-      sp.pos.set(s0.x, s0.y + s0.sy * 0.95, s0.z).addScaledVector(fwd, s0.sx * 0.45);
-      sp.pos.y += Math.sin(((u - overEnd) / (peekEnd - overEnd)) * Math.PI) * 0.4;
+      const k = (u - overEnd) / PEEK;
+      sp.pos.copy(P.land).setY(P.land.y + bob() * k);
       sp.yaw = toTower;
-      sp.tilt = -0.45;
+      sp.tilt = -0.4 * Math.sin(k * Math.PI * 0.5);
+      sp.grin = 1;
+    } else if (u < eyeEnd) {
+      // Rises to the eyehole, reaching into it.
+      const k = THREE.MathUtils.smootherstep(u, peekEnd, eyeEnd);
+      sp.size = 1 - 0.18 * k;
+      const hc = GHOST_H * SPIRIT_SIZE * sp.size * 0.5;
+      const at = P.eye.clone().addScaledVector(P.axis, GHOST_R * SPIRIT_SIZE + 0.9).setY(P.eye.y - hc);
+      sp.pos.lerpVectors(P.land, at, k);
+      sp.yaw = toTower;
+      sp.tilt = -0.4 * (1 - k);
+      dive = k;
       sp.grin = 1;
     } else if (u < inEnd) {
-      // Squeezes in through an eyehole.
-      const k = (u - peekEnd) / (inEnd - peekEnd);
-      const h = t.head, s0 = t.slab;
-      const from = new THREE.Vector3(s0.x, s0.y + s0.sy * 0.95, s0.z).addScaledVector(fwd, s0.sx * 0.45);
-      const eye = new THREE.Vector3(h.x, h.y + h.sy * 0.12, h.z).addScaledVector(fwd, h.sx * 0.92).addScaledVector(right, -0.27 * h.sx);
-      sp.pos.lerpVectors(from, eye, k);
-      sp.pos.y += Math.sin(k * Math.PI) * 1.2 - k * 0.6 * S;
-      sp.size = 1 - 0.85 * k;
-      sp.squash = 1 + 0.6 * k;
+      // Slips in, shrinking, into the hollow.
+      const k = THREE.MathUtils.smootherstep(u, eyeEnd, inEnd);
+      sp.size = 0.82 - 0.4 * k;
+      const hc = GHOST_H * SPIRIT_SIZE * sp.size * 0.5;
+      sp.pos.copy(P.eye).addScaledVector(P.axis, THREE.MathUtils.lerp(GHOST_R * SPIRIT_SIZE + 0.9, -2.6, k)).setY(P.eye.y - hc - 0.25 * k);
       sp.yaw = toTower;
+      sp.tilt = 0.25 * k;
+      dive = 1;
     } else if (!f.lit) {
       // The head blazes on.
       f.lit = true;
@@ -989,37 +1126,20 @@ export class Beacons {
       this.d.sfx.whoosh();
       this.d.sfx.chirp(true);
     }
-    sp.place();
-    // Arms: long enough to hang to the ground, flung up for joy, or up the tower.
-    if (sp.group.visible) {
-      const s = sp.size * S;
-      for (let k = 0; k < 2; k++) {
-        const side = k === 0 ? -1 : 1;
-        const sh = sp.shoulder(side, new THREE.Vector3());
-        const c = Math.cos(sp.yaw), sn = Math.sin(sp.yaw);
-        const outward = new THREE.Vector3(c * side, 0, -sn * side);
-        const ahead = new THREE.Vector3(Math.sin(sp.yaw), 0, Math.cos(sp.yaw));
-        // Hanging: down to just off the ground, swaying.
-        const g = this.d.gen.height(sh.x, sh.z);
-        const sway = Math.sin(this.time * 2.2 + k * 1.7) * 0.15 * s;
-        const down = sh.clone().addScaledVector(outward, 0.3 * s).addScaledVector(ahead, 0.1 * s + sway);
-        down.y = Math.min(sh.y - 0.2 * s, g + 0.12 * sp.size);
-        const up = sh.clone().addScaledVector(outward, (1.2 + 0.2 * Math.sin(this.time * 11 + k * 2)) * s).add(new THREE.Vector3(0, (1.4 + 0.25 * Math.sin(this.time * 14 + k * 2)) * s, 0));
-        let hand = down.lerp(up, armUp);
-        if (hands) hand = hand.lerp(hands[k], handsK);
-        const len = sh.distanceTo(hand);
-        let a1 = sh.clone().addScaledVector(outward, Math.min(len * 0.2, 0.8 * s));
-        let a2 = hand.clone().addScaledVector(hand.y < sh.y ? outward : ahead, Math.min(len * 0.12, 0.6 * s)).add(new THREE.Vector3(0, hand.y < sh.y ? Math.min(len * 0.15, 0.5 * s) : -Math.min(len * 0.15, 3), 0));
-        if (climbing) {
-          // Up the tower's face: the curve's controls sit well out from the
-          // rock at their heights, so the long arm bows round the bulges.
-          a1 = outside(THREE.MathUtils.lerp(sh.y, hand.y, 0.33), 1.8).addScaledVector(right, side * 1.0 * S);
-          a2 = outside(THREE.MathUtils.lerp(sh.y, hand.y, 0.72), 1.4).addScaledVector(right, side * 0.9 * S);
-        }
-        const thin = THREE.MathUtils.clamp(1.2 - len / 90, 0.7, 1);
-        this.arms[k].set(sh, a1, a2, hand, 0.1 * s * thin, 0.075 * s * thin, 0.15 * s, -side, hand.clone().add(new THREE.Vector3(0, 1, 0)));
+    // On the ground it never floats through you: it keeps a step away.
+    if (u < T_REACH && sp.group.visible) {
+      const dx = sp.pos.x - b.pos.x, dz = sp.pos.z - b.pos.z;
+      const dd = Math.hypot(dx, dz);
+      const min = GHOST_R * sp.s + 0.9;
+      if (dd < min && sp.pos.y < b.pos.y + 1.8) {
+        const k = min / Math.max(dd, 1e-3);
+        sp.pos.x = b.pos.x + (dd > 1e-3 ? dx : 1) * k;
+        sp.pos.z = b.pos.z + (dd > 1e-3 ? dz : 0) * k;
       }
-    } else if (!this.slurp) this.arms[0].group.visible = this.arms[1].group.visible = false;
+    }
+    sp.place();
+    if (sp.group.visible) this.poseArms(t, fwd, armUp, dive, hands, handsK, climbing, P);
+    else if (!this.slurp) this.arms[0].group.visible = this.arms[1].group.visible = false;
     if (u >= end) {
       this.free = null;
       // You're standing at its door: step away before it'll take you in.
@@ -1027,6 +1147,69 @@ export class Beacons {
       sp.group.visible = false;
       this.arms[0].group.visible = this.arms[1].group.visible = false;
       this.dropLock();
+    }
+  }
+
+  /**
+   * The spirit's arms: hanging to the floor under it (never longer than an
+   * arm), flung up for joy, reaching ahead into the eyehole, or stretched up
+   * the tower to its grips. Nothing passes through rock: on the climb the
+   * arm runs up the face just clear of it, and any point of it that would be
+   * in rock is moved back out.
+   */
+  private poseArms(t: Tower, fwd: THREE.Vector3, armUp: number, dive: number, hands: [THREE.Vector3, THREE.Vector3] | null, handsK: number, climbing: boolean, P: ClimbPlan) {
+    const sp = this.spirit;
+    const s = sp.s;
+    const slabY = t.slab.y;
+    const up = new THREE.Vector3(0, 1, 0);
+    const upOut = fwd.clone().add(up).normalize();
+    const tmp = new THREE.Vector3();
+    const clear = (p: THREE.Vector3) => {
+      const o = p.y > slabY - t.slab.sy * 0.3 ? upOut : fwd;
+      for (let i = 0; i < 60 && (this.solidAt(p) || this.solidAt(tmp.copy(p).addScaledVector(o, -0.3))); i++) p.addScaledVector(o, 0.2);
+    };
+    for (let k = 0; k < 2; k++) {
+      const side = k === 0 ? -1 : 1;
+      const sh = sp.shoulder(side, new THREE.Vector3());
+      const c = Math.cos(sp.yaw), sn = Math.sin(sp.yaw);
+      const outward = new THREE.Vector3(c * side, 0, -sn * side);
+      const ahead = new THREE.Vector3(Math.sin(sp.yaw), 0, Math.cos(sp.yaw));
+      // Hanging: down to just off the floor under it (at most an arm's length), swaying.
+      const sway = Math.sin(this.time * 2.2 + k * 1.7) * 0.12 * s;
+      const down = sh.clone().addScaledVector(outward, 0.2 * s).addScaledVector(ahead, 0.08 * s + sway);
+      down.y = Math.max(this.floorUnder(down.x, down.z, sh.y) + 0.1, sh.y - ARM_HANG * s);
+      const joy = sh.clone().addScaledVector(outward, (0.9 + 0.15 * Math.sin(this.time * 11 + k * 2)) * s).add(new THREE.Vector3(0, (1.1 + 0.2 * Math.sin(this.time * 14 + k * 2)) * s, 0));
+      const hand = down.lerp(joy, armUp);
+      if (dive > 0) hand.lerp(sh.clone().addScaledVector(P.axis, -0.9 * s).addScaledVector(outward, -0.05 * s).add(new THREE.Vector3(0, 0.35 * s, 0)), dive);
+      if (hands && handsK > 0) {
+        // Up the face: the hand climbs just clear of the rock, then takes its grip.
+        const g = hands[k];
+        const hy = THREE.MathUtils.lerp(sh.y + 0.4, g.y, handsK);
+        const glat = P.lat + side * 0.6;
+        const onFace = this.facePoint(t, Math.max(this.faceAt(t, hy, glat), 0) + 0.35, glat, hy);
+        hand.lerp(handsK < 0.85 ? onFace : onFace.lerp(g, (handsK - 0.85) / 0.15), Math.min(1, handsK * 4));
+      }
+      const len = sh.distanceTo(hand);
+      const r0 = 0.085 * s, r1 = 0.065 * s, hr = 0.13 * s;
+      if (climbing && hand.y > sh.y + 1) {
+        // A path up the face from the shoulder to the hand.
+        // From the shoulder's distance out to hugging the face near the hand.
+        const glat = P.lat + side * 0.6;
+        const shD = (sh.x - t.x) * fwd.x + (sh.z - t.z) * fwd.z, shL = (sh.x - t.x) * fwd.z - (sh.z - t.z) * fwd.x;
+        const pts = [sh.clone()];
+        for (let y = sh.y + 1.2; y < hand.y - 0.8; y += 1.4) {
+          const f = (y - sh.y) / (hand.y - sh.y);
+          const l = THREE.MathUtils.lerp(shL, glat, f);
+          const face = Math.max(this.faceAt(t, y, l), 0) + 0.3;
+          pts.push(this.facePoint(t, Math.max(face, THREE.MathUtils.lerp(shD, face, Math.min(1, f * 1.6))), l, y));
+        }
+        pts.push(hand.clone());
+        this.arms[k].setPath(pts, r0, r1, hr, -side, hand.clone().add(up), clear);
+      } else {
+        const a1 = sh.clone().addScaledVector(outward, Math.min(len * 0.2, 0.5 * s));
+        const a2 = hand.clone().addScaledVector(hand.y < sh.y ? outward : ahead, Math.min(len * 0.12, 0.4 * s)).add(new THREE.Vector3(0, hand.y < sh.y ? Math.min(len * 0.15, 0.35 * s) : -Math.min(len * 0.15, 2), 0));
+        this.arms[k].set(sh, a1, a2, hand, r0, r1, hr, -side, hand.clone().add(up), dive > 0 ? undefined : clear);
+      }
     }
   }
 
@@ -1077,7 +1260,8 @@ export class Beacons {
     const top = SPAN.top;
     for (const o of rs) {
       if (o === r || o.hollow || !span(o, x, z)) continue;
-      if (SPAN.bot < top - 0.05 && top < SPAN.top - 0.05) return false;
+      // Buried in it, or tucked under it with no headroom.
+      if (SPAN.bot < top + BODY_H && top < SPAN.top - 0.05) return false;
     }
     SPAN.top = top;
     return true;
@@ -1197,7 +1381,8 @@ export class Beacons {
       if (rk.hollow) {
         const q = this.shellQ(t, p.x, p.y, p.z);
         const d = q.length();
-        if (d >= 1 || q.y < -0.56) continue;
+        // The drawn shape outside, the ellipsoid hollow within.
+        if (!inside(rk, p.x, p.y, p.z) || q.y < -0.56) continue;
         if (!this.lit.has(t.id)) return true;
         if (d > 0.86 && !this.inDoorway(q.divideScalar(d || 1), 0)) return true;
       } else if (inside(rk, p.x, p.y, p.z)) return true;
@@ -1300,7 +1485,7 @@ export class Beacons {
         const len = sh.distanceTo(hand);
         const a1 = sh.clone().addScaledVector(right, side * Math.min(len * 0.2, 1.5));
         const a2 = hand.clone().add(new THREE.Vector3(0, Math.min(len * 0.25, 3), 0));
-        this.arms[k].set(sh, a1, a2, hand, 0.18 * SPIRIT_SIZE, 0.13 * SPIRIT_SIZE, 0.28, -side, chest);
+        this.arms[k].set(sh, a1, a2, hand, 0.1 * SPIRIT_SIZE, 0.075 * SPIRIT_SIZE, 0.16 * SPIRIT_SIZE, -side, chest);
       }
     } else if (!this.free) this.arms[0].group.visible = this.arms[1].group.visible = false;
   }

@@ -1246,11 +1246,12 @@ void main() {
 `;
 
 // ------------------------------------------------------------------ tower spirit
-// The little glowing ghost that lives in a beacon tower's head. Its face is
-// painted, not stuck on: two tall, rounded-rectangle eye sockets that sink
-// into the glow (a darkened rim, near-black inside with an inner shadow
-// under the brow), and a small, subtle, lopsided smile like the explorer's.
-// Object space: the face looks down +z, the body is ~1.2 tall.
+// The glowing ghost that lives in a beacon tower's head: tall and skinny, in
+// the same warm amber as a lit tower's eyes (hotter core up top, deeper ember
+// toward the hem and the edges). Its face is painted, not stuck on: two tall,
+// rounded-rectangle eye sockets that sink into the glow, and a small, quiet,
+// lopsided smile like the explorer's.
+// Object space: the face looks down +z, the body is 2.0 tall, ~0.3 round.
 
 export const GHOST_VERT = /* glsl */ `
 out vec3 vObj;
@@ -1271,7 +1272,8 @@ ${GBUF_OUT}
 in vec3 vObj;
 in vec3 vN;
 in vec3 vView;
-uniform vec3 uColor;
+uniform vec3 uEmber;
+uniform vec3 uCore;
 uniform vec3 uInk;
 uniform float uEmissive;
 uniform float uBlink;
@@ -1283,40 +1285,41 @@ float sq(vec2 q) {
 void main() {
   vec3 n = normalize(vN);
   if (!gl_FrontFacing) n = -n;
-  vec3 col = uColor;
+  // Hotter up in the head, deeper ember toward the hem and round the edges.
+  float up = smoothstep(0.1, 1.8, vObj.y);
+  float edge = pow(1.0 - abs(dot(n, normalize(-vView))), 2.0);
+  float flick = 0.94 + 0.06 * sin(uTime * 7.1 + vObj.y * 3.0) * sin(uTime * 4.3);
+  vec3 col = mix(uEmber, uCore, 0.12 + 0.5 * up) * flick;
+  col = mix(col, uEmber * 0.92, edge * 0.6);
   float em = uEmissive;
-  if (vObj.z > 0.25) {
-    // Eyes: tall rounded rectangles (the towers' eyes), level, well apart.
-    vec2 size = vec2(0.068, 0.13 * max(uBlink, 0.06));
+  if (vObj.z > 0.1) {
+    // Eyes: tall rounded rectangles (the towers' eyes), level, apart.
+    vec2 size = vec2(0.052, 0.12 * max(uBlink, 0.06));
     for (int i = 0; i < 2; i++) {
-      float ex = i == 0 ? -0.165 : 0.165;
-      vec2 q = (vObj.xy - vec2(ex, 0.8)) / size;
+      float ex = i == 0 ? -0.105 : 0.105;
+      vec2 q = (vObj.xy - vec2(ex, 1.62)) / size;
       float r = sq(q);
       // A soft darkened rim round the socket: the glow sinks in.
-      float rim = 1.0 - smoothstep(1.0, 1.55, r);
-      col = mix(col, col * 0.62, rim * 0.8);
-      em = mix(em, em * 0.45, rim);
+      float rim = 1.0 - smoothstep(1.0, 1.6, r);
+      col = mix(col, uEmber * 0.62, rim * 0.75);
       if (r < 1.0) {
         // Inside: near black, a touch of warmth low down, deepest under the brow.
         float depth = smoothstep(-1.0, 0.7, q.y);
-        col = mix(uInk * 1.9 + uColor * 0.08, uInk, depth);
-        em = 0.0;
+        col = mix(uInk * 1.9 + uEmber * 0.1, uInk, depth);
       }
     }
     // A small, quiet smile, a little off centre with one end lifted.
-    float x = vObj.x - 0.02;
-    float w = 0.085 + 0.02 * uGrin;
+    float x = vObj.x - 0.015;
+    float w = 0.06 + 0.014 * uGrin;
     if (abs(x) < w) {
       float t = x / w;
-      float yc = 0.605 + (0.028 + 0.02 * uGrin) * t * t + 0.012 * t;
-      float thick = 0.011 * (1.0 - 0.55 * t * t);
+      float yc = 1.44 + (0.022 + 0.016 * uGrin) * t * t + 0.009 * t;
+      float thick = 0.009 * (1.0 - 0.55 * t * t);
       float d = abs(vObj.y - yc);
       float line = 1.0 - smoothstep(thick * 0.6, thick, d);
       col = mix(col, uInk * 1.3, line);
-      em = mix(em, 0.0, line);
     }
   }
-  if (em <= 0.0) em = -0.3;
   writeG(col, em, n, vView);
 }
 `;
