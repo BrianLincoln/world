@@ -33,6 +33,11 @@ const SAVE_VERSION = 2;
 const TOOL_HOLD = 0.7;
 /** Seconds without progress before the spirit repeats its hint, more obviously. */
 const HINT_AFTER = 20;
+/** How far from a trunk's / rock's surface the axe and hammer reach (m). */
+const CHOP_REACH = 2.2;
+const SMASH_REACH = 2.15;
+/** Resources come out as you work: every other blow, ending on the last (3 blows: 1st and 3rd). */
+const yields = (hit: number, hp: number) => (hp - hit) % 2 === 0;
 
 interface Target {
   tag: TargetTag;
@@ -215,9 +220,9 @@ export class Story {
 
     // Interactables.
     this.targets.push({ tag: 'axe', pos: this.axe.pos, reach: 2.3, mat: this.axe.mat, ok: () => !this.axe.taken });
-    for (const t of this.trees) this.targets.push({ tag: 'tree', pos: t.pos, reach: 1.65 + t.radius, mat: t.mat, ok: () => t.standing });
+    for (const t of this.trees) this.targets.push({ tag: 'tree', pos: t.pos, reach: CHOP_REACH + t.radius, mat: t.mat, ok: () => t.standing });
     this.targets.push({ tag: 'hammer', pos: this.hammer.pos, reach: 2.0 + hb.sc, mat: this.hammer.mat, ok: () => !this.hammer.taken });
-    for (const r of this.rocks) this.targets.push({ tag: 'rock', pos: r.pos, reach: 1.6 + r.radius, mat: r.mat, ok: () => !r.broken && this.hasHammer });
+    for (const r of this.rocks) this.targets.push({ tag: 'rock', pos: r.pos, reach: SMASH_REACH + r.radius, mat: r.mat, ok: () => !r.broken && this.hasHammer });
     this.targets.push({
       tag: 'hearth', pos: this.cabin.hearthPos, reach: 2.0, mat: this.cabin.hearthMat,
       ok: () => !this.cabin.lit && d.env.hour >= (this.step.kind === 'light' ? this.step.readyAt : 99),
@@ -372,7 +377,7 @@ export class Story {
   private updateProxies(walking: boolean) {
     const d = this.d;
     const p = d.body.pos;
-    const hitT = this.hasAxe && walking ? d.colliders.nearestTree(p.x, p.z, 1.6) : null;
+    const hitT = this.hasAxe && walking ? d.colliders.nearestTree(p.x, p.z, CHOP_REACH) : null;
     const cT = hitT ? Harvest.cellOf('tree', hitT.x, hitT.z) : null;
     if (this.proxyTree && (!cT || cT[0] !== this.proxyTree.gi || cT[1] !== this.proxyTree.gj)) this.releaseTree();
     if (hitT && cT && !this.proxyTree && !this.worldChops.some((w) => w.gi === cT[0] && w.gj === cT[1])) {
@@ -384,7 +389,7 @@ export class Story {
       d.harvest.proxy('tree', cT[0], cT[1], true);
       this.proxyTree = { tree, gi: cT[0], gj: cT[1], row: r };
     }
-    const hitR = this.hasHammer && walking ? d.colliders.nearestRock(p.x, p.z, 1.4, Infinity) : null;
+    const hitR = this.hasHammer && walking ? d.colliders.nearestRock(p.x, p.z, SMASH_REACH, Infinity) : null;
     const cR = hitR ? Harvest.cellOf('rock', hitR.x, hitR.z) : null;
     if (this.proxyRock && (!cR || cR[0] !== this.proxyRock.gi || cR[1] !== this.proxyRock.gj)) this.releaseRock();
     if (hitR && cR && !this.proxyRock && !this.worldBreaks.some((w) => w.gi === cR[0] && w.gj === cR[1])) {
@@ -396,12 +401,12 @@ export class Story {
       this.proxyRock = { rock, gi: cR[0], gj: cR[1], row: hitR.row };
     }
     this.dynTargets.length = 0;
-    if (this.proxyTree) { const t = this.proxyTree.tree; this.dynTargets.push({ tag: 'tree', pos: t.pos, reach: 1.7 + t.radius, mat: t.mat, ok: () => t.standing }); }
-    if (this.proxyRock) { const r = this.proxyRock.rock; this.dynTargets.push({ tag: 'rock', pos: r.pos, reach: 1.6 + r.radius, mat: r.mat, ok: () => !r.broken }); }
+    if (this.proxyTree) { const t = this.proxyTree.tree; this.dynTargets.push({ tag: 'tree', pos: t.pos, reach: CHOP_REACH + t.radius, mat: t.mat, ok: () => t.standing }); }
+    if (this.proxyRock) { const r = this.proxyRock.rock; this.dynTargets.push({ tag: 'rock', pos: r.pos, reach: SMASH_REACH + r.radius, mat: r.mat, ok: () => !r.broken }); }
     if (this.hasHammer) {
       for (const { rock: r } of this.rubble.values()) {
         if (r.broken || Math.hypot(r.pos.x - p.x, r.pos.z - p.z) > 4) continue;
-        this.dynTargets.push({ tag: 'rock', pos: r.pos, reach: 1.6 + r.radius, mat: r.mat, ok: () => !r.broken });
+        this.dynTargets.push({ tag: 'rock', pos: r.pos, reach: SMASH_REACH + r.radius, mat: r.mat, ok: () => !r.broken });
       }
     }
   }
@@ -734,17 +739,20 @@ export class Story {
       for (const [key, p] of this.rubble) if (!before.has(key)) p.rock.hop(from, i++ * 0.07);
       return;
     }
+    // (Its stones already came out with the blows, see `spill`.)
     d.puffs(r.pos, 10, 0.3, 2.6);
     this.chipPuffs.emit(r.pos, 8, 0.07, 3, undefined, { life: 0.6, rise: -9, drag: 1.2, up: 3 });
-    for (let i = 0; i < 2; i++) {
-      const f = new Flyer('stone', r.pos.clone().setY(r.pos.y + 0.2), (x, z) => this.floorAt(x, z), i * 0.15, i + (r.index + 3) * 2);
-      this.flyers.push({ f, res: 'stones', stone: -1 });
-      this.group.add(f.mesh);
-    }
     if (w) this.takeWorld('rock', w.gi, w.gj, w.row);
     const piece = [...this.rubble.values()].find((p) => p.rock === r);
     if (piece) d.harvest.smashPiece(piece.gi, piece.gj, piece.k);
     this.dirty = true;
+  }
+
+  /** A log or stone knocked loose by a blow: it hops out and into the pack. */
+  private spill(kind: 'log' | 'stone', at: THREE.Vector3, variant: number) {
+    const f = new Flyer(kind, at.clone(), (x, z) => this.floorAt(x, z), 0, variant);
+    this.flyers.push({ f, res: kind === 'log' ? 'logs' : 'stones', stone: -1 });
+    this.group.add(f.mesh);
   }
 
   private progressMade() {
@@ -758,13 +766,8 @@ export class Story {
   }
 
   private treeGone(t: ChopTree, along: THREE.Vector3[]) {
+    // (Its logs already came out with the blows, see `spill`.)
     for (const p of along) this.d.puffs(p.clone().setY(this.floorAt(p.x, p.z)), 4, 0.35, 2.2);
-    // Two logs hop out and into the pack.
-    for (const [i, p] of [along[1], along[2]].entries()) {
-      const f = new Flyer('log', p.clone().setY(this.floorAt(p.x, p.z) + 0.4), (x, z) => this.floorAt(x, z), i * 0.18);
-      this.flyers.push({ f, res: 'logs', stone: -1 });
-      this.group.add(f.mesh);
-    }
     // A world tree: taken (its stump takes over) until it grows back.
     const w = this.worldChops.find((x) => x.tree === t) ?? (this.proxyTree?.tree === t ? this.proxyTree : null);
     if (w) {
@@ -839,18 +842,22 @@ export class Story {
       }
       if (this.swingT >= 0.3 && this.swingT - dt < 0.3) {
         if (tree) {
+          const before = tree.hits;
           const felled = tree.hit(body.pos);
           d.sfx.chop();
           if (felled) d.sfx.fall();
           const at = tree.pos.clone().lerp(body.pos, 0.35).setY(tree.pos.y + 0.9);
           d.puffs(at, 3, 0.07, 1.8);
           this.chips(at);
+          if (tree.hits > before && yields(tree.hits, 3)) this.spill('log', at, tree.hits);
         } else if (rock) {
+          const before = rock.hits;
           rock.hit();
           d.sfx.smash();
           const at = rock.pos.clone().lerp(body.pos, 0.3).setY(rock.pos.y + rock.radius * 0.6);
           d.puffs(at, 3, 0.09, 1.6);
           this.chipPuffs.emit(at, 4, 0.05, 2.4, undefined, { life: 0.45, rise: -9, drag: 1.5, up: 2.2 });
+          if (rock.hits > before && yields(rock.hits, rock.hp)) this.spill('stone', at, rock.hits + (rock.index + 3) * 2);
         }
         this.progressMade();
       }

@@ -315,7 +315,7 @@ export class CharacterRig {
   private chopT = 9;
   private giveT = 9;
   private knockT = 9;
-  /** Story tools: each has an in-hand copy (right mitten) and a stowed one (axe across the pack, hammer at the hip). */
+  /** Story tools: each has an in-hand copy (right mitten) and a stowed one (axe and hammer crossed on the pack). */
   private tools: Record<'axe' | 'hammer', { hand: THREE.Group; stowed: THREE.Group; parts: THREE.Object3D[]; carryGrip: number; swingGrip: number }> = {
     axe: { hand: new THREE.Group(), stowed: new THREE.Group(), parts: [], carryGrip: 0.52, swingGrip: 0.06 },
     hammer: { hand: new THREE.Group(), stowed: new THREE.Group(), parts: [], carryGrip: 0.12, swingGrip: 0.04 },
@@ -421,11 +421,12 @@ export class CharacterRig {
         t.stowed.position.set(0.02, 0.3, -0.43);
         this.spine.add(t.stowed);
       } else {
-        // Hanging head-down from the belt on the left hip, face out.
-        t.stowed.quaternion.copy(basis(new THREE.Vector3(0.1, -1, 0.15), new THREE.Vector3(0, 0.15, 1)));
-        t.stowed.position.set(0.3, 0.02, 0.02);
-        for (const m of stowed) m.position.set(0, -0.5, 0);
-        this.hips.add(t.stowed);
+        // The mirror diagonal, crossing the axe in an X, head up by the right
+        // shoulder; a touch further out so it lies over the axe handle.
+        for (const m of stowed) m.position.set(0, -0.25, 0);
+        t.stowed.quaternion.copy(basis(new THREE.Vector3(-0.62, 0.78, 0), new THREE.Vector3(0.78, 0.62, 0)));
+        t.stowed.position.set(0.02, 0.32, -0.47);
+        this.spine.add(t.stowed);
       }
     }
   }

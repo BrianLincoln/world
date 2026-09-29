@@ -322,6 +322,7 @@ export class Woods {
 // ---------------------------------------------------------------- rocks
 
 let ROCK_GEO: THREE.BufferGeometry | null = null;
+const RAY = new THREE.Raycaster();
 
 /**
  * A boulder you can break with the hammer: three blows (it jolts and chips),
@@ -366,26 +367,22 @@ export class SmashRock {
   }
 
   /**
-   * How far the rock's surface reaches from its centre, horizontally, in
-   * direction `dir` (unit xz) at world height `y`: the widest posed vertex
-   * inside a narrow wedge around `dir` and a band around `y`.
+   * How far the rock's surface is from its centre, horizontally, in direction
+   * `dir` (unit xz) at world height `y`: a ray cast in from outside against
+   * the posed mesh. 0 above the rock.
    */
-  extent(dir: THREE.Vector3, y: number): number {
-    const p = ROCK_GEO!.attributes.position as THREE.BufferAttribute;
-    const y0 = this.row[1], sc = this.row[3], rot = this.row[4], sy = this.row[5];
-    const c = Math.cos(rot), s = Math.sin(rot);
-    let best = 0;
-    for (let i = 0; i < p.count; i++) {
-      const lx = p.getX(i) * sc, lz = p.getZ(i) * sc;
-      const wy = y0 + p.getY(i) * sc * sy;
-      if (Math.abs(wy - y) > 0.18 * sc) continue;
-      const wx = c * lx + s * lz, wz = -s * lx + c * lz;
-      const along = wx * dir.x + wz * dir.z;
-      const side = Math.abs(wx * dir.z - wz * dir.x);
-      if (along > 0 && side < along * 0.45) best = Math.max(best, along);
+  surface(dir: THREE.Vector3, y: number): number {
+    if (!this.posed) {
+      const [sc, rot, sy] = [this.row[3], this.row[4], this.row[5]];
+      const g = ROCK_GEO!.clone().scale(sc, sc * sy, sc).rotateY(rot);
+      this.posed = new THREE.Mesh(g, new THREE.MeshBasicMaterial({ side: THREE.DoubleSide }));
     }
-    return best || this.radius;
+    const far = 4 * this.row[3] + 2;
+    RAY.set(new THREE.Vector3(dir.x * far, y - this.row[1], dir.z * far), new THREE.Vector3(-dir.x, 0, -dir.z));
+    const hit = RAY.intersectObject(this.posed, false)[0];
+    return hit ? Math.hypot(hit.point.x, hit.point.z) : 0;
   }
+  private posed: THREE.Mesh | null = null;
 
   hit(): boolean {
     if (this.broken) return false;
@@ -441,24 +438,31 @@ export class HammerProp {
 
   /** `dir`: unit xz from the rock's centre toward the side it leans on. */
   constructor(rock: SmashRock, dir: THREE.Vector3, ground: (x: number, z: number) => number) {
-    const S = 1.35, HEAD = 0.47 * S, LEAN = 0.42;
+    const S = 1.35, HEAD = 0.47 * S, HALF = 0.045 * S, LEAN = 0.42;
     this.mesh = propMesh(buildHammer(), this.mat);
     this.mesh.scale.setScalar(S);
     // Grip end on the ground, head resting on the rock face with its long
-    // side flat against it. Fit to the actual surface where the head
-    // touches, plus the head's half-thickness and a hair, so it never sinks in.
-    // The boulder flares at its foot, so the grip must clear that too: if
-    // it can't, the hammer stands a little further out and leans more.
-    const gy = ground(rock.row[0] + dir.x * rock.radius, rock.row[2] + dir.z * rock.radius);
-    const base = rock.extent(dir, gy + 0.05) + 0.06;
-    let lean = LEAN, r = 0, foot = 0;
-    for (let i = 0; i < 4; i++) {
-      r = rock.extent(dir, gy + 0.05 + HEAD * Math.cos(lean)) + 0.055 * S + 0.02;
-      foot = Math.max(r + HEAD * Math.sin(LEAN), base);
-      lean = Math.asin(THREE.MathUtils.clamp((foot - r) / HEAD, 0.2, 0.9));
+    // side flat against it. For a lean, the head sits exactly on the surface
+    // (ray cast at its height, plus its half-thickness), which fixes where the
+    // grip stands; take the lean nearest LEAN whose handle clears the rock
+    // all the way down (boulders flare at the foot).
+    const gy = ground(rock.row[0] + dir.x * (rock.radius + 0.35), rock.row[2] + dir.z * (rock.radius + 0.35));
+    const pose = (l: number) => {
+      const foot = rock.surface(dir, gy + HEAD * Math.cos(l)) + HALF + HEAD * Math.sin(l);
+      for (let t = 0.05; t < 0.9; t += 0.1) {
+        const d = foot - t * HEAD * Math.sin(l);
+        if (d < rock.surface(dir, gy + t * HEAD * Math.cos(l)) + 0.035 * S) return -1;
+      }
+      return foot;
+    };
+    let lean = LEAN, foot = pose(LEAN);
+    for (let k = 1; foot < 0 && k <= 16; k++) {
+      lean = LEAN + (k % 2 ? 1 : -1) * Math.ceil(k / 2) * 0.05;
+      if (lean > 0.05) foot = pose(lean);
     }
+    if (foot < 0) { lean = 0.9; foot = rock.surface(dir, gy + 0.05) + 0.1 + HEAD * Math.sin(lean); }
     const fx = rock.row[0] + dir.x * foot, fz = rock.row[2] + dir.z * foot;
-    this.mesh.position.set(fx, ground(fx, fz) + 0.045, fz);
+    this.mesh.position.set(fx, ground(fx, fz) + 0.03, fz);
     const up = new THREE.Vector3(-dir.x * Math.sin(lean), Math.cos(lean), -dir.z * Math.sin(lean));
     const along = new THREE.Vector3(dir.z, 0, -dir.x);
     const out = new THREE.Vector3().crossVectors(along, up);

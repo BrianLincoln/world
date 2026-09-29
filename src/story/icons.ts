@@ -225,16 +225,23 @@ function drawHammer(g: CanvasRenderingContext2D) {
   g.fillStyle = '#d9b27a';
   g.fill();
   ink(g);
+  // Steel head (as the tool: a rounded block with a round striking face
+  // on the right), same steel and highlight as the axe.
   g.beginPath();
-  g.roundRect(-30, -34, 60, 28, 8);
-  g.fillStyle = '#9a6248';
+  g.roundRect(-30, -32, 50, 24, 7);
+  g.fillStyle = '#9aa8b8';
   g.fill();
   ink(g);
   g.beginPath();
-  g.moveTo(-22, -26); g.lineTo(-22, -14);
-  g.moveTo(22, -26); g.lineTo(22, -14);
-  g.strokeStyle = '#6f4232';
-  g.lineWidth = 4;
+  g.roundRect(18, -38, 16, 36, 6);
+  g.fillStyle = '#9aa8b8';
+  g.fill();
+  ink(g);
+  g.beginPath();
+  g.moveTo(-22, -26); g.lineTo(12, -26);
+  g.moveTo(26, -32); g.lineTo(26, -9);
+  g.strokeStyle = '#eef3f6';
+  g.lineWidth = 5;
   g.stroke();
   g.restore();
   g.beginPath();
