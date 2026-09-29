@@ -122,7 +122,7 @@ The objective sequence is built as data, like phase 1.
 4. Light the hearth (afternoon; no jump to night). The spirit settles by the
    fire.
 
-**Phase 2: the gift and the first journey**
+**Phase 2: the gift and the first journey** (built, first pass: stages 0-5 are all in, waiting on the owner's review)
 1. After the hearth is lit, the home spirit gives you a bike.
    From then on, the bike always reappears outside the home cabin.
 2. The spirit rides alongside on its own small bike and leads you along a

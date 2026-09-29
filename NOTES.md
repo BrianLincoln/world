@@ -1192,3 +1192,100 @@ ledge, the standing stone and lighting on top.
 - **Crows and elk keep off towers**: `nearBase` in `crow.ts`/`elk.ts` also
   rejects anywhere within `TOWER_CLEAR` (55 m) of a tower. All their landing
   and spawn spots go through it. Crows had settled in a doorway's room.
+
+## Phase 2, stage 2 polish + stages 3-5 (2026-09-29)
+Owner's bug list, then the rest of phase 2 in one go (the owner was away and
+asked for as far as possible). Everything below is a first pass for review.
+- **Towers are solid** (`story/towerRock.ts`). Every tower boulder (stack,
+  loose rocks, the head) collides against its *drawn* shape: each boulder
+  mesh is rasterised once into top/bottom height fields (129², unit space),
+  since the meshes are star-shaped round their vertical axis. Walls push you
+  out radially past the rock at any height the body spans (feet + 0.5 to
+  + 1.7 m); tops are floor only if walkable (rise/run < 1.15), open to the
+  sky and with headroom (never inside or tucked under another boulder: that
+  was the invisible floor inside the stack). Landings from any height: if
+  last frame's feet were over a top and this frame's are under it, you land
+  on it (fall, parachute, mounts, bike jumps). The door boulder keeps its
+  shell collider (hollow room); its roof is a normal top. The chunk prop
+  colliders now skip every tower boulder (lean 8). **Dev fly collides too**
+  (owner's answer): `WorldQuery.landmarks`, called by `FlyMode`. Mobs collide
+  with towers as well. `Beacons.clampCamera` pulls the orbit camera in to
+  just short of any tower rock (snaps in, eases out), which also keeps it in
+  the room. `scripts/towerland.mjs`: 49-point drop grids per tower in walk,
+  glide and fly; 0 bad on fjord and hilda after two fixes (headroom, and the
+  door's `solidAt` using the drawn shape, not the ellipsoid).
+- **Stepped frames for tests**: `__ow.manual(true)` + `advance(n, dt)`. A
+  browser frame already queued when stepping starts used to run with a
+  negative dt (it froze the padlock's flight); stray frames are now ignored
+  and dt is clamped at 0.
+- **The tower spirit**: tall and skinny (2 units × 0.3, ~2.8 m at 1.4 m per
+  unit), a slim lathe that swells at a five-scallop hem. Colour: the lit
+  eyes' uEmber/uCore, hotter up top, deeper ember at the hem and edges. It
+  read white because emissive 0.34 is under the grade's 0.5 cut-off: the
+  monochrome grade swapped its chroma for the tint's. It writes 0.62 now.
+  Arms too (same colour, 0.62).
+- **The climb** (`planClimb`, worked out once): it climbs beside the doorway
+  (not over it). Both arms reach up the face to grips on the capstone's
+  top edge (found from the capstone's height field), a tug, then a slow
+  three-heave haul with the body held clear of the rock over its whole
+  height and width (`faceClear`, marching `solidAt`), up past the lip, in
+  onto the capstone in front of the left eye, a look up, then it rises to
+  the eyehole and slides in along the eye's axis, shrinking a little (the
+  eye is ~1.4 × 3.3 m; it fits). Arms are tubes along a path up the face
+  (`Arm.setPath`, Catmull-Rom), and any point of an arm in or within 0.3 m
+  of rock is pushed back out (up and out above the capstone, out below), so
+  no arm passes through rock. Hanging arms reach the floor under the spirit
+  (the capstone when it's up there), capped at an arm's length that scales
+  with it, so they retract as it shrinks. It keeps a step away from you on
+  the ground. ~20 s in all.
+- **The freeing camera** is explicit now (`cinematic()` returns a pose, and
+  main eases in from and back out to the orbit over 1.1 s): side on to the
+  pair, then a smooth pull back and round to the whole tower as it climbs
+  (distance leads the focus, so it never passes through rock), closing in
+  on the head for the eyehole. No cuts. The padlock flies away from the camera.
+- **No disarm after freeing**: you're outside the room at the lock, and a
+  kid walking straight in (as the hearth spirit shows) must get taken up.
+- **Stage 3, the tower camera** (`towerView.ts`, overlay scene, so fog and
+  night can't hide it): towers in sight (the head's links, plus anywhere you
+  can fly) are drawn as plum silhouettes where the real tower has faded
+  (fading in past 250-700 m) with eye markers: lit = white-hot eyes in a big
+  ember glow, unlit = two dim embers. Targets: lit towers it can see, plus
+  home (from home: every lit tower). Aim snaps to a target within 0.2 rad
+  and eases the view onto it; it glows brighter with a pulsing ring, and the
+  badge becomes a new `ember` icon (E / click flies). No target, or looking
+  well down, the badge is the down arrow (out). Esc is always out.
+- **Stage 4, ember flight**: you become a small ember on a cubic arc (up and
+  out along your look, high over the land, then round to come into the far
+  head's eyes from the front, so never through its rock), 2.6 s + 1 s per
+  480 m. The camera follows behind it, easing out of the eyes at the start
+  and into the far eyes at the end, turning to look out of its face. Your
+  (hidden) body is moved to the far doorway at take-off so the world streams
+  in there. You arrive as that head (the tower camera again).
+- **Stage 5, the journey** (`story/journey.ts`, data-light director; the
+  story lends it the hearth spirit with `Story.lent`). Stages: gift → ride1 →
+  lock1 → enter1 → ride2 → lock2 → enter2 → done, saved per seed
+  (`fjellheim.journey.<seed>`, cleared by `?fresh=1`). The paths are real
+  world footpaths (`WorldGen.journey`, drawn and kept clear of trees like any
+  path): yard → the home tower's doorway, and on to the next tower (a
+  neighbour of home, preferring one whose face looks back at home, nearest
+  first). They detour through dry midpoints when the straight way crosses
+  water (checked on 4 seeds: no wet samples). The spirit rides a 0.55-scale
+  bike (`BikePose.scale`; `Bikes.place/move`), 1.5 m right of the path, about
+  10 m ahead, matching your speed, stopping to wait (looking back, a chirp
+  every 3.5 s) if you're 24 m behind or 40 m off the path. At the tower it
+  hops off, points at the lock (pick bubble), then at the doorway (up
+  bubble). In the head the view turns by itself to the next tower (dark,
+  dim-eyed) (`Beacons.guide`); coming out, it's already on its bike to lead
+  you on. At the second tower, the head's view turns to home, glowing: fly
+  home. Then it goes back to its fire once you're 90 m away. From ride1 on,
+  the gift bike turns up again outside the cabin whenever it's been left far
+  away and you're not near either. Dev: panel → "Journey (phase 2)", or
+  `?story=1&journey=<step>`.
+- Checked: `scripts/journey.mjs` plays the whole of phase 2 on fjord and
+  hilda (frame-stepped); Phase 1 replay completes (34 s); perf unchanged
+  (avg 3.89 ms / p99 6.5 ms vs 3.90 / 6.6 at 232258b, uncapped, mobs=0).
+- Known / next: the rise into the head and the exit still have their old
+  camera moves (the exit cuts to look in through the doorway); the spirit's
+  arms near the capstone lip can kink a little; the tower camera has no
+  touch controls beyond the badge; no bell/voice for the waiting spirit
+  beyond a chirp; the gift has no ceremony beyond pointing and a bubble.

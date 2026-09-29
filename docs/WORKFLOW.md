@@ -53,6 +53,14 @@ change goes through this loop:
   `beacons.onTop`, `beacons.isLit(id)`. `scripts/beacon.mjs` shoots tower
   faces, lit/unlit, night, the home tower, and `shots=unlock` (smash the
   lock, the spirit's sequence, walk in, the head view, exit).
+  `beacons.debugEnter(id)` makes you tower `id`'s head, `beacons.debugLookAt(id)`
+  turns the view; `journeyJump('gift'|'ride1'|...)` jumps phase 2 (also
+  `?journey=<step>` with `story=1`). `manual(true)` + `advance(n, dt)` step
+  frames by hand at a fixed dt (deterministic sequences; only the last frame
+  draws). Scripts: `scripts/towerland.mjs` (drop onto towers from above,
+  walk/glide/fly), `scripts/beacon.mjs shots=free|travel|unlock`,
+  `scripts/journey.mjs` (the whole of phase 2), `scripts/tl.sh <secs> cmd`
+  (a time limit; macOS has no `timeout`).
   `beacons.debugBreak()` breaks the nearest lock; `beacons.inside` is the
   tower you're the head of.
 - `_r` / `_p` / `_scene` / `_terrain` / `_cam` expose internals for probes.

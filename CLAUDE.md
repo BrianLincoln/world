@@ -56,7 +56,10 @@ npm run shots    # build + headless GPU screenshots -> shots/   (look at them!)
   rider IK targets). Movement is `BikeMode`.
 - `src/story/beacons.ts`: beacon towers at runtime (drawing, the lock,
   freeing the tower spirit = lighting, being slurped in via `CarriedMode`,
-  the head view, save).
+  the head view, the tower camera's aim and ember flight, save).
+  `towerRock.ts`: tower rock as exact solid shapes (collision, camera,
+  arms). `towerView.ts`: the tower camera's overlay (silhouettes, eyes).
+  `journey.ts`: phase 2 (bike gift, guided rides, the first two towers).
 - `src/ui/debug.ts`: the panel and HUD. `towerDebug.ts`: tower sight lines
   (L) and network map (M), only while the panel shows (H).
 

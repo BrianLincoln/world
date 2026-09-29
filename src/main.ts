@@ -269,7 +269,6 @@ function makeJourney() {
   }) : null;
 }
 makeJourney();
-if (params.get('journey') && STAGES.includes(params.get('journey') as Stage)) journey?.jump(params.get('journey') as Stage);
 if (params.get('lit') === 'all') beacons.debugSet('all');
 if (params.get('beacons') === '0') beacons.group.visible = false;
 
@@ -325,6 +324,8 @@ function spawn() {
   }
 }
 spawn();
+// ?journey=<step>: straight to a phase 2 step (after the spawn, which it moves you from).
+if (params.get('journey') && STAGES.includes(params.get('journey') as Stage)) journey?.jump(params.get('journey') as Stage);
 if (params.has('yaw')) orbit.yaw = parseFloat(params.get('yaw')!);
 {
   const [sx, sz] = findSpawn(0, 0);
