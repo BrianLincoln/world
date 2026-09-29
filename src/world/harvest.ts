@@ -77,6 +77,8 @@ export interface RegrowCtx {
 export class Harvest {
   private taken = new Map<string, Taken>();
   private proxies = new Set<string>();
+  /** Knocked over and falling right now (by a charging mount): not solid, not takeable. */
+  private knocked = new Set<string>();
   /** Bumped on every change (stumps, rubble and colliders rebuild from it). */
   version = 0;
   /** In-game hours elapsed (saved with the story). */
@@ -100,10 +102,17 @@ export class Harvest {
   }
 
   /** Taken at all (including a tree still regrowing): it can't be taken again yet. */
-  has(kind: HarvestKind, gi: number, gj: number) { return this.taken.has(Harvest.key(kind, gi, gj)); }
+  has(kind: HarvestKind, gi: number, gj: number) { const k = Harvest.key(kind, gi, gj); return this.taken.has(k) || this.knocked.has(k); }
+
+  /** Mark a prop as knocked over (falling): it stops being solid at once. */
+  knock(kind: HarvestKind, gi: number, gj: number, on: boolean) {
+    const k = Harvest.key(kind, gi, gj);
+    if (on) this.knocked.add(k); else this.knocked.delete(k);
+  }
 
   /** Not there to bump into: taken, or a sapling still too small to block. */
   gone(kind: HarvestKind, gi: number, gj: number) {
+    if (this.knocked.has(Harvest.key(kind, gi, gj))) return true;
     const t = this.taken.get(Harvest.key(kind, gi, gj));
     return !!t && (kind === 'rock' || (t.grow ?? 0) < SOLID_AT);
   }
@@ -115,6 +124,7 @@ export class Harvest {
     t.at ??= this.clock;
     if (t.kind === 'tree') t.grow ??= 0;
     this.taken.set(Harvest.key(t.kind, t.gi, t.gj), t);
+    this.knocked.delete(Harvest.key(t.kind, t.gi, t.gj));
     this.write(t.kind, t.gi, t.gj, 'saved', t.kind === 'tree' ? treeByte(t) : 255);
     this.version++;
   }
@@ -191,6 +201,7 @@ export class Harvest {
     }
     this.taken.clear();
     this.proxies.clear();
+    this.knocked.clear();
     this.clock = 0;
     this.version++;
   }

@@ -17,7 +17,7 @@ export interface Mob {
   pos: THREE.Vector3;
   vel: THREE.Vector3;
   heading: number;
-  /** On the ground (crows). Floofs are always airborne. */
+  /** On the ground (crows, elk). Floofs are always airborne. */
   grounded: boolean;
   state: MobState;
   leashed: boolean;
@@ -65,12 +65,14 @@ export interface MobCtx {
   surface(x: number, z: number): number;
   /** Is a sphere out of the camera's view? (Set by the manager for spawning.) */
   hidden?(x: number, y: number, z: number, r: number): boolean;
+  /** Push a ground creature out of solid props (trees, rocks, walls). */
+  collide?(pos: THREE.Vector3, vel: THREE.Vector3, radius: number): void;
   /** Dust / hearts. */
   puff(at: THREE.Vector3, count: number, size: number, spread: number): void;
 }
 
 export interface Species {
-  readonly name: 'floof' | 'crow';
+  readonly name: 'floof' | 'crow' | 'elk';
   /** Body radius (m), for collision, rope and targeting. */
   readonly radius: number;
   /** Height of the body centre above the feet. */

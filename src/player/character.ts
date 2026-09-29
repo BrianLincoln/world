@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { makeFaceMaterial, makeSolidMaterial } from '../gfx/materials';
-import { buildAxe, buildHammer } from '../story/geometry';
+import { buildAxe, buildHammer, buildPick } from '../story/geometry';
 import type { BikeRider } from '../vehicles/bikes';
 import type { Body } from './movement';
 
@@ -103,6 +103,12 @@ const newPose = (): Pose => Object.fromEntries(JOINTS.map((k) => [k, 0])) as Pos
 
 const STATES = ['ground', 'air', 'glide', 'swim', 'fly', 'ride', 'bike'] as const;
 type State = (typeof STATES)[number];
+/** Putting a tool away: the whole gesture (s), and when it leaves the mitten. */
+const STOW_T = 0.45;
+const STOW_SWAP = 0.2;
+/** Story tools the right mitten can hold. */
+const TOOLS = ['axe', 'pick', 'hammer'] as const;
+type Tool = (typeof TOOLS)[number];
 
 const sat = (x: number) => Math.min(1, Math.max(0, x));
 const lerp = THREE.MathUtils.lerp;
@@ -315,21 +321,39 @@ export class CharacterRig {
   private chopT = 9;
   private giveT = 9;
   private knockT = 9;
-  /** Story tools: each has an in-hand copy (right mitten) and a stowed one (axe and hammer crossed on the pack). */
-  private tools: Record<'axe' | 'hammer', { hand: THREE.Group; stowed: THREE.Group; parts: THREE.Object3D[]; carryGrip: number; swingGrip: number }> = {
+  /**
+   * Story tools: each has an in-hand copy (right mitten); the axe and pick
+   * also have a stowed one, crossed on the pack. The hammer isn't carried:
+   * it's only ever drawn for building.
+   */
+  private tools: Record<Tool, { hand: THREE.Group; stowed: THREE.Group | null; parts: THREE.Object3D[]; carryGrip: number; swingGrip: number }> = {
     axe: { hand: new THREE.Group(), stowed: new THREE.Group(), parts: [], carryGrip: 0.52, swingGrip: 0.06 },
-    hammer: { hand: new THREE.Group(), stowed: new THREE.Group(), parts: [], carryGrip: 0.12, swingGrip: 0.04 },
+    pick: { hand: new THREE.Group(), stowed: new THREE.Group(), parts: [], carryGrip: 0.5, swingGrip: 0.06 },
+    hammer: { hand: new THREE.Group(), stowed: null, parts: [], carryGrip: 0.12, swingGrip: 0.04 },
   };
-  private held: 'axe' | 'hammer' | null = null;
+  private held: Tool | null = null;
 
-  /** Which tools you own (drawn stowed on the body) and which is in the right mitten. */
-  setTools(owned: { axe: boolean; hammer: boolean }, hand: 'axe' | 'hammer' | null) {
-    this.held = hand && owned[hand] ? hand : null;
-    for (const k of ['axe', 'hammer'] as const) {
-      this.tools[k].hand.visible = this.held === k;
-      this.tools[k].stowed.visible = owned[k] && this.held !== k;
+  /** Which tools you own (drawn stowed on the pack) and which is in the right mitten (the hammer needs no owning). */
+  setTools(owned: { axe: boolean; pick: boolean }, hand: Tool | null) {
+    const held = hand && (hand === 'hammer' || owned[hand]) ? hand : null;
+    // Putting a tool away (not swapping to another) plays the stow gesture.
+    if (this.held && !held) { this.stowing = this.held; this.stowT = 0; }
+    if (held && this.stowing) {
+      const t = this.tools[this.stowing];
+      t.hand.scale.setScalar(1);
+      t.stowed?.scale.setScalar(1);
+      this.stowing = null;
+    }
+    this.held = held;
+    for (const k of TOOLS) {
+      const t = this.tools[k];
+      const going = this.stowing === k && this.stowT < STOW_SWAP;
+      t.hand.visible = this.held === k || going;
+      if (t.stowed) t.stowed.visible = k !== 'hammer' && owned[k] && this.held !== k && !going;
     }
   }
+  private stowing: Tool | null = null;
+  private stowT = 9;
 
   get inHand() { return this.held; }
 
@@ -401,7 +425,7 @@ export class CharacterRig {
     // leading (-z is the direction an arm swinging forward travels).
     this.toolCarry = basis(new THREE.Vector3(0, 0.55, 0.83), new THREE.Vector3(0, -0.83, 0.55));
     this.toolSwing = basis(new THREE.Vector3(0, -1, 0.12), new THREE.Vector3(0, -0.12, -1));
-    for (const [k, geo] of [['axe', buildAxe()], ['hammer', buildHammer()]] as const) {
+    for (const [k, geo] of [['axe', buildAxe()], ['pick', buildPick()], ['hammer', buildHammer()]] as const) {
       const t = this.tools[k];
       const mk = () => [new THREE.Mesh(split(geo, 17), wood), new THREE.Mesh(split(geo, 18), steel)];
       const inHand = mk();
@@ -411,6 +435,7 @@ export class CharacterRig {
       t.hand.quaternion.copy(this.toolCarry);
       t.hand.visible = false;
       this.elR.add(t.hand);
+      if (!t.stowed) continue;
       const stowed = mk();
       t.stowed.add(...stowed);
       t.stowed.visible = false;
@@ -423,7 +448,7 @@ export class CharacterRig {
       } else {
         // The mirror diagonal, crossing the axe in an X, head up by the right
         // shoulder; a touch further out so it lies over the axe handle.
-        for (const m of stowed) m.position.set(0, -0.25, 0);
+        for (const m of stowed) m.position.set(0, -0.4, 0);
         t.stowed.quaternion.copy(basis(new THREE.Vector3(-0.62, 0.78, 0), new THREE.Vector3(0.78, 0.62, 0)));
         t.stowed.position.set(0.02, 0.32, -0.47);
         this.spine.add(t.stowed);
@@ -979,6 +1004,34 @@ export class CharacterRig {
       t.hand.quaternion.slerpQuaternions(this.toolCarry, this.toolSwing, this.swingW);
       const grip = lerp(t.carryGrip, t.swingGrip, this.swingW);
       for (const p of t.parts) p.position.set(0, -grip, 0);
+    }
+    // Putting a tool away: reach back over the right shoulder and slot it on
+    // the pack (it lands with a little bounce), or, for the hammer, drop the
+    // hand to the hip and tuck it away.
+    this.stowT += dt;
+    if (this.stowing && this.stowT < STOW_T) {
+      const k = this.stowT / STOW_T;
+      const w = Math.sin(k * Math.PI);
+      const t = this.tools[this.stowing];
+      if (this.stowing === 'hammer') {
+        P.shRx = lerp(P.shRx, 0.35, w);
+        P.shRz = lerp(P.shRz, -0.2, w);
+        P.elR = lerp(P.elR, -0.35, w);
+        t.hand.scale.setScalar(sat((STOW_SWAP - this.stowT) / 0.1));
+      } else {
+        P.shRx = lerp(P.shRx, -2.6, w);
+        P.shRz = lerp(P.shRz, 0.3, w);
+        P.elR = lerp(P.elR, -2.0, w);
+        P.spYaw -= 0.12 * w;
+        P.hdYaw += 0.1 * w;
+        const pop = sat((this.stowT - STOW_SWAP) / 0.18);
+        t.stowed?.scale.setScalar(this.stowT > STOW_SWAP ? 1 + 0.14 * Math.sin(pop * Math.PI) : 1);
+      }
+    } else if (this.stowing) {
+      const t = this.tools[this.stowing];
+      t.hand.scale.setScalar(1);
+      t.stowed?.scale.setScalar(1);
+      this.stowing = null;
     }
     this.giveT += dt;
     if (this.giveT < 0.35) {

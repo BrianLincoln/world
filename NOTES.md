@@ -801,6 +801,15 @@ camera.
   slow sway, and never points. When you're within 7 m it looks round at you
   every 5-11 s with happy eyes. This is the base for whatever comes next.
 
+## Peak tails no longer clip into walls (2026-09-29)
+`peaks()` culls a peak beyond `r * sqrt(1.6)`, but its falloff uses the
+wobbled radius (up to 1.34 r), so on wide lobes the cut landed where the peak
+still added 15-27 m: a sheer, perfectly circular wall that zigzagged across
+the mesh grid (e.g. seed default, x ≈ -120, z ≈ 670). The tail now tapers to
+zero over the outer 30% of the cull radius. Heights inside ~0.88 r are
+unchanged and the story site doesn't move. If real cliffs are wanted, they
+should be a deliberate feature with their own shading, not this.
+
 ### Greeting, per-blow resources, tools on the pack (2026-09-29)
 Supersedes the hammer notes in the feel pass above.
 - **The spirit greets you at the doorstep.** The 'meet' step fires at 24 m
@@ -825,3 +834,67 @@ Supersedes the hammer notes in the feel pass above.
   point entering the rock. It takes the lean nearest 0.42 at which the
   *head* is what touches. On the seeds checked, leans come out 0.7-1.1 and
   the head sits within ~2 cm of the rock.
+- **The ending has no night reveal any more.** The spirit used to walk out
+  to the lookout at 20:36 and point at the far cabin's light. Playtesting
+  showed that it read as leading you off at random and then pointing back
+  at the house. The rest step (`kind: 'rest'`, `doneAt`) is now a plain idle
+  state, `Story.potter`: a 45-90 s sit by the fire, then 1-3 spots round
+  the yard (7-16 s each, looking at the grove, cabin, far light and so on),
+  then back to the fire. It is always `settled`, so it never leads, points
+  or tugs. The next phase's first step takes over from it. The far light
+  and the lookout's view corridor are still in the world.
+
+### Pickaxe for rocks, hammer only for building; canopy-edge chop reach (2026-09-29)
+- **The rock tool is a pickaxe** (`buildPick`, `PickProp`). It stands with its
+  point struck into the top of the first boulder (`SmashRock.top` ray-casts
+  the posed rock), handle leaning out toward the cabin. The pickup step, the
+  target tag, the anchors (`pickSpot`) and the save field are all `pick`
+  now. Old saves with `hammer` / step `'hammer'` still load.
+- **Axe and pick cross on the pack.** The hammer is never owned or stowed.
+  The rig draws it into the mitten for each building knock (roof, door and
+  chimney), and it goes away after `TOOL_HOLD` like the others. It used to
+  stay in hand after the chimney: `depositing` was only cleared inside the
+  build step, so it stuck on once the step moved on. It's now cleared on
+  any other step.
+- **Chop reach is measured from the canopy edge** (`ChopTree.canopy` is
+  the widest tier, `(TREE_HEIGHT * 0.19 + 0.3) * sc`, plus 1.3 m). The
+  bottom tier droops to head height, so measuring from the trunk meant
+  standing under the branches. From that far out, the swing first walks you
+  in (`stepIn`, which sets `body.vel` so the gait animates and collides,
+  1.2 s cap), then swings from arm's length.
+
+## Elk (stag mount)
+- `src/mobs/elk.ts`: a ground-only mob. Herds of 2–5 graze in meadows and at
+  forest edges, look up, and gallop away if you run at them (or within ~10 m
+  on foot). It can be lassoed, led and ridden like the others, but never flies.
+  The body is sculpted: each sphere direction is mapped through a shape
+  function (`barrel`), with normals from finite differences. The rump patch
+  and saddle are caps of the same sphere, so they sit exactly on the body.
+  The silhouette is a stag, not a moose: a deep chest, high withers, the
+  back sloping to a round rump, and a thick neck held upright. The head is
+  level, with wide lyre antlers made of tapered tubes.
+- Gait: per-leg phase with walk (lateral 4-beat), trot (diagonals) and
+  rotary gallop offsets, blended by speed. After posing, the body is lifted by
+  the deepest hoof penetration, so hooves don't sink into slopes.
+- Riding uses `gallopUpdate` in movement.ts (a MountSpec without `fly`). It
+  carves instead of strafing, takes `gather` seconds to reach a 34 m/s
+  gallop, leaps on Space, swims deep water, and sub-steps its collision.
+- Trees: above 13 m/s, a tree in the elk's path is knocked flat (`Story.
+  knockTree`, called before the move). Harvest's `knocked` flag drops its
+  collider at once. Slower, a click or the badge butts the tree ahead down.
+  Either way it gives 2 logs, which hop up to the rider (`Story.packLift`).
+  In the sandbox, the inventory shows once you're carrying something.
+- The touch action badge now stands in for a click (Mouse0), not E, so it no
+  longer clashes with the ride / hop-off button.
+- **Stow gesture.** When a tool goes away (not when you swap to another),
+  the right arm reaches back over the shoulder. The tool leaves the mitten
+  at 0.2 s and lands on the pack with a small scale bounce (0.45 s in all).
+  The hammer has no pack slot, so the hand drops to the hip and it shrinks
+  away instead (`Character.stowing`).
+- **Dusk no longer holds up the fire prompt.** The hearth unlocks at
+  `readyAt` (18:35), and the light step's time-lapse started from wherever
+  the chimney finished (often ~14:00), so it took ~13 s. If you walked
+  straight in, you stood at the hearth with no prompt. `clock()` now gets
+  there within ~4.5 s of the step starting, and in about a second if you're
+  already within 2.5 m of the hearth. In the playthrough, the hearth step
+  went from 17.5 s to 7 s including the walk.

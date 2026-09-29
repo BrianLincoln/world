@@ -97,20 +97,15 @@ while (Date.now() - t0 < 420000) {
   }
   if (st.done) break;
   if (st.step === 'home') {
-    // Watch the ending from the doorstep: the far light, the cabin, the spirit.
-    const info = await ev(() => { const s = window.__ow.story(); return { h: s.d.env.hour, rev: s.revealT, far: s.far.pos, sp: s.spirit.pos, cx: s.site.x, cz: s.site.z }; });
-    if (info.rev > 3 && !seen.has('far')) {
-      seen.add('far');
+    // The ending: night falls over the lit cabin while the spirit potters.
+    const Q = await S();
+    if (!seen.has('night') && (await ev(() => window.__ow.story().d.env.hour)) > 20.8) {
+      seen.add('night');
       await hold(false);
-      const Q = await S();
-      await frame(info.far.x, info.far.z, 0.0, 7); await W(500); await shot('13-far-light');
       await look('12-night-cabin', ...Q.cab, 0.5, 0.12, 18, 600);
-      await look('12b-spirit-points', ...Q.sp, 2.2, 0.05, 4.5);
+      await look('12b-spirit-resting', ...Q.sp, 2.2, 0.05, 4.5);
     }
-    // Follow the spirit out onto the doorstep for the reveal.
-    const gg = await ev(() => { const s = window.__ow.story(); const b = window.__ow.body.pos; const g = s.goal(); if (!g) return null; const r = s.route(b, g).filter((p, i, a) => i === a.length - 1 || Math.hypot(p.x - b.x, p.z - b.z) > 0.5); return { wp: r[0], d: Math.hypot(g.x - b.x, g.z - b.z), b: { x: b.x, z: b.z } }; });
-    if (gg && gg.d > 0.6) { await ev((y) => window.__ow.lockInput(y), Math.atan2(-(gg.wp.x - gg.b.x), -(gg.wp.z - gg.b.z))); await hold(true); }
-    await W(150);
+    await W(500);
     continue;
   }
   // A cached route (re-planned when the goal moves or every few seconds),

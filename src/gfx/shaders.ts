@@ -727,6 +727,12 @@ uniform vec3 uBlushCol;
 uniform vec3 uGlow;
 /** Hearth-spirit warmth glow (0 = none): flattens shading and blooms. */
 uniform float uEmber;
+/**
+ * 0..1: the normal written for the outline pass leans toward the camera, so
+ * creases where one part meets another (a neck into a body) don't ink.
+ * Silhouettes still do, from depth. Lighting uses the true normal.
+ */
+uniform float uSoftCrease;
 
 float fillE(float d, float aa) { return 1.0 - smoothstep(-0.5 * aa, 0.5 * aa, d); }
 vec2 sphereUV(vec3 d) { return vec2(atan(d.x, d.z), asin(clamp(d.y, -1.0, 1.0))); }
@@ -820,7 +826,9 @@ void main() {
     // which is the point: a warm spirit stays warm under a blue night.
     if (uEmber > 0.3 && paint > 0.5) glow = max(glow, 0.52 + 0.06 * sin(uTime * 3.0));
   }
-  writeG(col, glow > 0.02 ? glow : -keep, n, vView);
+  vec3 gn = n;
+  if (uSoftCrease > 0.0) gn = normalize(mix(n, transpose(mat3(viewMatrix)) * normalize(-vView), uSoftCrease));
+  writeG(col, glow > 0.02 ? glow : -keep, gn, vView);
 }
 `;
 

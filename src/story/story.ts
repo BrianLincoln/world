@@ -14,8 +14,8 @@ import { Hud } from './hud';
 import { glowCanvas, iconCanvas, tex, type IconName } from './icons';
 import { Billboard, OVERLAY_U } from './overlay';
 import { PHASE1, type Anchor, type PhaseDef, type Resource, type StepDef, type TargetTag } from './phase1';
-import { AxeProp, ChopTree, easeGlint, Flyer, HammerProp, SmashRock, Stumps, Woods, type WoodTree } from './props';
-import type { Colliders } from '../world/colliders';
+import { AxeProp, ChopTree, easeGlint, Flyer, PickProp, SmashRock, Stumps, Woods, type WoodTree } from './props';
+import type { Colliders, PropHit } from '../world/colliders';
 import { BIG_ROCK, Harvest, rubbleOf, type RegrowCtx, type Taken } from '../world/harvest';
 import { hash01 } from '../core/rng';
 import { segDist } from '../world/worldgen';
@@ -33,8 +33,14 @@ const SAVE_VERSION = 2;
 const TOOL_HOLD = 0.7;
 /** Seconds without progress before the spirit repeats its hint, more obviously. */
 const HINT_AFTER = 20;
-/** How far from a trunk's / rock's surface the axe and hammer reach (m). */
-const CHOP_REACH = 2.2;
+/**
+ * How far from a tree's canopy edge / a rock's surface the axe and pick
+ * reach (m). Trees are measured from the canopy: its lowest tier droops to
+ * head height, so you'd otherwise have to stand under the branches.
+ */
+const CHOP_REACH = 1.3;
+/** Widest canopy a world tree can have (m), for the collider search. */
+const MAX_CANOPY = 4.6;
 const SMASH_REACH = 2.15;
 /** Resources come out as you work: every other blow, ending on the last (3 blows: 1st and 3rd). */
 const yields = (hit: number, hp: number) => (hp - hit) % 2 === 0;
@@ -52,7 +58,9 @@ interface SaveData {
   step: string;
   inv: Record<Resource, number>;
   axe: boolean;
-  hammer: boolean;
+  pick: boolean;
+  /** Saves from before the pick replaced the hammer. */
+  hammer?: boolean;
   felled: number[];
   /** Story boulders smashed. */
   smashed: number[];
@@ -94,10 +102,10 @@ export class Story {
   readonly cabin: RuinCabin;
   readonly spirit: Spirit;
   readonly trees: ChopTree[] = [];
-  /** Boulders to smash behind the cabin ([0] has the hammer on it). */
+  /** Boulders to smash behind the cabin ([0] has the pick struck in it). */
   readonly rocks: SmashRock[] = [];
   readonly axe: AxeProp;
-  readonly hammer: HammerProp;
+  readonly pick: PickProp;
   readonly stumps = new Stumps();
   /** A world tree / rock stood in for by a story prop (glints, takes hits). */
   private proxyTree: { tree: ChopTree; gi: number; gj: number; row: Float32Array } | null = null;
@@ -111,6 +119,7 @@ export class Story {
   private harvestSeen = -1;
   private saveClockT = 0;
   private frustum = new THREE.Frustum();
+  private pack = new THREE.Vector3();
   private projView = new THREE.Matrix4();
   private sphere = new THREE.Sphere();
   private regrow: RegrowCtx;
@@ -129,20 +138,27 @@ export class Story {
   stepIndex = 0;
   inv: Record<Resource, number> = { logs: 0, stones: 0 };
   hasAxe = false;
-  hasHammer = false;
+  hasPick = false;
   /** The tool drawn for the last action, and how long ago it was used. */
-  private toolHand: 'axe' | 'hammer' | null = null;
+  private toolHand: 'axe' | 'pick' | 'hammer' | null = null;
   private toolT = 99;
   done = false;
   private idleT = 0;
   private boostT = 0;
   private swingT = -1;
+  /** Walking in to a tree / rock picked from out of arm's length (s), -1 when not. */
+  private stepIn = -1;
+  private stepPressed = false;
   private swingCd = 0;
   private swingOn: { tree?: ChopTree; rock?: SmashRock } = {};
+  /** How far above the body's feet the pack is (riding: up on the mount). */
+  packLift = 0;
+  /** A mount could butt a tree right now (the badge shows antlers). */
+  ramReady = false;
   private depositT = 0;
   private stepT = 0;
-  private revealT = -1;
-  private revealWait = 0;
+  /** The resting spirit's pottering: where it is, how long it's been there, how long it stays. */
+  private pot = { out: 0, t: 0, go: 0, stay: 40 };
   private anchors = new Map<Anchor, THREE.Vector3>();
   private dirty = false;
   private saveT = 0;
@@ -172,10 +188,10 @@ export class Story {
       this.group.add(r.group);
     });
     const hb = site.boulders[0];
-    // Leaning on the cabin side of its boulder, a little away from where the spirit waits.
+    // Handle out over the cabin side of its boulder, a little away from where the spirit waits.
     const hdir = new THREE.Vector3(site.x - hb.x, 0, site.z - hb.z).normalize().applyAxisAngle(new THREE.Vector3(0, 1, 0), -0.45);
-    this.hammer = new HammerProp(this.rocks[0], hdir, ground);
-    this.group.add(this.hammer.mesh, this.stumps.mesh);
+    this.pick = new PickProp(this.rocks[0], hdir);
+    this.group.add(this.pick.group, this.stumps.mesh);
     const cab = { x: site.x, z: site.z };
     // The axe leans on the side facing the yard (where you walk in).
     this.axe = new AxeProp(site.stump.x, ground(site.stump.x, site.stump.z), site.stump.z, Math.atan2(site.paths[0].bx - cab.x, site.paths[0].bz - cab.z));
@@ -205,11 +221,11 @@ export class Story {
     this.anchors.set('cabin', L(0, 0).setY(site.y + 2.5));
     this.anchors.set('roof', this.cabin.parts.roof.centre.clone());
     this.anchors.set('bank', new THREE.Vector3(site.bank.x, 0, site.bank.z));
-    // Beside the hammer's boulder, on the cabin side, looking at it.
+    // Beside the pick's boulder, on the cabin side, looking at it.
     const hbv = new THREE.Vector3(hb.x, 0, hb.z);
     const toCab = new THREE.Vector3(site.x - hb.x, 0, site.z - hb.z).normalize();
-    this.anchors.set('hammerSpot', hbv.clone().addScaledVector(toCab, 1.8 + hb.sc).add(new THREE.Vector3(toCab.z, 0, -toCab.x).multiplyScalar(0.8)));
-    this.anchors.set('hammer', this.hammer.pos.clone());
+    this.anchors.set('pickSpot', hbv.clone().addScaledVector(toCab, 1.8 + hb.sc).add(new THREE.Vector3(toCab.z, 0, -toCab.x).multiplyScalar(0.8)));
+    this.anchors.set('pick', this.pick.pos.clone());
     const rc = site.boulders.reduce((a, b) => a.add(new THREE.Vector3(b.x, 0, b.z)), new THREE.Vector3()).divideScalar(site.boulders.length);
     this.anchors.set('rocks', rc.setY(ground(rc.x, rc.z) + 0.6));
     this.anchors.set('chimneySpot', L(CAB.W / 2 + 2.6, 1.6));
@@ -220,9 +236,9 @@ export class Story {
 
     // Interactables.
     this.targets.push({ tag: 'axe', pos: this.axe.pos, reach: 2.3, mat: this.axe.mat, ok: () => !this.axe.taken });
-    for (const t of this.trees) this.targets.push({ tag: 'tree', pos: t.pos, reach: CHOP_REACH + t.radius, mat: t.mat, ok: () => t.standing });
-    this.targets.push({ tag: 'hammer', pos: this.hammer.pos, reach: 2.0 + hb.sc, mat: this.hammer.mat, ok: () => !this.hammer.taken });
-    for (const r of this.rocks) this.targets.push({ tag: 'rock', pos: r.pos, reach: SMASH_REACH + r.radius, mat: r.mat, ok: () => !r.broken && this.hasHammer });
+    for (const t of this.trees) this.targets.push({ tag: 'tree', pos: t.pos, reach: CHOP_REACH + t.canopy, mat: t.mat, ok: () => t.standing });
+    this.targets.push({ tag: 'pick', pos: this.pick.pos, reach: 2.0 + hb.sc, mat: this.pick.mat, ok: () => !this.pick.taken });
+    for (const r of this.rocks) this.targets.push({ tag: 'rock', pos: r.pos, reach: SMASH_REACH + r.radius, mat: r.mat, ok: () => !r.broken && this.hasPick });
     this.targets.push({
       tag: 'hearth', pos: this.cabin.hearthPos, reach: 2.0, mat: this.cabin.hearthMat,
       ok: () => !this.cabin.lit && d.env.hour >= (this.step.kind === 'light' ? this.step.readyAt : 99),
@@ -339,6 +355,8 @@ export class Story {
       if (vn < 0) { vel.x -= (dx / dd) * vn; vel.z -= (dz / dd) * vn; }
     }
     for (const t of this.allTrees()) {
+      // A big mount strides over stumps (and through a tree it's knocking down).
+      if (t.state !== 'standing' && r > 0.5) continue;
       const rad = (t.state === 'standing' ? t.radius : 0.36 * t.def.sc) + r;
       if (pos.y > t.pos.y + (t.state === 'standing' ? 12 : 0.4)) continue;
       const dx = pos.x - t.pos.x, dz = pos.z - t.pos.z;
@@ -368,7 +386,7 @@ export class Story {
   // ------------------------------------------------------------ world trees and rocks
 
   /**
-   * Any world tree (with the axe) or ordinary boulder (with the hammer) you
+   * Any world tree (with the axe) or ordinary boulder (with the pick) you
    * walk up to is swapped for an identical story prop that can glint and
    * take blows; the world's instance hides meanwhile (Harvest proxy flag).
    * Walk away without hitting it and the world's copy comes back. Once it
@@ -377,7 +395,7 @@ export class Story {
   private updateProxies(walking: boolean) {
     const d = this.d;
     const p = d.body.pos;
-    const hitT = this.hasAxe && walking ? d.colliders.nearestTree(p.x, p.z, CHOP_REACH) : null;
+    const hitT = this.hasAxe && walking ? d.colliders.nearestTree(p.x, p.z, CHOP_REACH + MAX_CANOPY) : null;
     const cT = hitT ? Harvest.cellOf('tree', hitT.x, hitT.z) : null;
     if (this.proxyTree && (!cT || cT[0] !== this.proxyTree.gi || cT[1] !== this.proxyTree.gj)) this.releaseTree();
     if (hitT && cT && !this.proxyTree && !this.worldChops.some((w) => w.gi === cT[0] && w.gj === cT[1])) {
@@ -389,7 +407,7 @@ export class Story {
       d.harvest.proxy('tree', cT[0], cT[1], true);
       this.proxyTree = { tree, gi: cT[0], gj: cT[1], row: r };
     }
-    const hitR = this.hasHammer && walking ? d.colliders.nearestRock(p.x, p.z, SMASH_REACH, Infinity) : null;
+    const hitR = this.hasPick && walking ? d.colliders.nearestRock(p.x, p.z, SMASH_REACH, Infinity) : null;
     const cR = hitR ? Harvest.cellOf('rock', hitR.x, hitR.z) : null;
     if (this.proxyRock && (!cR || cR[0] !== this.proxyRock.gi || cR[1] !== this.proxyRock.gj)) this.releaseRock();
     if (hitR && cR && !this.proxyRock && !this.worldBreaks.some((w) => w.gi === cR[0] && w.gj === cR[1])) {
@@ -401,9 +419,9 @@ export class Story {
       this.proxyRock = { rock, gi: cR[0], gj: cR[1], row: hitR.row };
     }
     this.dynTargets.length = 0;
-    if (this.proxyTree) { const t = this.proxyTree.tree; this.dynTargets.push({ tag: 'tree', pos: t.pos, reach: CHOP_REACH + t.radius, mat: t.mat, ok: () => t.standing }); }
+    if (this.proxyTree) { const t = this.proxyTree.tree; this.dynTargets.push({ tag: 'tree', pos: t.pos, reach: CHOP_REACH + t.canopy, mat: t.mat, ok: () => t.standing }); }
     if (this.proxyRock) { const r = this.proxyRock.rock; this.dynTargets.push({ tag: 'rock', pos: r.pos, reach: SMASH_REACH + r.radius, mat: r.mat, ok: () => !r.broken }); }
-    if (this.hasHammer) {
+    if (this.hasPick) {
       for (const { rock: r } of this.rubble.values()) {
         if (r.broken || Math.hypot(r.pos.x - p.x, r.pos.z - p.z) > 4) continue;
         this.dynTargets.push({ tag: 'rock', pos: r.pos, reach: SMASH_REACH + r.radius, mat: r.mat, ok: () => !r.broken });
@@ -426,6 +444,85 @@ export class Story {
     if (w.rock.hits > 0) { this.worldBreaks.push(w); return; }
     this.group.remove(w.rock.group);
     this.d.harvest.proxy('rock', w.gi, w.gj, false);
+  }
+
+  /**
+   * The nearest standing tree whose trunk is in a strip `reach` m ahead of
+   * `from` along `dir` (unit, flat), `half` m either side: a story tree or a
+   * world tree (by its instance row). Null if none.
+   */
+  treeAhead(from: THREE.Vector3, dir: THREE.Vector3, reach: number, half: number): { tree?: ChopTree; hit?: PropHit; x: number; z: number } | null {
+    const inStrip = (x: number, z: number, r: number) => {
+      const dx = x - from.x, dz = z - from.z;
+      const along = dx * dir.x + dz * dir.z;
+      const side = Math.abs(dx * dir.z - dz * dir.x);
+      return along > -r && along < reach + r && side < half + r ? along : null;
+    };
+    let best: { tree?: ChopTree; hit?: PropHit; x: number; z: number } | null = null;
+    let bd = Infinity;
+    for (const t of this.allTrees()) {
+      if (!t.standing || Math.abs(t.pos.y - from.y) > 3) continue;
+      const a = inStrip(t.pos.x, t.pos.z, t.radius);
+      if (a !== null && a < bd) { bd = a; best = { tree: t, x: t.pos.x, z: t.pos.z }; }
+    }
+    const mid = reach * 0.5;
+    const hit = this.d.colliders.nearestTree(from.x + dir.x * mid, from.z + dir.z * mid, Math.hypot(mid, half) + 0.2);
+    if (hit) {
+      const a = inStrip(hit.x, hit.z, hit.radius);
+      if (a !== null && a < bd && Math.abs(hit.row[1] - from.y) < 3) best = { hit, x: hit.x, z: hit.z };
+    }
+    return best;
+  }
+
+  /**
+   * Knock a tree down (a charging or butting mount): it falls away from
+   * `from`, stops being solid at once, and throws out its logs, which hop
+   * into the pack. Returns where the trunk stood, or null if nothing was there.
+   */
+  knockTree(from: THREE.Vector3, dir: THREE.Vector3, reach: number, half: number): THREE.Vector3 | null {
+    const d = this.d;
+    const found = this.treeAhead(from, dir, reach, half);
+    if (!found) return null;
+    let tree = found.tree;
+    if (!tree && found.hit) {
+      // A world tree: stand a story tree in for it, falling (or use the one
+      // already standing in for it).
+      const r = found.hit.row;
+      const [gi, gj] = Harvest.cellOf('tree', r[0], r[2]);
+      tree = [...this.worldChops, ...(this.proxyTree ? [this.proxyTree] : [])].find((w) => w.gi === gi && w.gj === gj)?.tree;
+    }
+    if (!tree && found.hit) {
+      const r = found.hit.row;
+      const [gi, gj] = Harvest.cellOf('tree', r[0], r[2]);
+      tree = new ChopTree({ x: r[0], z: r[2], sc: r[3], rot: r[4], lean: r[6], tone: r[7], sy: r[5] }, r[1] + 0.4, -1);
+      tree.onLanded = (tr) => this.treeLanded(tr);
+      tree.onGone = (tr, along) => this.treeGone(tr, along);
+      this.group.add(tree.group);
+      d.harvest.proxy('tree', gi, gj, true);
+      this.worldChops.push({ tree, gi, gj, row: r });
+    }
+    if (!tree) return null;
+    // Stop being solid now, not when it's down.
+    for (const w of this.worldChops) {
+      if (w.tree !== tree && this.proxyTree?.tree !== tree) continue;
+      d.harvest.knock('tree', w.gi, w.gj, true);
+      d.colliders.invalidate(w.row[0], w.row[2]);
+    }
+    if (this.proxyTree?.tree === tree) {
+      d.harvest.knock('tree', this.proxyTree.gi, this.proxyTree.gj, true);
+      d.colliders.invalidate(this.proxyTree.row[0], this.proxyTree.row[2]);
+    }
+    const before = tree.hits;
+    tree.hit(from, 3);
+    d.sfx.chop();
+    d.sfx.fall();
+    const at = tree.pos.clone().lerp(from, 0.3).setY(tree.pos.y + 1.2);
+    d.puffs(at, 6, 0.14, 2.6);
+    this.chipPuffs.emit(at, 8, 0.07, 3.4, undefined, { life: 0.6, rise: -9, drag: 1.3, up: 3.2 });
+    // The logs a full chop would have given (less any already chopped out).
+    for (let k = before < 1 ? 0 : 1; k < 2; k++) this.spill('log', at, k + 1);
+    this.progressMade();
+    return tree.pos;
   }
 
   /** A world tree has fallen or a world rock broken: take it for good. */
@@ -555,6 +652,7 @@ export class Story {
       sp.teleport(this.anchor(st.anchor));
       sp.warmth = sp.warmthTarget = st.warmth;
     }
+    if (st.kind === 'rest') this.pot = { out: 0, t: 0, go: 0, stay: restoring ? 20 : 45 };
     if (st.kind === 'rest' && !restoring) this.d.sfx.chirp(true);
   }
 
@@ -603,7 +701,7 @@ export class Story {
     const p = this.d.body.pos;
     switch (st.kind) {
       case 'meet': return Math.hypot(p.x - this.anchor(st.near).x, p.z - this.anchor(st.near).z) < st.radius;
-      case 'pickup': return st.item === 'axe' ? this.hasAxe : this.hasHammer;
+      case 'pickup': return st.item === 'axe' ? this.hasAxe : this.hasPick;
       case 'gather': return this.inv[st.resource] + this.pending(st.resource) >= this.remainingFor(st.for) && this.pending(st.resource) === 0;
       case 'build': return st.parts.every((id) => this.cabin.parts[id].state === 'built');
       case 'light': return this.cabin.lit;
@@ -636,7 +734,7 @@ export class Story {
     const t = this.inReach();
     if (t) {
       if (t.tag === 'tree') return { verb: 'chop', icon: 'axe', target: t };
-      if (t.tag === 'rock') return { verb: 'smash', icon: 'hammer', target: t };
+      if (t.tag === 'rock') return { verb: 'smash', icon: 'pick', target: t };
       if (t.tag === 'hearth') return { verb: 'light', icon: 'flame', target: t };
       return { verb: 'take', icon: 'hand', target: t };
     }
@@ -672,7 +770,7 @@ export class Story {
     const p = this.d.body.pos;
     let best: Target | null = null, bd = Infinity;
     for (const t of [...this.targets, ...this.dynTargets]) {
-      const tool = (t.tag === 'tree' && this.hasAxe) || (t.tag === 'rock' && this.hasHammer);
+      const tool = (t.tag === 'tree' && this.hasAxe) || (t.tag === 'rock' && this.hasPick);
       if ((t.tag !== tag && !tool) || !t.ok()) continue;
       if (Math.abs(p.y - t.pos.y) > 2.5) continue;
       const d = Math.hypot(p.x - t.pos.x, p.z - t.pos.z);
@@ -684,19 +782,18 @@ export class Story {
   private act(t: Target, pressed: boolean) {
     const d = this.d;
     if (t.tag === 'tree' || t.tag === 'rock') {
-      if (this.swingCd > 0 || this.swingT >= 0) return;
+      if (this.swingCd > 0 || this.swingT >= 0 || this.stepIn >= 0) return;
       this.swingOn = t.tag === 'tree' ? { tree: this.allTrees().find((tr) => tr.pos === t.pos) } : { rock: this.allRocks().find((r) => r.pos === t.pos) };
       if (!this.swingOn.tree && !this.swingOn.rock) return;
-      this.swingT = 0;
-      this.swingCd = pressed ? 0.6 : 0.72;
-      this.useTool(t.tag === 'tree' ? 'axe' : 'hammer');
-      d.rig.chop();
+      this.stepPressed = pressed;
+      // From out at the canopy edge, walk in first so the blow lands.
+      if (this.swingGap() > 0.35) this.stepIn = 0; else this.startSwing();
       return;
     }
-    if (t.tag === 'axe' || t.tag === 'hammer') {
-      const prop = t.tag === 'axe' ? this.axe : this.hammer;
+    if (t.tag === 'axe' || t.tag === 'pick') {
+      const prop = t.tag === 'axe' ? this.axe : this.pick;
       prop.take();
-      if (t.tag === 'axe') this.hasAxe = true; else this.hasHammer = true;
+      if (t.tag === 'axe') this.hasAxe = true; else this.hasPick = true;
       this.useTool(t.tag);
       d.sfx.pickup();
       this.sparkles.emit(t.pos.clone().setY(t.pos.y + 0.6), 6, 0.07, 1.6, undefined, { life: 0.6, rise: 0.4, up: 1.4 });
@@ -710,7 +807,7 @@ export class Story {
   }
 
   /** Draw a tool into the right mitten (it's stowed again after TOOL_HOLD s unused). */
-  private useTool(k: 'axe' | 'hammer') {
+  private useTool(k: 'axe' | 'pick' | 'hammer') {
     this.toolHand = k;
     this.toolT = 0;
   }
@@ -718,7 +815,7 @@ export class Story {
   private placeTools(dt: number) {
     this.toolT += dt;
     if (this.toolT > TOOL_HOLD && this.swingT < 0 && !this.depositing) this.toolHand = null;
-    this.d.rig.setTools({ axe: this.hasAxe, hammer: this.hasHammer }, this.toolHand);
+    this.d.rig.setTools({ axe: this.hasAxe, pick: this.hasPick }, this.toolHand);
   }
 
   /**
@@ -801,7 +898,7 @@ export class Story {
 
     // Flying pickups land in the pack.
     for (const fl of this.flyers) {
-      if (fl.f.update(dt, body.pos)) {
+      if (fl.f.update(dt, this.pack.copy(body.pos).setY(body.pos.y + this.packLift))) {
         this.inv[fl.res]++;
         d.sfx.collect(this.inv[fl.res]);
         this.hud.bump(fl.res);
@@ -811,7 +908,9 @@ export class Story {
     this.flyers = this.flyers.filter((f) => { if (f.f.done) { this.group.remove(f.f.mesh); return false; } return true; });
 
     if (!d.active) {
-      this.hud.set(this.inv, false, this.opened());
+      // The sandbox has no story, but wood knocked down still counts.
+      this.hud.set(this.inv, this.inv.logs + this.inv.stones > 0, this.opened());
+      this.hud.action(this.ramReady ? 'antlers' : null, input.held('Mouse0'), input, 'tap');
       return;
     }
 
@@ -824,8 +923,26 @@ export class Story {
     const holding = input.held('KeyE') || input.held('Mouse0');
     if ((this.action?.verb === 'chop' || this.action?.verb === 'smash') && holding) this.act(this.action.target!, false);
     const hold = this.action?.verb === 'chop' || this.action?.verb === 'smash';
-    this.hud.action(this.action?.icon ?? null, holding, input, hold ? 'hold' : 'tap');
+    this.hud.action(this.action?.icon ?? (this.ramReady ? 'antlers' : null), holding, input, hold ? 'hold' : 'tap');
     this.swingCd -= dt;
+    if (this.stepIn >= 0) {
+      // Walk (through the movement mode, so it animates and collides) until
+      // the trunk / rock is in arm's length, then swing.
+      this.stepIn += dt;
+      const { tree, rock } = this.swingOn;
+      const tp = (tree ?? rock)!.pos;
+      const gone = tree ? !tree.standing : rock!.broken;
+      const gap = this.swingGap();
+      if (gone || !walking) this.stepIn = -1;
+      else if (gap <= 0.1 || this.stepIn > 1.2) this.startSwing();
+      else {
+        this.face(tp, dt);
+        const dx = tp.x - body.pos.x, dz = tp.z - body.pos.z, dl = Math.hypot(dx, dz) || 1;
+        const s = Math.min(4.5, gap * 8);
+        body.vel.x = (dx / dl) * s;
+        body.vel.z = (dz / dl) * s;
+      }
+    }
     if (this.swingT >= 0) {
       this.swingT += dt;
       const { tree, rock } = this.swingOn;
@@ -865,6 +982,7 @@ export class Story {
     }
 
     // Deposits: stand by the sketch with material and it flies into the slots.
+    if (st.kind !== 'build') this.depositing = false;
     if (st.kind === 'build') {
       const inZone = this.inBuildZone();
       // One press hands over everything that's needed, piece by piece.
@@ -885,10 +1003,9 @@ export class Story {
           const bb = new Billboard(tex(iconCanvas(st.resource === 'logs' ? 'log' : 'stone')), 0.55, 30);
           this.overlayGroup.add(bb.mesh);
           this.tokens.push({ bb, from: body.pos.clone().setY(body.pos.y + 1.3), part, slot, t: 0, res: st.resource });
-          // Building: with the hammer it's a knock per piece; before she has
-          // one (the cabin repair) it's a flurry in a cloud of dust.
-          if (this.hasHammer) { this.useTool('hammer'); d.rig.knock(); this.dust(P.centre); }
-          else { d.rig.give(); this.dust(P.centre, 2); }
+          // Building: the hammer comes out for a knock per piece (it isn't
+          // carried, just drawn for the work and put away after).
+          this.useTool('hammer'); d.rig.knock(); this.dust(P.centre);
           this.progressMade();
         }
       }
@@ -939,7 +1056,7 @@ export class Story {
     for (const t of [...this.targets, ...this.dynTargets]) {
       const on = (t.tag === tag && t.ok()) || t === aimed;
       // Thin tools are nearly all rim; they get a lighter touch too.
-      const k = t.tag === 'tree' ? 0.55 : t.tag === 'axe' || t.tag === 'hammer' ? 0.5 : 1;
+      const k = t.tag === 'tree' ? 0.55 : t.tag === 'axe' || t.tag === 'pick' ? 0.5 : 1;
       easeGlint(t.mat, on ? (this.boostT > 0 ? 1.5 : 1) * k : 0, dt);
     }
 
@@ -1001,6 +1118,22 @@ export class Story {
     return out;
   }
 
+  /** How far the explorer is outside striking distance of the tree / rock being worked (m). */
+  private swingGap(): number {
+    const { tree, rock } = this.swingOn;
+    const tp = (tree ?? rock)!.pos;
+    const reachIn = tree ? tree.radius + 0.95 : rock!.radius + 0.85;
+    return Math.hypot(tp.x - this.d.body.pos.x, tp.z - this.d.body.pos.z) - reachIn;
+  }
+
+  private startSwing() {
+    this.stepIn = -1;
+    this.swingT = 0;
+    this.swingCd = this.stepPressed ? 0.6 : 0.72;
+    this.useTool(this.swingOn.tree ? 'axe' : 'pick');
+    this.d.rig.chop();
+  }
+
   /** Turn the explorer toward a point (squaring up to work). */
   private face(p: THREE.Vector3, dt: number) {
     const b = this.d.body;
@@ -1042,7 +1175,7 @@ export class Story {
     }
     if (st.kind === 'gather' && st.targets === 'rock') {
       const r = this.rocks.find((x) => !x.broken);
-      return r ? { at: this.anchor('hammerSpot'), face: r.pos } : null;
+      return r ? { at: this.anchor('pickSpot'), face: r.pos } : null;
     }
     if (st.kind === 'light' && this.d.env.hour < st.readyAt) return null;
     if (st.kind === 'build' && this.inv[st.resource] === 0) return null;
@@ -1052,25 +1185,41 @@ export class Story {
   private restLogic(dt: number) {
     const st = this.step;
     if (st.kind !== 'rest') return;
-    if (this.revealT < 0 && !this.done && this.d.env.hour >= st.revealAt) {
-      // Night: the spirit steps out onto the doorstep and shows you the light
-      // across the valley. Then it goes back in to its fire.
-      this.revealT = 0;
-      this.spirit.want = { at: this.anchor(st.from).clone(), face: this.anchor(st.reveal), pose: 'point', icon: 'home', lead: true };
+    // Night has come in: the story lets go of the clock.
+    if (!this.done && this.d.env.hour >= st.doneAt) { this.done = true; this.dirty = true; }
+    this.potter(dt);
+  }
+
+  /**
+   * Nothing left to ask for, so the spirit just lives here: a long sit by the
+   * fire, then a slow turn round the yard (a spot or three, looking about),
+   * then back to the fire. It never leads or points; the next phase's first
+   * step takes over from this.
+   */
+  private potter(dt: number) {
+    const sp = this.spirit;
+    const p = this.pot;
+    if (sp.busy) return;
+    if (sp.arrived || p.go > 20) p.t += dt;
+    else p.go += dt;
+    if (p.t < p.stay) return;
+    p.t = p.go = 0;
+    if (p.out === 0) p.out = 1 + Math.floor(Math.random() * 3);
+    else p.out--;
+    if (p.out === 0) {
+      p.stay = 45 + Math.random() * 45;
+      sp.want = { at: this.anchor('hearthSeat').clone(), face: this.anchor('hearth'), pose: 'sit', icon: null, lead: false, settled: true };
+      return;
     }
-    if (this.revealT >= 0) {
-      // It keeps pointing until you've stood beside it a while (or, if you
-      // wander off, it gives up after a minute and goes home anyway).
-      const near = this.d.body.pos.distanceTo(this.anchor(st.from)) < 14;
-      this.revealWait += dt;
-      if ((this.spirit.arrived || this.revealT > 0) && (near || this.revealWait > 60)) this.revealT += dt;
-      if (this.revealT > 8 && !this.done) {
-        this.done = true;
-        this.d.sfx.chirp();
-        this.spirit.want = { at: this.anchor('hearthSeat').clone(), face: this.anchor('hearth'), pose: 'sit', icon: null, lead: false, settled: true };
-        this.dirty = true;
-      }
-    }
+    p.stay = 7 + Math.random() * 9;
+    const spots: Anchor[] = ['doorstep', 'yard', 'stumpSpot', 'chimneySpot', 'seat'];
+    const looks: Anchor[] = ['grove', 'cabin', 'chimney', 'far', 'rocks'];
+    const pick = <T>(a: T[]) => a[Math.floor(Math.random() * a.length)];
+    const at = this.anchor(pick(spots)).clone();
+    at.x += (Math.random() - 0.5) * 2.4;
+    at.z += (Math.random() - 0.5) * 2.4;
+    at.y = this.d.gen.height(at.x, at.z);
+    sp.want = { at, face: this.anchor(pick(looks)), pose: 'stand', icon: null, lead: false, settled: true };
   }
 
   /**
@@ -1091,12 +1240,18 @@ export class Story {
     const cap = st.easeTo ?? (next ? next.hour ?? (next.easeTo !== undefined ? next.easeTo - 1.2 : start) : start);
     if (env.hour < start - 0.005) {
       const gap = start - env.hour;
-      const rate = st.easeTo !== undefined ? gap * 0.16 + 0.035 : Math.min(0.2, gap * 0.12 + 0.02);
+      let rate = st.easeTo !== undefined ? gap * 0.16 + 0.035 : Math.min(0.2, gap * 0.12 + 0.02);
+      // The hearth can't be lit before dusk, so dusk mustn't keep you
+      // waiting: it's there within a few seconds of the step, and at once if
+      // you're already at the hearth.
+      if (st.kind === 'light' && env.hour < st.readyAt) {
+        const p = this.d.body.pos, h = this.cabin.hearthPos;
+        const left = Math.hypot(p.x - h.x, p.z - h.z) < 2.5 ? 0.5 : Math.max(0.5, 4.5 - this.stepT);
+        rate = Math.max(rate, (st.readyAt - env.hour) / left + 0.3);
+      }
       env.hour = Math.min(start, env.hour + Math.max(natural, rate * dt));
     } else if (env.hour < cap) {
       env.hour = Math.min(cap, env.hour + natural);
-    } else if (st.kind === 'rest' && this.revealT >= 0) {
-      env.hour += natural;
     }
   }
 
@@ -1107,7 +1262,7 @@ export class Story {
     for (let k = 0; k < i; k++) {
       const st = this.phase.steps[k];
       if (st.kind === 'pickup' && st.item === 'axe') { this.axe.take(); this.hasAxe = true; }
-      if (st.kind === 'pickup' && st.item === 'hammer') { this.hammer.take(); this.hasHammer = true; }
+      if (st.kind === 'pickup' && st.item === 'pick') { this.pick.take(); this.hasPick = true; }
       if (st.kind === 'build') for (const p of st.parts) this.cabin.setBuilt(p);
       if (st.kind === 'gather' && st.targets === 'tree') for (const t of this.trees.slice(0, 3)) t.setFelled();
       if (st.kind === 'gather' && st.targets === 'rock') for (const r of this.rocks.slice(0, 2)) r.setBroken();
@@ -1133,7 +1288,7 @@ export class Story {
       step: this.step.id,
       inv: { ...this.inv, logs: this.inv.logs + this.pending('logs') + this.tokens.filter((t) => t.res === 'logs').length, stones: this.inv.stones + this.pending('stones') + this.tokens.filter((t) => t.res === 'stones').length },
       axe: this.hasAxe,
-      hammer: this.hasHammer,
+      pick: this.hasPick,
       felled: this.trees.filter((t) => t.state !== 'standing').map((t) => t.index),
       smashed: this.rocks.filter((r) => r.broken).map((r) => r.index),
       world: this.d.harvest.all(),
@@ -1162,13 +1317,14 @@ export class Story {
     this.d.harvest.load(data.world ?? [], data.clock ?? 0);
     this.d.colliders.reset(this.d.gen);
     this.refreshTaken();
-    const i = this.phase.steps.findIndex((s) => s.id === data!.step);
+    const saved = data.step === 'hammer' ? 'pick' : data.step;
+    const i = this.phase.steps.findIndex((s) => s.id === saved);
     this.stepIndex = Math.max(0, i);
     this.inv = { logs: data.inv.logs ?? 0, stones: data.inv.stones ?? 0 };
     this.hasAxe = data.axe;
-    this.hasHammer = !!data.hammer;
+    this.hasPick = !!(data.pick ?? data.hammer);
     if (this.hasAxe) this.axe.take();
-    if (this.hasHammer) this.hammer.take();
+    if (this.hasPick) this.pick.take();
     for (const k of data.felled) this.trees[k]?.setFelled();
     for (const k of data.smashed ?? []) this.rocks[k]?.setBroken();
     for (const p of data.built) this.cabin.setBuilt(p);
@@ -1200,11 +1356,11 @@ export class Story {
     const nearest = (list: { pos: THREE.Vector3 }[]) => list.sort((a, b) => a.pos.distanceTo(p) - b.pos.distanceTo(p))[0]?.pos ?? null;
     switch (st.kind) {
       case 'meet': return this.anchor(st.near);
-      case 'pickup': return st.item === 'axe' ? this.axe.pos : this.hammer.pos;
+      case 'pickup': return st.item === 'axe' ? this.axe.pos : this.pick.pos;
       case 'gather': return st.targets === 'tree' ? nearest(this.trees.filter((t) => t.standing)) : nearest(this.rocks.filter((r) => !r.broken));
       case 'build': return this.anchor(st.zone);
       case 'light': return this.d.env.hour >= st.readyAt ? this.cabin.hearthPos : this.anchor('doorstep');
-      case 'rest': return this.revealT >= 0 && !this.done ? this.anchor(st.from) : null;
+      case 'rest': return null;
     }
   }
 

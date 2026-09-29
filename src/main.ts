@@ -16,6 +16,7 @@ import { Crow, crowStyle } from './mobs/crow';
 import { Mobs } from './mobs/manager';
 import type { Mob, MobCtx } from './mobs/types';
 import { Floof } from './mobs/floof';
+import { Elk } from './mobs/elk';
 import { OrbitCamera } from './player/orbitCamera';
 import { DebugUI } from './ui/debug';
 import { StoryHost } from './story/host';
@@ -81,7 +82,8 @@ rig.onPuff = (at, n, size, spread) => puffs.emit(at, n, size, spread);
 
 // Creatures: wild flocks, the lasso, leads and riding.
 const crow = new Crow();
-const mobs = new Mobs(gen, [new Floof(), crow]);
+const elk = new Elk();
+const mobs = new Mobs(gen, [new Floof(), crow, elk]);
 // ?mobs=0 = no wild spawns (shots place their own), or a density multiplier.
 if (params.has('mobs')) mobs.settings.density = parseFloat(params.get('mobs')!);
 scene.add(mobs.group);
@@ -93,6 +95,10 @@ const mobCtx: MobCtx = {
   gen,
   player: { pos: new THREE.Vector3(), vel: new THREE.Vector3(), heading: 0, mode: 'walk' },
   surface: (x, z) => Math.max(gen.height(x, z), SEA_LEVEL),
+  collide: (pos, vel, r) => {
+    colliders.push(pos, vel, r);
+    storyHost?.story?.collide(pos, vel, r);
+  },
   puff: (at, n, size, spread) => puffs.emit(at, n, size, spread),
 };
 let riding: Mob | null = null;
@@ -453,6 +459,7 @@ function frame(ts?: number) {
   ctx.camYaw = inputYaw ?? orbit.yaw;
   ctx.camPitch = orbit.pitch;
   ctx.dt = dt;
+  elkWork(dt);
   if (player.current.name !== 'fly') colliders.prefetch(player.body.pos.x, player.body.pos.z);
   player.update(ctx);
   input.endFrame();
@@ -507,8 +514,22 @@ function frame(ts?: number) {
     riding.vel.copy(body.vel);
     riding.heading = body.heading;
     riding.grounded = body.grounded;
-    for (const ev of body.events) if (ev.type === 'land' && ev.impact > 3) puffs.emit(body.pos, 6, 0.16, 2.2);
+    for (const ev of body.events) {
+      if (ev.type === 'land' && ev.impact > 3) puffs.emit(body.pos, 6, 0.16, 2.2);
+      if (ev.type === 'bump') orbit.bump(Math.min(1.5, ev.impact * 0.1));
+    }
+    // A gallop kicks up dust behind.
+    const gs = rideMode.gallopState;
+    if (riding.species.name === 'elk' && body.grounded && gs.wet < 0.5 && gs.speed > 12) {
+      hoofT -= dt;
+      if (hoofT <= 0) {
+        hoofT = 0.11 - Math.min(0.06, (gs.speed - 12) * 0.003);
+        const k = (Math.random() - 0.5) * 0.8;
+        puffs.emit(v3.set(body.pos.x - Math.sin(body.heading) * 1.3 + Math.cos(body.heading) * k, body.pos.y + 0.1, body.pos.z - Math.cos(body.heading) * 1.3 - Math.sin(body.heading) * k), 1, 0.16 + Math.min(0.1, (gs.speed - 12) * 0.005), 0.8);
+      }
+    }
   }
+  if (storyHost?.story) storyHost.story.packLift = riding ? riding.species.seat(riding).pos.y - body.pos.y : 0;
   mobCtx.dt = dt;
   mobCtx.time = elapsed;
   mobCtx.player.pos.copy(body.pos);
@@ -587,6 +608,51 @@ function frame(ts?: number) {
   requestAnimationFrame(frame);
 }
 let skidT = 0;
+let hoofT = 0;
+/** Seconds until a butt of the antlers lands (-1 = none under way). */
+let buttAt = -1;
+const elkDir = new THREE.Vector3();
+/** A full gallop (m/s along the heading) bowls trees over. */
+const CHARGE_SPEED = 13;
+
+/**
+ * Riding an elk: at a full gallop, trees in its path are knocked flat as it
+ * runs through them (it hardly checks its stride); slower, a click (or the
+ * badge) butts the tree in front down with the antlers. The logs hop into
+ * your pack either way. Runs before the move, so the trunk is out of the way
+ * before the gallop would hit it.
+ */
+function elkWork(dt: number) {
+  const story = storyHost?.story;
+  if (!story) return;
+  const m = riding;
+  if (!m || m.species.name !== 'elk') {
+    story.ramReady = false;
+    buttAt = -1;
+    return;
+  }
+  const b = player.body;
+  const gs = rideMode.gallopState;
+  elkDir.set(Math.sin(b.heading), 0, Math.cos(b.heading));
+  const nose = m.species.radius + 0.4;
+  if (b.grounded && gs.wet < 0.5 && gs.speed > CHARGE_SPEED) {
+    const reach = nose + gs.speed * dt * 1.6 + 0.4;
+    if (story.knockTree(b.pos, elkDir, reach, 0.5)) {
+      elk.butt(m);
+      gs.speed *= 0.85;
+      orbit.bump(0.8);
+    }
+  }
+  story.ramReady = b.grounded && gs.wet < 0.5 && gs.speed <= CHARGE_SPEED && !!story.treeAhead(b.pos, elkDir, nose + 2.2, 0.8);
+  if (buttAt < 0 && story.ramReady && input.pressed('Mouse0')) {
+    elk.butt(m);
+    buttAt = 0.26;
+  }
+  if (buttAt >= 0) {
+    buttAt -= dt;
+    if (buttAt < 0 && story.knockTree(b.pos, elkDir, nose + 2.6, 0.9)) orbit.bump(0.6);
+  }
+}
 /** Seconds of dust trail left after a timed kick. */
 let trailT = 0;
 let trailEmit = 0;
@@ -630,11 +696,15 @@ function updateAimHud() {
   const e = next ? `<b>E</b> ${onto}` : '<b>E</b> hop off';
   if (next && !mounted) tips.push(e);
   if (cycling) tips.push(`${e} · <b>Shift</b> pedal hard · <b>Space</b> hop`);
-  if (riding) tips.push(riding.species.mount.walk ? `${e} · <b>Space</b> take off / climb · <b>C</b> descend` : `${e} · <b>Space</b> climb · <b>C</b> descend`);
+  if (riding) {
+    const sp = riding.species.mount;
+    if (!sp.fly) tips.push(`${e} · <b>Shift</b> gallop · <b>Space</b> leap${storyHost?.story?.ramReady ? ' · <b>Click</b> knock it down' : ''}`);
+    else tips.push(sp.walk ? `${e} · <b>Space</b> take off / climb · <b>C</b> descend` : `${e} · <b>Space</b> climb · <b>C</b> descend`);
+  }
   touch?.setContext({
     ride: next ? (mounted ? 'Switch' : 'Ride') : mounted ? 'Hop off' : null,
     lasso: a ? (a.action === 'lasso' ? 'Lasso' : a.action === 'lead' ? 'Lead' : 'Let go') : null,
-    down: !!riding || player.current.name === 'fly',
+    down: (!!riding && !!riding.species.mount.fly) || player.current.name === 'fly',
     fly: !riding && !cycling,
   });
   const html = tips.join(' · ');
@@ -726,7 +796,7 @@ window.__ow = {
   _body: player.body,
   _cam: camera,
   mobs,
-  /** Drop a flock (floof|crow) `d` m in front of the explorer. */
+  /** Drop a flock (floof|crow|elk) `d` m in front of the explorer. */
   spawnFlock: (name: string, d = 14, n?: number) => {
     const b = player.body;
     mobs.spawnFlockAt(name, b.pos.x + Math.sin(b.heading) * d, b.pos.z + Math.cos(b.heading) * d, mobCtx, n);

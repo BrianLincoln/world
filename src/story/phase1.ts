@@ -12,10 +12,10 @@ export type Resource = 'logs' | 'stones';
 /** Named places the spirit can wait at or point to (resolved by the site). */
 export type Anchor =
   | 'hearthSpot' | 'hearthSeat' | 'hearth' | 'door' | 'doorstep' | 'stumpSpot' | 'axe' | 'seat' | 'grove'
-  | 'yard' | 'cabin' | 'roof' | 'bank' | 'stones' | 'chimneySpot' | 'chimney' | 'far' | 'lookout' | 'hammerSpot' | 'hammer' | 'rocks';
+  | 'yard' | 'cabin' | 'roof' | 'bank' | 'stones' | 'chimneySpot' | 'chimney' | 'far' | 'lookout' | 'pickSpot' | 'pick' | 'rocks';
 
 /** Interactable groups a step can switch on (they glint while it's active). */
-export type TargetTag = 'axe' | 'hammer' | 'tree' | 'rock' | 'hearth';
+export type TargetTag = 'axe' | 'pick' | 'tree' | 'rock' | 'hearth';
 
 interface StepBase {
   id: string;
@@ -43,15 +43,16 @@ export type StepDef =
   /** Done when the explorer comes within `radius` of an anchor. */
   | (StepBase & { kind: 'meet'; near: Anchor; radius: number })
   /** Pick up a tool (every target with the tag). */
-  | (StepBase & { kind: 'pickup'; targets: TargetTag; item: 'axe' | 'hammer' })
+  | (StepBase & { kind: 'pickup'; targets: TargetTag; item: 'axe' | 'pick' })
   /** Collect enough of a resource to finish `for` (minus what's already built in). */
   | (StepBase & { kind: 'gather'; targets: TargetTag; resource: Resource; for: PartId[] })
   /** Bring the resource to the sketched parts; fall back to `gather` if you run out. */
   | (StepBase & { kind: 'build'; parts: PartId[]; resource: Resource; gather: string; zone: Anchor; zoneRadius: number })
   /** Light something, possible from `readyAt` o'clock. */
   | (StepBase & { kind: 'light'; targets: TargetTag; readyAt: number })
-  /** The ending: the spirit settles; at `revealAt` it walks to `from` and shows you `reveal`. */
-  | (StepBase & { kind: 'rest'; reveal: Anchor; from: Anchor; revealAt: number });
+  /** Nothing to ask for: the spirit potters (fire, yard, fire). At `doneAt`
+   *  o'clock the story lets go of the clock. */
+  | (StepBase & { kind: 'rest'; doneAt: number });
 
 export interface PartDef { id: PartId; resource: Resource; need: number }
 
@@ -75,10 +76,10 @@ export const PHASE1: PhaseDef = {
     { id: 'axe', kind: 'pickup', targets: 'axe', item: 'axe', anchor: 'stumpSpot', face: 'axe', icon: 'axe', warmth: 0.06, hour: 7.9, hint: 'tug', onDone: 'celebrate' },
     { id: 'logs', kind: 'gather', targets: 'tree', resource: 'logs', for: ['roof', 'door'], anchor: 'seat', face: 'grove', pose: 'sit', icon: 'log', warmth: 0.14, hour: 9.0, hint: 'tug', onDone: 'celebrate' },
     { id: 'repair', kind: 'build', parts: ['roof', 'door'], resource: 'logs', gather: 'logs', zone: 'yard', zoneRadius: 6.5, anchor: 'yard', face: 'roof', icon: 'log', warmth: 0.24, hour: 10.6, hint: 'tug', onDone: 'celebrate' },
-    { id: 'hammer', kind: 'pickup', targets: 'hammer', item: 'hammer', anchor: 'hammerSpot', face: 'hammer', icon: 'hammer', warmth: 0.36, hour: 12.2, hint: 'tug', onDone: 'celebrate' },
-    { id: 'stones', kind: 'gather', targets: 'rock', resource: 'stones', for: ['chimney'], anchor: 'hammerSpot', face: 'rocks', icon: 'stone', warmth: 0.46, hour: 13.4, hint: 'tug', onDone: 'celebrate' },
+    { id: 'pick', kind: 'pickup', targets: 'pick', item: 'pick', anchor: 'pickSpot', face: 'pick', icon: 'pick', warmth: 0.36, hour: 12.2, hint: 'tug', onDone: 'celebrate' },
+    { id: 'stones', kind: 'gather', targets: 'rock', resource: 'stones', for: ['chimney'], anchor: 'pickSpot', face: 'rocks', icon: 'stone', warmth: 0.46, hour: 13.4, hint: 'tug', onDone: 'celebrate' },
     { id: 'chimney', kind: 'build', parts: ['chimney'], resource: 'stones', gather: 'stones', zone: 'chimneySpot', zoneRadius: 5.5, anchor: 'chimneySpot', face: 'chimney', icon: 'stone', warmth: 0.58, hour: 15.0, hint: 'tug', onDone: 'celebrate' },
     { id: 'hearth', kind: 'light', targets: 'hearth', readyAt: 18.35, anchor: 'hearthSpot', face: 'hearth', pose: 'warm', icon: 'flame', warmth: 0.68, easeTo: 18.75, hint: 'tug', onDone: 'celebrate' },
-    { id: 'home', kind: 'rest', reveal: 'far', from: 'lookout', revealAt: 20.6, anchor: 'hearthSeat', face: 'hearth', pose: 'sit', icon: null, warmth: 1, easeTo: 21.3, hint: 'none' },
+    { id: 'home', kind: 'rest', doneAt: 21.2, anchor: 'hearthSeat', face: 'hearth', pose: 'sit', icon: null, warmth: 1, easeTo: 21.3, hint: 'none' },
   ],
 };

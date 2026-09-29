@@ -3,7 +3,7 @@ import { buildBoulder, buildConifer, TREE_HEIGHT } from '../gfx/geometry';
 import { makeCasterMaterial, makePropMaterial } from '../gfx/materials';
 import { SHADOW_LAYER } from '../gfx/groundShadow';
 import type { StoryStone, StoryTree } from '../world/storySite';
-import { buildAxe, buildBlock, buildHammer, buildLog, buildPebble, buildStump } from './geometry';
+import { buildAxe, buildBlock, buildLog, buildPebble, buildPick, buildStump, PICK_TIP } from './geometry';
 
 // The small story props, each its own mesh drawn with the prop shader so it
 // matches the world exactly (same palette, bands, outlines) and can carry the
@@ -71,6 +71,8 @@ export class ChopTree {
   /** World xz of the trunk and its collision radius. */
   readonly pos: THREE.Vector3;
   readonly radius: number;
+  /** Radius of the lowest (widest) canopy tier. */
+  readonly canopy: number;
   onLanded?: (t: ChopTree) => void;
   onGone?: (t: ChopTree, along: THREE.Vector3[]) => void;
 
@@ -87,14 +89,18 @@ export class ChopTree {
     this.group.add(this.tree, this.stump);
     this.pos = new THREE.Vector3(def.x, y, def.z);
     this.radius = 0.34 * def.sc;
+    this.canopy = (TREE_HEIGHT * 0.19 + 0.3) * def.sc;
   }
 
   get standing() { return this.state === 'standing'; }
 
-  /** One axe blow from `from` (the explorer's position). Returns true on the felling blow. */
-  hit(from: THREE.Vector3): boolean {
+  /**
+   * One axe blow from `from` (the explorer's position); `power` blows at once
+   * (a charging elk fells it outright). Returns true on the felling blow.
+   */
+  hit(from: THREE.Vector3, power = 1): boolean {
     if (this.state !== 'standing') return false;
-    this.hits++;
+    this.hits = Math.min(3, this.hits + power);
     this.shakeDir.set(this.pos.x - from.x, 0, this.pos.z - from.z).normalize();
     this.shakeV += 1.6 + this.hits * 0.4;
     if (this.hits >= 3) {
@@ -325,7 +331,7 @@ let ROCK_GEO: THREE.BufferGeometry | null = null;
 const RAY = new THREE.Raycaster();
 
 /**
- * A boulder you can break with the hammer: three blows (it jolts and chips),
+ * A boulder you can break with the pick: three blows (it jolts and chips),
  * then it cracks apart in a burst of dust and leaves stones to collect. The
  * same mesh as world boulders, so it can stand in for one seamlessly. A big
  * one takes `hp` blows and breaks into rubble instead (story.ts); each piece
@@ -384,6 +390,14 @@ export class SmashRock {
   }
   private posed: THREE.Mesh | null = null;
 
+  /** World height of the rock's upper surface above (x, z) (its base if the point misses it). */
+  top(x: number, z: number): number {
+    this.surface(new THREE.Vector3(1, 0, 0), this.row[1]);
+    RAY.set(new THREE.Vector3(x - this.row[0], 10 * this.row[3] + 5, z - this.row[2]), new THREE.Vector3(0, -1, 0));
+    const hit = RAY.intersectObject(this.posed!, false)[0];
+    return this.row[1] + (hit ? hit.point.y : 0);
+  }
+
   hit(): boolean {
     if (this.broken) return false;
     this.hits++;
@@ -427,78 +441,36 @@ export class SmashRock {
   }
 }
 
-// ---------------------------------------------------------------- hammer
+// ---------------------------------------------------------------- pick
 
-/** The hammer, leaning against the side of a boulder behind the cabin. */
-export class HammerProp {
+/** The pickaxe, its point struck into the top of a boulder behind the cabin. */
+export class PickProp {
+  readonly group = new THREE.Group();
   readonly mat = glintMat({ toneVar: 0 });
   readonly mesh: THREE.Mesh;
   readonly pos: THREE.Vector3;
   taken = false;
 
-  /** `dir`: unit xz from the rock's centre toward the side it leans on. */
-  constructor(rock: SmashRock, dir: THREE.Vector3, ground: (x: number, z: number) => number) {
-    const S = 1.35, LEAN = 0.42;
-    this.mesh = propMesh(buildHammer(), this.mat);
+  /** `dir`: unit xz from the rock's centre toward the side the handle leans out over. */
+  constructor(rock: SmashRock, dir: THREE.Vector3) {
+    const S = 1.35, TILT = 0.85, BITE = 0.07;
+    this.mesh = propMesh(buildPick(), this.mat);
     this.mesh.scale.setScalar(S);
-    // Grip end on the ground, head resting on the rock with its long side
-    // flat against it. Boulders differ in height and often sit lower than the
-    // ground beside them, so fit the actual hammer: sample points on the head
-    // and handle, and for a lean, stand the grip as close as it can go without
-    // any of them entering the rock (ray cast against the posed mesh). Take
-    // the lean nearest LEAN at which it's the head that touches.
-    const PTS: [number, number, number, boolean][] = [];
-    for (const x of [-0.09, 0.13]) for (const y of [0.4325, 0.5075]) for (const z of [-0.0375, 0.0375]) PTS.push([x, y, z, true]);
-    for (const y of [0.425, 0.515]) for (const z of [-0.045, 0.045]) PTS.push([0.165, y, z, true]);
-    for (let y = 0.06; y < 0.43; y += 0.04) for (const z of [-0.03, 0.03]) PTS.push([0, y, z, false]);
-    const along = new THREE.Vector3(dir.z, 0, -dir.x);
-    const frame = (l: number) => {
-      const up = new THREE.Vector3(-dir.x * Math.sin(l), Math.cos(l), -dir.z * Math.sin(l));
-      return { up, out: new THREE.Vector3().crossVectors(along, up) };
-    };
-    const off = new THREE.Vector3(), rd = new THREE.Vector3();
-    /** Where the grip stands for lean `l` on ground `gy`, and how far the head is then from the rock. */
-    const fit = (l: number, gy: number) => {
-      const { up, out } = frame(l);
-      const offs = PTS.map(([x, y, z, head]) => ({ o: off.copy(along).multiplyScalar(x * S).addScaledVector(up, y * S).addScaledVector(out, z * S).clone(), head }));
-      // Gap from each point to the surface, radially from the rock's axis (+Inf clear of it).
-      const gaps = (foot: number) => offs.map(({ o, head }) => {
-        const px = dir.x * foot + o.x, pz = dir.z * foot + o.z, r = Math.hypot(px, pz);
-        const sf = rock.surface(rd.set(px / r, 0, pz / r), gy + 0.03 + o.y);
-        return { g: sf > 0 ? r - sf - (head ? 0.005 : 0.012) : Infinity, head };
-      });
-      let foot = rock.radius + 1;
-      for (let i = 0; i < 4; i++) {
-        const m = Math.min(...gaps(foot).map((x) => x.g));
-        if (!isFinite(m)) return null;
-        foot -= m;
-      }
-      const head = Math.min(...gaps(foot).filter((x) => x.head).map((x) => x.g));
-      return { foot, head };
-    };
-    let gy = ground(rock.row[0] + dir.x * (rock.radius + 0.35), rock.row[2] + dir.z * (rock.radius + 0.35));
-    let lean = LEAN, foot = rock.radius + 0.3;
-    for (let pass = 0; pass < 2; pass++) {
-      let best: { l: number; foot: number; head: number } | null = null;
-      for (let k = 0; k <= 64; k++) {
-        const l = LEAN + (k % 2 ? 1 : -1) * Math.ceil(k / 2) * 0.025;
-        if (l < 0.12 || l > 1.25) continue;
-        const f = fit(l, gy);
-        if (!f) continue;
-        if (!best || f.head < best.head) best = { l, ...f };
-        if (f.head < 0.02) break;
-      }
-      if (best) { lean = best.l; foot = best.foot; }
-      // Re-fit on the ground where the grip actually stands.
-      const g2 = ground(rock.row[0] + dir.x * foot, rock.row[2] + dir.z * foot);
-      if (Math.abs(g2 - gy) < 0.02) break;
-      gy = g2;
-    }
-    const fx = rock.row[0] + dir.x * foot, fz = rock.row[2] + dir.z * foot;
-    this.mesh.position.set(fx, ground(fx, fz) + 0.03, fz);
-    const { up, out } = frame(lean);
-    this.mesh.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(along, up, out));
-    this.pos = new THREE.Vector3(fx - dir.x * 0.15, gy + 0.3, fz - dir.z * 0.15);
+    // Tip at the pivot's origin; tilt the handle up and out (the point
+    // goes in steeply), then turn so the handle leans over `dir`.
+    const tilt = new THREE.Group();
+    tilt.rotation.z = -TILT;
+    this.mesh.position.copy(PICK_TIP).multiplyScalar(-S);
+    tilt.add(this.mesh);
+    const pivot = new THREE.Group();
+    pivot.rotation.y = Math.atan2(-dir.z, dir.x);
+    pivot.add(tilt);
+    // Struck in a little off the crown toward `dir`, sunk a touch into the rock.
+    const off = rock.radius * 0.3;
+    const x = rock.row[0] + dir.x * off, z = rock.row[2] + dir.z * off;
+    pivot.position.set(x, rock.top(x, z) - BITE, z);
+    this.group.add(pivot);
+    this.pos = new THREE.Vector3(x, pivot.position.y + 0.3, z);
   }
 
   take() {

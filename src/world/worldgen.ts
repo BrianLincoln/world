@@ -155,9 +155,13 @@ export class WorldGen {
         // Irregular radius so peaks get ridges and shoulders, not cones.
         const ang = Math.atan2(ddz, ddx);
         const wob = 1 + 0.22 * Math.sin(ang * 3 + p.h) + 0.12 * Math.sin(ang * 5 + p.r);
-        const s = Math.sqrt(d2) / (p.r * wob);
-        // Concave flanks, softly rounded summit.
-        sum += p.h * Math.exp(-Math.pow(s * 2.3, 1.45));
+        const d = Math.sqrt(d2);
+        const s = d / (p.r * wob);
+        // Concave flanks, softly rounded summit. Where the wobble pushes the
+        // flank past the cull radius, taper the tail to zero rather than
+        // clipping it: a hard cut left a sheer 20 m wall around the peak.
+        const tail = 1 - smoothstep(0.7, 1, d / (p.r * 1.2649));
+        sum += p.h * Math.exp(-Math.pow(s * 2.3, 1.45)) * tail;
       }
     }
     return sum;

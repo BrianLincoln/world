@@ -241,7 +241,9 @@ export function buildRuin(): CabinParts {
   const base: THREE.BufferGeometry[] = [];
   const top: THREE.BufferGeometry[] = [];
   const csk: THREE.BufferGeometry[] = [];
-  const nC = Math.ceil(ch.top / ch.course);
+  // Whole courses only, so the last one ends under the cap instead of poking through it.
+  const nC = Math.floor(ch.top / ch.course + 1e-6);
+  const stackTop = nC * ch.course;
   for (let c = 0; c < nC; c++) {
     const y = c * ch.course + ch.course / 2;
     const s = c > nC - 6 ? ch.size * 0.88 : ch.size;
@@ -260,10 +262,16 @@ export function buildRuin(): CabinParts {
       if (missing) csk.push(kbox(turn ? d : w, ch.course * 0.94, turn ? w : d, ch.x + ox, y, ch.z + oz, K.stone));
     }
   }
-  // Cap slab and flue.
-  top.push(rbox(ch.size + 0.16, 0.12, ch.size + 0.16, 0.04, ch.x, ch.top + 0.06, ch.z, K.stone));
-  top.push(kbox(0.42, 0.04, 0.42, ch.x, ch.top + 0.12, ch.z, K.soot));
-  csk.push(kbox(ch.size + 0.16, 0.12, ch.size + 0.16, ch.x, ch.top + 0.06, ch.z, K.stone));
+  // Cap: a stone collar round an open, sooty flue.
+  const capW = ch.size + 0.16, flue = 0.44, rimH = 0.16, rimT = (capW - flue) / 2;
+  const rimY = stackTop + rimH / 2;
+  for (const sg of [-1, 1]) {
+    const o = sg * (flue / 2 + rimT / 2);
+    top.push(rbox(capW, rimH, rimT, 0.04, ch.x, rimY, ch.z + o, K.stone));
+    top.push(rbox(rimT, rimH, flue + 0.02, 0.04, ch.x + o, rimY, ch.z, K.stone));
+  }
+  top.push(kbox(flue + 0.04, 0.04, flue + 0.04, ch.x, stackTop + 0.02, ch.z, K.soot));
+  csk.push(kbox(capW, rimH, capW, ch.x, rimY, ch.z, K.stone));
   // Rubble at the foot of the chimney.
   const rubble: THREE.BufferGeometry[] = [];
   for (let i = 0; i < 6; i++) {
@@ -370,6 +378,33 @@ export function buildHammer(): THREE.BufferGeometry {
   const head = new RoundedBoxGeometry(0.22, 0.075, 0.075, 2, 0.02).translate(0.02, 0.47, 0);
   const face = new THREE.CylinderGeometry(0.045, 0.045, 0.05, 12).rotateZ(Math.PI / 2).translate(0.14, 0.47, 0);
   return merge([core(handle, K.cut), core(grip, K.cut), core(head, K.steel), core(face, K.steel)]);
+}
+
+/** Tip of the pick's point (+x arm), in the pick's own space: where it bites into rock. */
+export const PICK_TIP = new THREE.Vector3(0.37, 0.62, 0);
+
+/**
+ * A pickaxe: cut-wood handle along +y from the origin, a steel head across
+ * the top, a point curving down toward +x and a flat chisel toward -x.
+ */
+export function buildPick(): THREE.BufferGeometry {
+  const Y = 0.72;
+  const handle = new THREE.CylinderGeometry(0.026, 0.034, Y + 0.04, 10, 4);
+  handle.translate(0, (Y + 0.04) / 2, 0);
+  const grip = new THREE.SphereGeometry(0.042, 10, 8);
+  const collar = new RoundedBoxGeometry(0.085, 0.11, 0.08, 2, 0.02).translate(0, Y, 0);
+  // Each arm: a cone laid along x from the collar, bent down along its length.
+  const arm = (sg: number, len: number, flat: number) => {
+    const g = new THREE.ConeGeometry(0.042, len, 10, 5);
+    g.rotateZ(-sg * Math.PI / 2);
+    g.scale(1, flat, 1);
+    g.translate(sg * (len / 2 + 0.03), Y, 0);
+    const p = g.attributes.position as THREE.BufferAttribute;
+    for (let i = 0; i < p.count; i++) p.setY(i, p.getY(i) - 0.75 * p.getX(i) ** 2);
+    g.computeVertexNormals();
+    return g;
+  };
+  return merge([core(handle, K.cut), core(grip, K.cut), core(collar, K.steel), core(arm(1, 0.34, 1), K.steel), core(arm(-1, 0.24, 0.55), K.steel)]);
 }
 
 /** A cut log: bark barrel with pale ringed ends. Centred, along x. */

@@ -231,6 +231,8 @@ export interface CreatureLook {
   blush?: [number, number, number, number];
   blushCol?: string;
   doubleSide?: boolean;
+  /** 0..1: soften part-to-part creases in the outline pass (see uSoftCrease). */
+  softCrease?: number;
 }
 
 /** Instanced creature parts: vertex colours plus painted eyes/mouth (see CREATURE_FRAG). */
@@ -254,6 +256,7 @@ export function makeCreatureMaterial(o: CreatureLook = {}) {
     uBlushCol: { value: col(o.blushCol ?? '#ef9c93') },
     uGlow: PROP_U.uGlow,
     uEmber: { value: 0 },
+    uSoftCrease: { value: o.softCrease ?? 0 },
   }, { side: o.doubleSide ? THREE.DoubleSide : THREE.FrontSide });
 }
 

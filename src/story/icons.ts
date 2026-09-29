@@ -5,7 +5,7 @@ import * as THREE from 'three';
 // canvases feed the HUD (as data URLs) and the in-world billboards (as
 // textures), so an icon always looks the same wherever it appears.
 
-export type IconName = 'axe' | 'log' | 'stone' | 'flame' | 'heart' | 'home' | 'check' | 'hand' | 'hammer' | 'smash' | 'finger' | 'mouse' | 'mouseDown' | 'fingerDown';
+export type IconName = 'axe' | 'log' | 'stone' | 'flame' | 'heart' | 'home' | 'check' | 'hand' | 'hammer' | 'pick' | 'smash' | 'antlers' | 'finger' | 'mouse' | 'mouseDown' | 'fingerDown';
 
 const INK = '#4a2e36';
 const SIZE = 128;
@@ -252,6 +252,41 @@ function drawHammer(g: CanvasRenderingContext2D) {
   g.stroke();
 }
 
+/** The pickaxe: a long handle and a steel head curving down to a point and a chisel. */
+function drawPick(g: CanvasRenderingContext2D) {
+  g.save();
+  g.translate(64, 68);
+  g.rotate(-0.62);
+  g.beginPath();
+  g.roundRect(-7, -40, 14, 90, 7);
+  g.fillStyle = '#d9b27a';
+  g.fill();
+  ink(g);
+  // Head: a crescent across the top of the handle, point right, chisel left.
+  g.beginPath();
+  g.moveTo(-44, -18);
+  g.quadraticCurveTo(-30, -44, 0, -48);
+  g.quadraticCurveTo(34, -44, 52, -10);
+  g.quadraticCurveTo(28, -30, 0, -32);
+  g.quadraticCurveTo(-24, -30, -38, -10);
+  g.closePath();
+  g.fillStyle = '#9aa8b8';
+  g.fill();
+  ink(g);
+  g.beginPath();
+  g.roundRect(-11, -52, 22, 26, 6);
+  g.fillStyle = '#9aa8b8';
+  g.fill();
+  ink(g);
+  g.beginPath();
+  g.moveTo(10, -43);
+  g.quadraticCurveTo(32, -40, 45, -18);
+  g.strokeStyle = '#eef3f6';
+  g.lineWidth = 5;
+  g.stroke();
+  g.restore();
+}
+
 /** "Break it": a stone with a crack and flying chips. */
 function drawSmash(g: CanvasRenderingContext2D) {
   g.save();
@@ -346,8 +381,41 @@ function drawMouse(g: CanvasRenderingContext2D, down: boolean) {
   }
 }
 
+/** A pair of elk antlers (riding an elk: knock the tree down). */
+function drawAntlers(g: CanvasRenderingContext2D) {
+  const beam = (s: number) => {
+    g.save();
+    g.translate(64, 100);
+    g.scale(s, 1);
+    g.beginPath();
+    // Main beam sweeping up and out, with three tines.
+    g.moveTo(6, 0);
+    g.quadraticCurveTo(26, -18, 34, -44);
+    g.quadraticCurveTo(40, -64, 36, -86);
+    g.moveTo(14, -12); g.quadraticCurveTo(10, -26, 2, -32);
+    g.moveTo(30, -36); g.quadraticCurveTo(20, -50, 14, -62);
+    g.moveTo(38, -62); g.quadraticCurveTo(48, -72, 52, -84);
+    g.lineWidth = 17;
+    g.strokeStyle = INK;
+    g.stroke();
+    g.lineWidth = 7.5;
+    g.strokeStyle = '#f3e6c8';
+    g.stroke();
+    g.restore();
+  };
+  beam(1);
+  beam(-1);
+  // The brow between them.
+  g.beginPath();
+  g.ellipse(64, 104, 16, 10, 0, 0, Math.PI * 2);
+  g.fillStyle = '#c9a27a';
+  g.fill();
+  ink(g, 5);
+}
+
 const DRAW: Record<IconName, (g: CanvasRenderingContext2D) => void> = {
-  axe: drawAxe, log: drawLog, stone: drawStone, flame: drawFlame, heart: drawHeart, home: drawHome, check: drawCheck, hand: drawHand, hammer: drawHammer, smash: drawSmash,
+  antlers: drawAntlers,
+  axe: drawAxe, log: drawLog, stone: drawStone, flame: drawFlame, heart: drawHeart, home: drawHome, check: drawCheck, hand: drawHand, hammer: drawHammer, pick: drawPick, smash: drawSmash,
   finger: (g) => drawFinger(g, false), fingerDown: (g) => drawFinger(g, true), mouse: (g) => drawMouse(g, false), mouseDown: (g) => drawMouse(g, true),
 };
 

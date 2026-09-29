@@ -107,14 +107,14 @@ export class Hud {
     this.how = document.createElement('div');
     this.how.id = 'story-how';
     document.body.appendChild(this.how);
-    // Touch: holding the badge holds E.
+    // Touch: holding the badge is a held click (E is the ride button's).
     this.act.addEventListener('pointerdown', (e) => {
       e.preventDefault();
       e.stopPropagation();
       this.touchHeld = true;
-      this.input?.virtualKey('KeyE', true);
+      this.input?.virtualKey('Mouse0', true);
     });
-    const up = () => { if (this.touchHeld) { this.touchHeld = false; this.input?.virtualKey('KeyE', false); } };
+    const up = () => { if (this.touchHeld) { this.touchHeld = false; this.input?.virtualKey('Mouse0', false); } };
     this.act.addEventListener('pointerup', up);
     this.act.addEventListener('pointercancel', up);
     this.act.addEventListener('pointerleave', up);
@@ -145,7 +145,7 @@ export class Hud {
     if (icon) this.actName = icon;
     this.act.classList.toggle('on', !!icon);
     this.act.classList.toggle('held', !!icon && held);
-    if (!icon && this.touchHeld) { this.touchHeld = false; input.virtualKey('KeyE', false); }
+    if (!icon && this.touchHeld) { this.touchHeld = false; input.virtualKey('Mouse0', false); }
   }
 
   /**
