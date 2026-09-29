@@ -20,6 +20,8 @@ const LEATHER = '#6e4a33';
 const BRASS = '#d9b36a';
 const TINTS = ['#ffffff', '#f4eef6', '#eef0f8', '#fbf2ec'].map((h) => new THREE.Color(h));
 const MAX = 64;
+/** Crows won't touch down within this many metres of the story cabin (they still fly over). */
+const BASE_CLEAR = 80;
 
 /** Body frame: body centre at the origin, +z forward, y up. */
 const BODY_Y = 0.78;
@@ -269,8 +271,15 @@ export class Crow implements Species {
     this.saddleB.setGeometry(reinsGeometry(p));
   }
 
+  /** Inside the explorer's home patch (the story cabin and its yard). */
+  private nearBase(gen: WorldGen, x: number, z: number) {
+    const st = gen.story;
+    return Math.hypot(x - st.x, z - st.z) < BASE_CLEAR;
+  }
+
   /** Lower = better landing ground. Infinity = unusable. */
   private groundScore(gen: WorldGen, x: number, z: number) {
+    if (this.nearBase(gen, x, z)) return Infinity;
     const h = gen.height(x, z);
     if (h < 1.2 || h > 150) return Infinity;
     const slope = Math.abs(gen.height(x + 2, z) - h) + Math.abs(gen.height(x, z + 2) - h);
@@ -349,7 +358,15 @@ export class Crow implements Species {
     const ok = scared
       ? this.findSpot(ctx.gen, fd.spot, ctx.player.pos, rnd, f.target, 80, 250)
       : this.findSpot(ctx.gen, fd.spot, null, rnd, f.target, 150, 450);
-    if (!ok) f.target.copy(fd.spot).add(tv.set(rnd() * 400 - 200, 0, rnd() * 400 - 200));
+    if (!ok) {
+      f.target.copy(fd.spot).add(tv.set(rnd() * 400 - 200, 0, rnd() * 400 - 200));
+      // Never fall back onto the home patch: push straight out past its edge.
+      const st = ctx.gen.story;
+      if (this.nearBase(ctx.gen, f.target.x, f.target.z)) {
+        const a = Math.atan2(f.target.x - st.x, f.target.z - st.z);
+        f.target.set(st.x + Math.sin(a) * BASE_CLEAR * 1.5, 0, st.z + Math.cos(a) * BASE_CLEAR * 1.5);
+      }
+    }
     fd.mode = 'fly';
     fd.flyT = 0;
     fd.landAt = 0;

@@ -19,6 +19,7 @@ import { Floof } from './mobs/floof';
 import { OrbitCamera } from './player/orbitCamera';
 import { DebugUI } from './ui/debug';
 import { StoryHost } from './story/host';
+import { Harvest } from './world/harvest';
 import { Bikes, type Bike } from './vehicles/bikes';
 import { Colliders } from './world/colliders';
 import { Terrain } from './world/terrain';
@@ -214,7 +215,11 @@ const post = new PostPipeline(renderer);
 // a time, a position or flight get the sandbox (?story=1 forces it on,
 // ?story=0 off; ?fresh=1 forgets saved progress for this seed).
 const storyActive = params.get('story') === '1' || (params.get('story') !== '0' && !params.has('t') && !params.has('x') && params.get('mode') !== 'fly');
-storyHost = new StoryHost({ scene, post, env, rig, body: player.body, camera, puffs: (at, n, size, spread) => puffs.emit(at, n, size, spread) }, storyActive);
+// Felled trees and smashed rocks (hidden on the GPU, left out of collision).
+const harvest = new Harvest();
+colliders.skip = (kind, x, z) => { const [gi, gj] = Harvest.cellOf(kind, x, z); return harvest.gone(kind, gi, gj); };
+colliders.busy = (kind, x, z) => { const [gi, gj] = Harvest.cellOf(kind, x, z); return harvest.has(kind, gi, gj); };
+storyHost = new StoryHost({ scene, post, env, rig, body: player.body, camera, puffs: (at, n, size, spread) => puffs.emit(at, n, size, spread), colliders, harvest }, storyActive);
 if (params.has('fresh')) try { localStorage.removeItem(`fjellheim.story.${seedText}`); } catch { /* ignore */ }
 storyHost.build(gen, seedText);
 

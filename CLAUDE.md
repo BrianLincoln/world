@@ -40,7 +40,7 @@ npm run shots    # build + headless GPU screenshots -> shots/   (look at them!)
   (quadtree streaming, LOD, instancing).
 - `src/gfx/`: `shaders.ts` (all scene GLSL), `materials.ts` (shared
   uniforms), `palette.ts` (time-of-day keyframes and biome colours),
-  `environment.ts` (day/night), `post.ts` (G-buffer → bloom → layer fog →
+  `environment.ts` (day/night), `groundShadow.ts` (prop shadows on the ground), `post.ts` (G-buffer → bloom → layer fog →
   outlines/grade → FXAA), `geometry.ts` (trees, rocks, cabins), `sky.ts`.
 - `src/player/`: input → movement modes → character rig; `orbitCamera.ts`.
 - `src/mobs/`: creatures. `manager.ts` (spawning, lasso, leads, shadows),

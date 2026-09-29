@@ -11,10 +11,14 @@ import type { Sfx } from './audio';
 import { RuinCabin, type PartId } from './cabin';
 import { CAB } from './geometry';
 import { Hud } from './hud';
-import { glowCanvas, iconCanvas, tex } from './icons';
+import { glowCanvas, iconCanvas, tex, type IconName } from './icons';
 import { Billboard, OVERLAY_U } from './overlay';
 import { PHASE1, type Anchor, type PhaseDef, type Resource, type StepDef, type TargetTag } from './phase1';
-import { AxeProp, ChopTree, easeGlint, Flyer, RiverStone } from './props';
+import { AxeProp, ChopTree, easeGlint, Flyer, HammerProp, SmashRock, Stumps, Woods, type WoodTree } from './props';
+import type { Colliders } from '../world/colliders';
+import { BIG_ROCK, Harvest, rubbleOf, type RegrowCtx, type Taken } from '../world/harvest';
+import { hash01 } from '../core/rng';
+import { segDist } from '../world/worldgen';
 import { Spirit } from './spirit';
 
 // The story director. It runs a phase table (phase1.ts) over the story set:
@@ -24,7 +28,9 @@ import { Spirit } from './spirit';
 // (walk up to things; E / click also works), the inventory, the clock while
 // the story runs, the idle hints and the save.
 
-const SAVE_VERSION = 1;
+const SAVE_VERSION = 2;
+/** How long a tool stays in hand after its last use before it's stowed again (s). */
+const TOOL_HOLD = 0.7;
 /** Seconds without progress before the spirit repeats its hint, more obviously. */
 const HINT_AFTER = 20;
 
@@ -41,8 +47,14 @@ interface SaveData {
   step: string;
   inv: Record<Resource, number>;
   axe: boolean;
+  hammer: boolean;
   felled: number[];
-  taken: number[];
+  /** Story boulders smashed. */
+  smashed: number[];
+  /** World trees felled and rocks smashed (anywhere), and how far they've come back. */
+  world: Taken[];
+  /** The harvest clock (in-game hours). */
+  clock?: number;
   filled: Record<PartId, number>;
   built: PartId[];
   lit: boolean;
@@ -62,6 +74,10 @@ export interface StoryDeps {
   sfx: Sfx;
   camera: THREE.PerspectiveCamera;
   puffs(at: THREE.Vector3, n: number, size: number, spread: number): void;
+  /** World prop collision (to find trees and rocks to take). */
+  colliders: Colliders;
+  /** What's been taken out of the world (felled / smashed). */
+  harvest: Harvest;
   /** localStorage key suffix (the seed text). */
   saveKey: string;
   /** false = the sandbox only: the set is there, but nothing runs. */
@@ -73,13 +89,33 @@ export class Story {
   readonly cabin: RuinCabin;
   readonly spirit: Spirit;
   readonly trees: ChopTree[] = [];
-  readonly stones: RiverStone[] = [];
+  /** Boulders to smash behind the cabin ([0] has the hammer on it). */
+  readonly rocks: SmashRock[] = [];
   readonly axe: AxeProp;
+  readonly hammer: HammerProp;
+  readonly stumps = new Stumps();
+  /** A world tree / rock stood in for by a story prop (glints, takes hits). */
+  private proxyTree: { tree: ChopTree; gi: number; gj: number; row: Float32Array } | null = null;
+  private proxyRock: { rock: SmashRock; gi: number; gj: number; row: Float32Array } | null = null;
+  /** World trees / rocks being felled or broken (they finish even if you walk off). */
+  private worldChops: { tree: ChopTree; gi: number; gj: number; row: Float32Array }[] = [];
+  private worldBreaks: { rock: SmashRock; gi: number; gj: number; row: Float32Array }[] = [];
+  /** What big boulders broke into: small rocks to smash in turn (key "gi,gj#k"). */
+  private rubble = new Map<string, { rock: SmashRock; gi: number; gj: number; k: number }>();
+  private lastHour = -1;
+  private harvestSeen = -1;
+  private saveClockT = 0;
+  private frustum = new THREE.Frustum();
+  private projView = new THREE.Matrix4();
+  private sphere = new THREE.Sphere();
+  private regrow: RegrowCtx;
+  private dynTargets: Target[] = [];
   readonly group = new THREE.Group();
   readonly overlayGroup = new THREE.Group();
   readonly hud: Hud;
   readonly phase: PhaseDef = PHASE1;
   readonly far: FarLight;
+  readonly woods: Woods;
   private sparkles = new Puffs('#ffe7a0', 30, 0.8, 0.9);
   private chipPuffs = new Puffs('#ecd3a2', 24, 0, 0.6);
   private flyers: { f: Flyer; res: Resource; stone: number }[] = [];
@@ -88,13 +124,16 @@ export class Story {
   stepIndex = 0;
   inv: Record<Resource, number> = { logs: 0, stones: 0 };
   hasAxe = false;
+  hasHammer = false;
+  /** The tool drawn for the last action, and how long ago it was used. */
+  private toolHand: 'axe' | 'hammer' | null = null;
+  private toolT = 99;
   done = false;
   private idleT = 0;
   private boostT = 0;
-  private dwell = 0;
   private swingT = -1;
   private swingCd = 0;
-  private swingTree: ChopTree | null = null;
+  private swingOn: { tree?: ChopTree; rock?: SmashRock } = {};
   private depositT = 0;
   private stepT = 0;
   private revealT = -1;
@@ -111,7 +150,7 @@ export class Story {
     const site = (this.site = gen.story);
     const ground = (x: number, z: number) => gen.height(x, z);
     this.cabin = new RuinCabin(site, d.puffs);
-    this.group.add(this.cabin.root, this.cabin.embers.group, this.cabin.smoke.group, this.sparkles.group, this.chipPuffs.group);
+    this.group.add(this.cabin.root, this.cabin.embers.group, this.cabin.smoke.group, this.cabin.column.batch.mesh, this.sparkles.group, this.chipPuffs.group);
     this.overlayGroup.add(this.cabin.overlay);
     site.trees.forEach((t, i) => {
       const tree = new ChopTree(t, ground(t.x, t.z), i);
@@ -120,14 +159,24 @@ export class Story {
       this.trees.push(tree);
       this.group.add(tree.group);
     });
-    site.stones.forEach((s, i) => {
-      const st = new RiverStone(s, ground(s.x, s.z), i);
-      this.stones.push(st);
-      this.group.add(st.mesh);
+    site.boulders.forEach((b, i) => {
+      const y = ground(b.x, b.z);
+      const r = new SmashRock([b.x, y - b.sc * 0.25, b.z, b.sc, b.rot, 0.72, 0, 0.3 + i * 0.2], i);
+      r.onBroken = (rk) => this.rockBroken(rk);
+      this.rocks.push(r);
+      this.group.add(r.group);
     });
+    const hb = site.boulders[0];
+    // Leaning on the cabin side of its boulder, a little away from where the spirit waits.
+    const hdir = new THREE.Vector3(site.x - hb.x, 0, site.z - hb.z).normalize().applyAxisAngle(new THREE.Vector3(0, 1, 0), -0.45);
+    this.hammer = new HammerProp(this.rocks[0], hdir, ground);
+    this.group.add(this.hammer.mesh, this.stumps.mesh);
     const cab = { x: site.x, z: site.z };
-    this.axe = new AxeProp(site.stump.x, ground(site.stump.x, site.stump.z), site.stump.z, Math.atan2(site.spawn.x - cab.x, site.spawn.z - cab.z));
+    // The axe leans on the side facing the yard (where you walk in).
+    this.axe = new AxeProp(site.stump.x, ground(site.stump.x, site.stump.z), site.stump.z, Math.atan2(site.paths[0].bx - cab.x, site.paths[0].bz - cab.z));
     this.group.add(this.axe.group);
+    this.woods = new Woods(this.plantWoods(gen));
+    this.group.add(this.woods.group);
     this.far = new FarLight(site);
     this.group.add(this.far.mesh);
     this.overlayGroup.add(this.far.halo.mesh);
@@ -151,8 +200,13 @@ export class Story {
     this.anchors.set('cabin', L(0, 0).setY(site.y + 2.5));
     this.anchors.set('roof', this.cabin.parts.roof.centre.clone());
     this.anchors.set('bank', new THREE.Vector3(site.bank.x, 0, site.bank.z));
-    const sc = site.stones.reduce((a, s) => a.add(new THREE.Vector3(s.x, 0, s.z)), new THREE.Vector3()).divideScalar(Math.max(1, site.stones.length));
-    this.anchors.set('stones', sc.setY(ground(sc.x, sc.z)));
+    // Beside the hammer's boulder, on the cabin side, looking at it.
+    const hbv = new THREE.Vector3(hb.x, 0, hb.z);
+    const toCab = new THREE.Vector3(site.x - hb.x, 0, site.z - hb.z).normalize();
+    this.anchors.set('hammerSpot', hbv.clone().addScaledVector(toCab, 1.8 + hb.sc).add(new THREE.Vector3(toCab.z, 0, -toCab.x).multiplyScalar(0.8)));
+    this.anchors.set('hammer', this.hammer.pos.clone());
+    const rc = site.boulders.reduce((a, b) => a.add(new THREE.Vector3(b.x, 0, b.z)), new THREE.Vector3()).divideScalar(site.boulders.length);
+    this.anchors.set('rocks', rc.setY(ground(rc.x, rc.z) + 0.6));
     this.anchors.set('chimneySpot', L(CAB.W / 2 + 2.6, 1.6));
     this.anchors.set('chimney', this.cabin.parts.chimney.centre.clone());
     this.anchors.set('far', this.far.pos.clone());
@@ -160,9 +214,10 @@ export class Story {
     for (const [k, v] of this.anchors) if (v.y === 0 && k !== 'far') v.y = ground(v.x, v.z);
 
     // Interactables.
-    this.targets.push({ tag: 'axe', pos: this.axe.pos, reach: 1.7, mat: this.axe.mat, ok: () => !this.axe.taken });
-    for (const t of this.trees) this.targets.push({ tag: 'tree', pos: t.pos, reach: 1.2 + t.radius, mat: t.mat, ok: () => t.standing });
-    for (const s of this.stones) this.targets.push({ tag: 'stone', pos: s.pos, reach: 1.35, mat: s.mat, ok: () => !s.taken });
+    this.targets.push({ tag: 'axe', pos: this.axe.pos, reach: 2.3, mat: this.axe.mat, ok: () => !this.axe.taken });
+    for (const t of this.trees) this.targets.push({ tag: 'tree', pos: t.pos, reach: 1.65 + t.radius, mat: t.mat, ok: () => t.standing });
+    this.targets.push({ tag: 'hammer', pos: this.hammer.pos, reach: 2.0 + hb.sc, mat: this.hammer.mat, ok: () => !this.hammer.taken });
+    for (const r of this.rocks) this.targets.push({ tag: 'rock', pos: r.pos, reach: 1.6 + r.radius, mat: r.mat, ok: () => !r.broken && this.hasHammer });
     this.targets.push({
       tag: 'hearth', pos: this.cabin.hearthPos, reach: 2.0, mat: this.cabin.hearthMat,
       ok: () => !this.cabin.lit && d.env.hour >= (this.step.kind === 'light' ? this.step.readyAt : 99),
@@ -174,9 +229,20 @@ export class Story {
       sound: (n) => { if (n === 'excited') d.sfx.chirp(true); else d.sfx[n](); },
       sparkle: (at, n) => this.sparkles.emit(at, n, 0.07, 1.4, undefined, { life: 0.6, rise: 0.4, up: 1.4 }),
     }, this.anchors.get('hearthSpot')!.clone());
+    this.spirit.home = new THREE.Vector3(site.x, 0, site.z);
     this.group.add(this.spirit.group);
     this.overlayGroup.add(this.spirit.bubble.mesh);
     this.hud = new Hud();
+    this.regrow = {
+      // Only where you'd never catch it happening: well away, or off screen.
+      unseen: (x, y, z, r) => {
+        const dd = Math.hypot(x - d.body.pos.x, z - d.body.pos.z);
+        if (dd < 25) return false;
+        return dd > 120 || !this.frustum.intersectsSphere(this.sphere.set(this.sphere.center.set(x, y, z), r));
+      },
+      // The cabin's clearing stays cleared.
+      keep: (x, z) => Math.hypot(x - site.x, z - site.z) < 40,
+    };
 
     d.scene.add(this.group);
     d.overlay.add(this.overlayGroup);
@@ -198,14 +264,76 @@ export class Story {
     return this.cabin.inside(x, z, -0.2) ? Math.max(g, this.site.y + CAB.floor) : g;
   }
 
+  /**
+   * Conifers round the start clearing and along the first two-thirds of the
+   * path from it, wherever the natural forest is thin, so the walk always
+   * starts in the woods and the cabin opens up round the bend. Seeded: the
+   * same trees every time.
+   */
+  private plantWoods(gen: WorldGen): WoodTree[] {
+    const site = this.site;
+    const seed = gen.seed;
+    const approach = site.paths.slice(2); // [0] door->yard, [1] to the bank
+    const out: WoodTree[] = [];
+    if (!approach.length) return out;
+    const S = site.spawn;
+    const pathD = (x: number, z: number) => approach.reduce((d, p) => Math.min(d, segDist(x, z, p)), Infinity);
+    for (let i = 0; i < 700 && out.length < 95; i++) {
+      const r = (k: number) => hash01(i, k, seed, 977);
+      let x: number, z: number;
+      if (r(0) < 0.4) {
+        const a = r(1) * Math.PI * 2, d = 10 + r(2) * 16;
+        x = S.x + Math.cos(a) * d; z = S.z + Math.sin(a) * d;
+      } else {
+        // Beside the path, over the stretch nearest the start.
+        const seg = approach[approach.length - 1 - Math.floor(r(1) * approach.length * 0.7)];
+        const t = r(2);
+        const px = seg.ax + (seg.bx - seg.ax) * t, pz = seg.az + (seg.bz - seg.az) * t;
+        const l = Math.hypot(seg.bx - seg.ax, seg.bz - seg.az) || 1;
+        const side = (r(3) < 0.5 ? -1 : 1) * (5.4 + r(4) * 9);
+        x = px - ((seg.bz - seg.az) / l) * side; z = pz + ((seg.bx - seg.ax) / l) * side;
+      }
+      const h = gen.height(x, z);
+      if (h < 2.5 || Math.abs(gen.height(x + 2, z) - gen.height(x - 2, z)) > 1.4) continue;
+      if (gen.forestDensity(x, z, h) > 0.35) continue; // real forest already
+      if (pathD(x, z) < 5.2 || Math.hypot(x - S.x, z - S.z) < 9.5) continue;
+      if (Math.hypot(x - site.x, z - site.z) < 24) continue;
+      if (gen.storyBlock(x, z, 1.2, 'tree')) continue;
+      if (out.some((t) => Math.hypot(t.x - x, t.z - z) < 3.6)) continue;
+      out.push({ x, y: h, z, sc: 0.75 + r(5) * 0.45, rot: r(6) * 6.283, lean: r(7) - 0.5, tone: r(8) });
+    }
+    return out;
+  }
+
   // ------------------------------------------------------------ world hooks
 
   /** Solid story props (cabin walls, standing trunks, stumps). */
   collide(pos: THREE.Vector3, vel: THREE.Vector3, r: number) {
     this.cabin.push(pos, vel, r);
     const l = siteToLocal(this.site, pos.x, pos.z);
-    if (Math.abs(l.x) > 60 || Math.abs(l.z) > 60) return;
-    for (const t of this.trees) {
+    if (Math.abs(l.x) > 130 || Math.abs(l.z) > 130) return;
+    for (const t of this.woods.trees) {
+      const rad = 0.34 * t.sc + r;
+      const dx = pos.x - t.x, dz = pos.z - t.z;
+      const dd = Math.hypot(dx, dz);
+      if (dd >= rad || dd < 1e-4 || pos.y > t.y + 12) continue;
+      pos.x = t.x + (dx / dd) * rad;
+      pos.z = t.z + (dz / dd) * rad;
+      const vn = (vel.x * dx + vel.z * dz) / dd;
+      if (vn < 0) { vel.x -= (dx / dd) * vn; vel.z -= (dz / dd) * vn; }
+    }
+    for (const rk of this.rocks) {
+      if (rk.broken) continue;
+      const rad = rk.radius * 0.95 + r;
+      const dx = pos.x - rk.pos.x, dz = pos.z - rk.pos.z;
+      const dd = Math.hypot(dx, dz);
+      if (dd >= rad || dd < 1e-4 || pos.y > rk.pos.y + rk.radius) continue;
+      pos.x = rk.pos.x + (dx / dd) * rad;
+      pos.z = rk.pos.z + (dz / dd) * rad;
+      const vn = (vel.x * dx + vel.z * dz) / dd;
+      if (vn < 0) { vel.x -= (dx / dd) * vn; vel.z -= (dz / dd) * vn; }
+    }
+    for (const t of this.allTrees()) {
       const rad = (t.state === 'standing' ? t.radius : 0.36 * t.def.sc) + r;
       if (pos.y > t.pos.y + (t.state === 'standing' ? 12 : 0.4)) continue;
       const dx = pos.x - t.pos.x, dz = pos.z - t.pos.z;
@@ -219,8 +347,134 @@ export class Story {
     }
   }
 
+  /** The grove plus any world tree being targeted or felled. */
+  private allTrees(): ChopTree[] {
+    const out = [...this.trees, ...this.worldChops.map((w) => w.tree)];
+    if (this.proxyTree) out.push(this.proxyTree.tree);
+    return out;
+  }
+
+  private allRocks(): SmashRock[] {
+    const out = [...this.rocks, ...this.worldBreaks.map((w) => w.rock), ...[...this.rubble.values()].map((r) => r.rock)];
+    if (this.proxyRock) out.push(this.proxyRock.rock);
+    return out;
+  }
+
+  // ------------------------------------------------------------ world trees and rocks
+
+  /**
+   * Any world tree (with the axe) or ordinary boulder (with the hammer) you
+   * walk up to is swapped for an identical story prop that can glint and
+   * take blows; the world's instance hides meanwhile (Harvest proxy flag).
+   * Walk away without hitting it and the world's copy comes back. Once it
+   * falls or breaks it's taken for good (saved), leaving a stump.
+   */
+  private updateProxies(walking: boolean) {
+    const d = this.d;
+    const p = d.body.pos;
+    const hitT = this.hasAxe && walking ? d.colliders.nearestTree(p.x, p.z, 1.6) : null;
+    const cT = hitT ? Harvest.cellOf('tree', hitT.x, hitT.z) : null;
+    if (this.proxyTree && (!cT || cT[0] !== this.proxyTree.gi || cT[1] !== this.proxyTree.gj)) this.releaseTree();
+    if (hitT && cT && !this.proxyTree && !this.worldChops.some((w) => w.gi === cT[0] && w.gj === cT[1])) {
+      const r = hitT.row;
+      const tree = new ChopTree({ x: r[0], z: r[2], sc: r[3], rot: r[4], lean: r[6], tone: r[7], sy: r[5] }, r[1] + 0.4, -1);
+      tree.onLanded = (tr) => this.treeLanded(tr);
+      tree.onGone = (tr, along) => this.treeGone(tr, along);
+      this.group.add(tree.group);
+      d.harvest.proxy('tree', cT[0], cT[1], true);
+      this.proxyTree = { tree, gi: cT[0], gj: cT[1], row: r };
+    }
+    const hitR = this.hasHammer && walking ? d.colliders.nearestRock(p.x, p.z, 1.4, Infinity) : null;
+    const cR = hitR ? Harvest.cellOf('rock', hitR.x, hitR.z) : null;
+    if (this.proxyRock && (!cR || cR[0] !== this.proxyRock.gi || cR[1] !== this.proxyRock.gj)) this.releaseRock();
+    if (hitR && cR && !this.proxyRock && !this.worldBreaks.some((w) => w.gi === cR[0] && w.gj === cR[1])) {
+      // Big boulders take more blows (and break into rubble, see rockBroken).
+      const rock = new SmashRock(hitR.row, -1, hitR.row[3] > BIG_ROCK ? 5 : 3);
+      rock.onBroken = (rk) => this.rockBroken(rk);
+      this.group.add(rock.group);
+      d.harvest.proxy('rock', cR[0], cR[1], true);
+      this.proxyRock = { rock, gi: cR[0], gj: cR[1], row: hitR.row };
+    }
+    this.dynTargets.length = 0;
+    if (this.proxyTree) { const t = this.proxyTree.tree; this.dynTargets.push({ tag: 'tree', pos: t.pos, reach: 1.7 + t.radius, mat: t.mat, ok: () => t.standing }); }
+    if (this.proxyRock) { const r = this.proxyRock.rock; this.dynTargets.push({ tag: 'rock', pos: r.pos, reach: 1.6 + r.radius, mat: r.mat, ok: () => !r.broken }); }
+    if (this.hasHammer) {
+      for (const { rock: r } of this.rubble.values()) {
+        if (r.broken || Math.hypot(r.pos.x - p.x, r.pos.z - p.z) > 4) continue;
+        this.dynTargets.push({ tag: 'rock', pos: r.pos, reach: 1.6 + r.radius, mat: r.mat, ok: () => !r.broken });
+      }
+    }
+  }
+
+  private releaseTree() {
+    const w = this.proxyTree!;
+    this.proxyTree = null;
+    // Already cut into: it'll finish falling where it is.
+    if (w.tree.hits > 0) { this.worldChops.push(w); return; }
+    this.group.remove(w.tree.group);
+    this.d.harvest.proxy('tree', w.gi, w.gj, false);
+  }
+
+  private releaseRock() {
+    const w = this.proxyRock!;
+    this.proxyRock = null;
+    if (w.rock.hits > 0) { this.worldBreaks.push(w); return; }
+    this.group.remove(w.rock.group);
+    this.d.harvest.proxy('rock', w.gi, w.gj, false);
+  }
+
+  /** A world tree has fallen or a world rock broken: take it for good. */
+  private takeWorld(kind: 'tree' | 'rock', gi: number, gj: number, row: Float32Array) {
+    const d = this.d;
+    const t: Taken = { kind, gi, gj, x: row[0], y: d.gen.height(row[0], row[2]), z: row[2], sc: row[3], rot: row[4] };
+    if (kind === 'rock' && row[3] > BIG_ROCK) t.big = true;
+    d.harvest.take(t);
+    d.harvest.proxy(kind, gi, gj, false);
+    d.colliders.invalidate(row[0], row[2]);
+    this.refreshTaken();
+    this.dirty = true;
+  }
+
+  /** Stumps and rubble, from what's taken (and how far it's grown back). */
+  private refreshTaken() {
+    this.harvestSeen = this.d.harvest.version;
+    const all = this.d.harvest.all();
+    this.stumps.set(all.filter((t) => t.kind === 'tree'));
+    const want = new Set<string>();
+    for (const t of all) {
+      if (t.kind !== 'rock' || !t.big) continue;
+      rubbleOf(t, this.d.gen.seed, (x, z) => this.d.gen.height(x, z)).forEach((row, k) => {
+        if ((t.smashed ?? 0) & (1 << k)) return;
+        const key = `${t.gi},${t.gj}#${k}`;
+        want.add(key);
+        if (this.rubble.has(key)) return;
+        const rock = new SmashRock(row);
+        rock.onBroken = (rk) => this.rockBroken(rk);
+        this.group.add(rock.group);
+        this.rubble.set(key, { rock, gi: t.gi, gj: t.gj, k });
+      });
+    }
+    // Pieces smashed (once their break has played) or back as a boulder.
+    for (const [key, r] of this.rubble) {
+      if (want.has(key) || (r.rock.broken && r.rock.group.visible)) continue;
+      this.group.remove(r.rock.group);
+      this.rubble.delete(key);
+    }
+  }
+
   surface(x: number, z: number, feetY: number, r: number, step: number) {
-    return this.cabin.surface(x, z, feetY, r, step);
+    let best = this.cabin.surface(x, z, feetY, r, step);
+    // Rubble: low domes (all within a step), walked over like small world rocks.
+    for (const { rock } of this.rubble.values()) {
+      if (rock.broken) continue;
+      const row = rock.row, R = 0.9 * row[3];
+      const e = Math.max(0, Math.hypot(x - row[0], z - row[2]) - r);
+      if (e >= R) continue;
+      const q = e / R;
+      const h = row[1] + 1.1 * row[3] * row[5] * Math.sqrt(1 - q * q);
+      if (h <= feetY + step && h > best) best = h;
+    }
+    return best;
   }
 
   /** Where the explorer (re)starts: the yard, or the lit cabin's doorstep once it's home. */
@@ -289,6 +543,7 @@ export class Story {
       pose: st.pose ?? 'stand',
       icon: st.icon ?? null,
       lead: st.kind !== 'meet',
+      settled: st.kind === 'rest',
     };
     if (st.kind === 'build') for (const p of st.parts) this.cabin.showSketch(p);
     if (restoring) {
@@ -343,7 +598,7 @@ export class Story {
     const p = this.d.body.pos;
     switch (st.kind) {
       case 'meet': return Math.hypot(p.x - this.anchor(st.near).x, p.z - this.anchor(st.near).z) < st.radius;
-      case 'pickup': return this.hasAxe;
+      case 'pickup': return st.item === 'axe' ? this.hasAxe : this.hasHammer;
       case 'gather': return this.inv[st.resource] + this.pending(st.resource) >= this.remainingFor(st.for) && this.pending(st.resource) === 0;
       case 'build': return st.parts.every((id) => this.cabin.parts[id].state === 'built');
       case 'light': return this.cabin.lit;
@@ -353,14 +608,43 @@ export class Story {
 
   // ------------------------------------------------------------ frame
 
-  /** E / click on whatever is in reach. Returns true if the story used the press. */
+  /**
+   * The action press (E, a click, the on-screen badge; later a pad's X) on
+   * whatever the badge shows. Returns true if the story used the press.
+   */
   handleAction(input: Input): boolean {
     if (!this.d.active) return false;
-    const t = this.inReach();
-    if (!t) return false;
+    const a = this.action;
+    if (!a) return false;
     if (!input.pressed('KeyE') && !input.pressed('Mouse0')) return false;
-    this.act(t, true);
+    if (a.verb === 'repair') this.depositing = true;
+    else if (a.target) this.act(a.target, true);
     return true;
+  }
+
+  /** What the action would do right now (the badge), from the last frame. */
+  private action: { verb: 'take' | 'chop' | 'smash' | 'repair' | 'light'; icon: IconName; target?: Target } | null = null;
+  private depositing = false;
+
+  private findAction(walking: boolean): typeof this.action {
+    if (!walking) return null;
+    const t = this.inReach();
+    if (t) {
+      if (t.tag === 'tree') return { verb: 'chop', icon: 'axe', target: t };
+      if (t.tag === 'rock') return { verb: 'smash', icon: 'hammer', target: t };
+      if (t.tag === 'hearth') return { verb: 'light', icon: 'flame', target: t };
+      return { verb: 'take', icon: 'hand', target: t };
+    }
+    const st = this.step;
+    if (st.kind === 'build' && !this.depositing && this.inBuildZone() && this.inv[st.resource] > 0 && this.remainingFor(st.parts) > 0) return { verb: 'repair', icon: 'hammer' };
+    return null;
+  }
+
+  private inBuildZone(): boolean {
+    const st = this.step;
+    if (st.kind !== 'build') return false;
+    const p = this.d.body.pos, z = this.anchor(st.zone);
+    return Math.hypot(p.x - z.x, p.z - z.z) < st.zoneRadius || this.nearCabinSide(st.parts);
   }
 
   private activeTag(): TargetTag | null {
@@ -374,13 +658,17 @@ export class Story {
     return st.kind === 'gather' && this.inv[st.resource] + this.pending(st.resource) >= this.remainingFor(st.for);
   }
 
+  /**
+   * The thing the action would work on. The current step's targets, and
+   * (tools in hand) any tree or rock: gathering is a way of life now.
+   */
   private inReach(): Target | null {
     const tag = this.activeTag();
-    if (!tag || this.enough()) return null;
     const p = this.d.body.pos;
     let best: Target | null = null, bd = Infinity;
-    for (const t of this.targets) {
-      if (t.tag !== tag || !t.ok()) continue;
+    for (const t of [...this.targets, ...this.dynTargets]) {
+      const tool = (t.tag === 'tree' && this.hasAxe) || (t.tag === 'rock' && this.hasHammer);
+      if ((t.tag !== tag && !tool) || !t.ok()) continue;
       if (Math.abs(p.y - t.pos.y) > 2.5) continue;
       const d = Math.hypot(p.x - t.pos.x, p.z - t.pos.z);
       if (d < t.reach && d < bd) { bd = d; best = t; }
@@ -390,28 +678,23 @@ export class Story {
 
   private act(t: Target, pressed: boolean) {
     const d = this.d;
-    if (t.tag === 'tree') {
+    if (t.tag === 'tree' || t.tag === 'rock') {
       if (this.swingCd > 0 || this.swingT >= 0) return;
-      const tree = this.trees.find((tr) => tr.pos === t.pos)!;
-      this.swingTree = tree;
+      this.swingOn = t.tag === 'tree' ? { tree: this.allTrees().find((tr) => tr.pos === t.pos) } : { rock: this.allRocks().find((r) => r.pos === t.pos) };
+      if (!this.swingOn.tree && !this.swingOn.rock) return;
       this.swingT = 0;
-      this.swingCd = pressed ? 0.6 : 0.85;
+      this.swingCd = pressed ? 0.6 : 0.72;
+      this.useTool(t.tag === 'tree' ? 'axe' : 'hammer');
       d.rig.chop();
       return;
     }
-    if (t.tag === 'axe') {
-      this.axe.take();
-      this.hasAxe = true;
-      d.rig.tool = 'axe';
+    if (t.tag === 'axe' || t.tag === 'hammer') {
+      const prop = t.tag === 'axe' ? this.axe : this.hammer;
+      prop.take();
+      if (t.tag === 'axe') this.hasAxe = true; else this.hasHammer = true;
+      this.useTool(t.tag);
       d.sfx.pickup();
-      this.sparkles.emit(this.axe.pos.clone().setY(this.axe.pos.y + 0.6), 6, 0.07, 1.6, undefined, { life: 0.6, rise: 0.4, up: 1.4 });
-    } else if (t.tag === 'stone') {
-      const s = this.stones.find((x) => x.pos === t.pos)!;
-      s.take();
-      d.sfx.pickup();
-      const f = new Flyer('stone', s.pos.clone().setY(s.pos.y + 0.2), (x, z) => this.floorAt(x, z), 0, s.index);
-      this.flyers.push({ f, res: 'stones', stone: s.index });
-      this.group.add(f.mesh);
+      this.sparkles.emit(t.pos.clone().setY(t.pos.y + 0.6), 6, 0.07, 1.6, undefined, { life: 0.6, rise: 0.4, up: 1.4 });
     } else if (t.tag === 'hearth') {
       this.cabin.light();
       d.sfx.whoosh();
@@ -419,6 +702,49 @@ export class Story {
       d.puffs(this.cabin.hearthPos, 6, 0.12, 1.4);
     }
     this.progressMade();
+  }
+
+  /** Draw a tool into the right mitten (it's stowed again after TOOL_HOLD s unused). */
+  private useTool(k: 'axe' | 'hammer') {
+    this.toolHand = k;
+    this.toolT = 0;
+  }
+
+  private placeTools(dt: number) {
+    this.toolT += dt;
+    if (this.toolT > TOOL_HOLD && this.swingT < 0 && !this.depositing) this.toolHand = null;
+    this.d.rig.setTools({ axe: this.hasAxe, hammer: this.hasHammer }, this.toolHand);
+  }
+
+  /**
+   * A boulder broke apart: stones for the pack. A big one breaks into
+   * rubble instead, small rocks tumbling out to be smashed in turn.
+   */
+  private rockBroken(r: SmashRock) {
+    const d = this.d;
+    d.sfx.thud();
+    const w = this.worldBreaks.find((x) => x.rock === r) ?? (this.proxyRock?.rock === r ? this.proxyRock : null);
+    if (w && w.row[3] > BIG_ROCK) {
+      d.puffs(r.pos, 16, 0.45, 3.4 * w.row[3] * 0.6);
+      this.chipPuffs.emit(r.pos, 14, 0.09, 4, undefined, { life: 0.7, rise: -9, drag: 1.2, up: 4 });
+      const before = new Set(this.rubble.keys());
+      this.takeWorld('rock', w.gi, w.gj, w.row);
+      let i = 0;
+      const from = r.pos.clone().setY(r.pos.y + w.row[3] * 0.4);
+      for (const [key, p] of this.rubble) if (!before.has(key)) p.rock.hop(from, i++ * 0.07);
+      return;
+    }
+    d.puffs(r.pos, 10, 0.3, 2.6);
+    this.chipPuffs.emit(r.pos, 8, 0.07, 3, undefined, { life: 0.6, rise: -9, drag: 1.2, up: 3 });
+    for (let i = 0; i < 2; i++) {
+      const f = new Flyer('stone', r.pos.clone().setY(r.pos.y + 0.2), (x, z) => this.floorAt(x, z), i * 0.15, i + (r.index + 3) * 2);
+      this.flyers.push({ f, res: 'stones', stone: -1 });
+      this.group.add(f.mesh);
+    }
+    if (w) this.takeWorld('rock', w.gi, w.gj, w.row);
+    const piece = [...this.rubble.values()].find((p) => p.rock === r);
+    if (piece) d.harvest.smashPiece(piece.gi, piece.gj, piece.k);
+    this.dirty = true;
   }
 
   private progressMade() {
@@ -439,6 +765,12 @@ export class Story {
       this.flyers.push({ f, res: 'logs', stone: -1 });
       this.group.add(f.mesh);
     }
+    // A world tree: taken (its stump takes over) until it grows back.
+    const w = this.worldChops.find((x) => x.tree === t) ?? (this.proxyTree?.tree === t ? this.proxyTree : null);
+    if (w) {
+      this.takeWorld('tree', w.gi, w.gj, w.row);
+      if (this.proxyTree === w) { this.proxyTree = null; this.worldChops.push(w); }
+    }
     this.dirty = true;
   }
 
@@ -450,7 +782,12 @@ export class Story {
     const body = d.body;
     const st = this.step;
 
-    for (const t of this.trees) t.update(dt);
+    for (const t of this.allTrees()) t.update(dt);
+    for (const r of this.allRocks()) r.update(dt);
+    // Felled world trees hand over to the instanced stumps once they're gone.
+    this.worldChops = this.worldChops.filter((w) => { if (w.tree.state === 'gone') { this.group.remove(w.tree.group); return false; } return true; });
+    this.worldBreaks = this.worldBreaks.filter((w) => { if (w.rock.broken && !w.rock.group.visible) { this.group.remove(w.rock.group); return false; } return true; });
+    this.regrowth(dt);
     this.cabin.update(dt, d.camera.position, body.pos);
     this.sparkles.update(dt);
     this.chipPuffs.update(dt);
@@ -471,33 +808,50 @@ export class Story {
     this.flyers = this.flyers.filter((f) => { if (f.f.done) { this.group.remove(f.f.mesh); return false; } return true; });
 
     if (!d.active) {
-      this.hud.set(this.inv, false);
+      this.hud.set(this.inv, false, this.opened());
       return;
     }
 
-    // Interaction: walk into what glints; E / click works too.
+    // Interaction: everything is the one action (E, a click, or the badge
+    // on a touch screen), shown by an icon of what it will do. Chopping
+    // repeats while it's held.
     const walking = mode === 'walk' && body.grounded;
-    const near = walking ? this.inReach() : null;
-    if (near) {
-      this.dwell += dt;
-      if (near.tag === 'tree' ? this.dwell > 0.1 : this.dwell > 0.18) this.act(near, false);
-    } else this.dwell = 0;
+    this.updateProxies(walking);
+    this.action = this.findAction(walking);
+    const holding = input.held('KeyE') || input.held('Mouse0');
+    if ((this.action?.verb === 'chop' || this.action?.verb === 'smash') && holding) this.act(this.action.target!, false);
+    const hold = this.action?.verb === 'chop' || this.action?.verb === 'smash';
+    this.hud.action(this.action?.icon ?? null, holding, input, hold ? 'hold' : 'tap');
     this.swingCd -= dt;
     if (this.swingT >= 0) {
       this.swingT += dt;
-      const tree = this.swingTree!;
-      // Square up to the trunk while swinging.
-      const want = Math.atan2(tree.pos.x - body.pos.x, tree.pos.z - body.pos.z);
-      let dh = want - body.heading;
-      dh = Math.atan2(Math.sin(dh), Math.cos(dh));
-      body.heading += dh * (1 - Math.exp(-14 * dt));
+      const { tree, rock } = this.swingOn;
+      const tp = (tree ?? rock)!.pos;
+      // Square up to the trunk / rock while swinging, stepping in if you
+      // started from the edge of reach so the blow lands.
+      this.face(tp, dt);
+      const reachIn = (tree ? tree.radius + 0.95 : rock!.radius + 0.85);
+      const gap = Math.hypot(tp.x - body.pos.x, tp.z - body.pos.z) - reachIn;
+      if (gap > 0 && this.swingT < 0.28) {
+        const k = Math.min(gap, 3.5 * dt) / (gap + reachIn);
+        body.pos.x += (tp.x - body.pos.x) * k;
+        body.pos.z += (tp.z - body.pos.z) * k;
+      }
       if (this.swingT >= 0.3 && this.swingT - dt < 0.3) {
-        const felled = tree.hit(body.pos);
-        d.sfx.chop();
-        if (felled) d.sfx.fall();
-        const at = tree.pos.clone().lerp(body.pos, 0.35).setY(tree.pos.y + 0.9);
-        d.puffs(at, 3, 0.07, 1.8);
-        this.chips(at);
+        if (tree) {
+          const felled = tree.hit(body.pos);
+          d.sfx.chop();
+          if (felled) d.sfx.fall();
+          const at = tree.pos.clone().lerp(body.pos, 0.35).setY(tree.pos.y + 0.9);
+          d.puffs(at, 3, 0.07, 1.8);
+          this.chips(at);
+        } else if (rock) {
+          rock.hit();
+          d.sfx.smash();
+          const at = rock.pos.clone().lerp(body.pos, 0.3).setY(rock.pos.y + rock.radius * 0.6);
+          d.puffs(at, 3, 0.09, 1.6);
+          this.chipPuffs.emit(at, 4, 0.05, 2.4, undefined, { life: 0.45, rise: -9, drag: 1.5, up: 2.2 });
+        }
         this.progressMade();
       }
       if (this.swingT > 0.55) this.swingT = -1;
@@ -505,10 +859,16 @@ export class Story {
 
     // Deposits: stand by the sketch with material and it flies into the slots.
     if (st.kind === 'build') {
-      const z = this.anchor(st.zone);
-      const inZone = Math.hypot(body.pos.x - z.x, body.pos.z - z.z) < st.zoneRadius || this.nearCabinSide(st.parts);
+      const inZone = this.inBuildZone();
+      // One press hands over everything that's needed, piece by piece.
+      if (!inZone || this.inv[st.resource] === 0) this.depositing = false;
       this.depositT -= dt;
-      if (inZone && this.inv[st.resource] > 0 && this.depositT <= 0) {
+      if (this.depositing) {
+        // Face what you're building.
+        const part = st.parts.find((p) => this.cabin.remaining(p) > 0);
+        if (part) this.face(this.cabin.parts[part].centre, dt);
+      }
+      if (this.depositing && this.inv[st.resource] > 0 && this.depositT <= 0) {
         const part = st.parts.find((p) => this.cabin.remaining(p) - this.tokens.filter((t) => t.part === p).length > 0);
         if (part) {
           this.depositT = 0.3;
@@ -518,7 +878,10 @@ export class Story {
           const bb = new Billboard(tex(iconCanvas(st.resource === 'logs' ? 'log' : 'stone')), 0.55, 30);
           this.overlayGroup.add(bb.mesh);
           this.tokens.push({ bb, from: body.pos.clone().setY(body.pos.y + 1.3), part, slot, t: 0, res: st.resource });
-          d.rig.give();
+          // Building: with the hammer it's a knock per piece; before she has
+          // one (the cabin repair) it's a flurry in a cloud of dust.
+          if (this.hasHammer) { this.useTool('hammer'); d.rig.knock(); this.dust(P.centre); }
+          else { d.rig.give(); this.dust(P.centre, 2); }
           this.progressMade();
         }
       }
@@ -535,6 +898,7 @@ export class Story {
         const P = this.cabin.parts[tk.part];
         const finished = this.cabin.fill(tk.part);
         d.sfx.slot(P.filled, tk.res === 'stones');
+        this.dust(this.cabin.slotPos(P, tk.slot, new THREE.Vector3()).lerp(P.centre, 0.5));
         if (finished) {
           setTimeout(() => d.sfx.thunk(), 180);
           this.spirit.celebrate();
@@ -563,7 +927,14 @@ export class Story {
     // Glint only what's usable now; brighter while a hint is running.
     this.boostT = Math.max(0, this.boostT - dt);
     const tag = this.enough() ? null : this.activeTag();
-    for (const t of this.targets) easeGlint(t.mat, t.tag === tag && t.ok() ? (this.boostT > 0 ? 1.5 : 1) : 0, dt);
+    // Trees are big: their rim is kept gentler so a canopy doesn't flare.
+    const aimed = this.action?.target;
+    for (const t of [...this.targets, ...this.dynTargets]) {
+      const on = (t.tag === tag && t.ok()) || t === aimed;
+      // Thin tools are nearly all rim; they get a lighter touch too.
+      const k = t.tag === 'tree' ? 0.55 : t.tag === 'axe' || t.tag === 'hammer' ? 0.5 : 1;
+      easeGlint(t.mat, on ? (this.boostT > 0 ? 1.5 : 1) * k : 0, dt);
+    }
 
     // Hints: ~20 s without anything useful and the spirit comes to fetch you.
     this.idleT += dt;
@@ -576,10 +947,68 @@ export class Story {
       this.idleT = 0;
     }
 
+    this.placeTools(dt);
     this.clock(dt);
-    this.hud.set(this.inv, true);
+    this.hud.set(this.inv, true, this.opened(), this.enoughOf());
     this.saveT -= dt;
     if (this.dirty && this.saveT <= 0) { this.save(); this.dirty = false; this.saveT = 1; }
+  }
+
+  /**
+   * The harvest clock runs on in-game hours however the clock gets there
+   * (naturally, the story's time-lapses, later sleep), and things grow back.
+   */
+  private regrowth(dt: number) {
+    const d = this.d;
+    const hr = d.env.hour;
+    let dh = this.lastHour < 0 ? 0 : (hr - this.lastHour + 24) % 24;
+    if (dh > 12) dh = 0; // set backwards (debug)
+    this.lastHour = hr;
+    const cam = d.camera;
+    this.frustum.setFromProjectionMatrix(this.projView.multiplyMatrices(cam.projectionMatrix, cam.matrixWorldInverse));
+    const changed = d.harvest.update(dh, dt, this.regrow);
+    for (const t of changed) d.colliders.invalidate(t.x, t.z);
+    if (changed.length) this.dirty = true;
+    // Broken rubble goes once its break has played.
+    for (const [key, r] of this.rubble) if (r.rock.broken && !r.rock.group.visible) { this.group.remove(r.rock.group); this.rubble.delete(key); }
+    if (d.harvest.version !== this.harvestSeen) this.refreshTaken();
+    // Keep the clock (and growth) saved now and then.
+    this.saveClockT += dt;
+    if (this.saveClockT > 15) { this.saveClockT = 0; this.dirty = true; }
+  }
+
+  /** Per resource: has the story asked for it yet? (Its HUD row shows from then on.) */
+  private opened(): Record<Resource, boolean> {
+    const out = { logs: false, stones: false } as Record<Resource, boolean>;
+    this.phase.steps.forEach((s, i) => { if (s.kind === 'gather' && i <= this.stepIndex) out[s.resource] = true; });
+    return out;
+  }
+
+  /** Per resource: do you carry all that the unbuilt parts still need? (The HUD's tick.) */
+  private enoughOf(): Record<Resource, boolean> {
+    const out = { logs: false, stones: false } as Record<Resource, boolean>;
+    for (const r of Object.keys(out) as Resource[]) {
+      const need = this.phase.parts.filter((p) => p.resource === r).reduce((a, p) => a + this.cabin.remaining(p.id), 0) - this.tokens.filter((t) => t.res === r).length;
+      out[r] = need > 0 && this.inv[r] >= need;
+    }
+    return out;
+  }
+
+  /** Turn the explorer toward a point (squaring up to work). */
+  private face(p: THREE.Vector3, dt: number) {
+    const b = this.d.body;
+    const want = Math.atan2(p.x - b.pos.x, p.z - b.pos.z);
+    let dh = want - b.heading;
+    dh = Math.atan2(Math.sin(dh), Math.cos(dh));
+    b.heading += dh * (1 - Math.exp(-14 * dt));
+  }
+
+  /** A little cloud of building dust. */
+  private dust(at: THREE.Vector3, amount = 1) {
+    for (let i = 0; i < 3 * amount; i++) {
+      const p = at.clone().add(new THREE.Vector3((Math.random() - 0.5) * 2, (Math.random() - 0.5) * 1, (Math.random() - 0.5) * 2));
+      this.d.puffs(p, 3, 0.2 + 0.08 * amount, 1.1);
+    }
   }
 
   /** Pale wood chips flying off the cut. */
@@ -604,10 +1033,9 @@ export class Story {
       const at = tree.pos.clone().add(seat.clone().sub(tree.pos).setY(0).setLength(1.3));
       return { at, face: tree.pos.clone().setY(tree.pos.y + 1.5) };
     }
-    if (st.kind === 'gather' && st.targets === 'stone') {
-      const bank = this.anchor('bank');
-      const s = this.stones.filter((x) => !x.taken).sort((a, b) => a.pos.distanceTo(bank) - b.pos.distanceTo(bank))[0];
-      return s ? { at: bank, face: s.pos } : null;
+    if (st.kind === 'gather' && st.targets === 'rock') {
+      const r = this.rocks.find((x) => !x.broken);
+      return r ? { at: this.anchor('hammerSpot'), face: r.pos } : null;
     }
     if (st.kind === 'light' && this.d.env.hour < st.readyAt) return null;
     if (st.kind === 'build' && this.inv[st.resource] === 0) return null;
@@ -632,7 +1060,7 @@ export class Story {
       if (this.revealT > 8 && !this.done) {
         this.done = true;
         this.d.sfx.chirp();
-        this.spirit.want = { at: this.anchor('hearthSeat').clone(), face: this.anchor('hearth'), pose: 'sit', icon: null, lead: false };
+        this.spirit.want = { at: this.anchor('hearthSeat').clone(), face: this.anchor('hearth'), pose: 'sit', icon: null, lead: false, settled: true };
         this.dirty = true;
       }
     }
@@ -671,10 +1099,11 @@ export class Story {
     if (i < 0) return false;
     for (let k = 0; k < i; k++) {
       const st = this.phase.steps[k];
-      if (st.kind === 'pickup') { this.axe.take(); this.hasAxe = true; this.d.rig.tool = 'axe'; }
+      if (st.kind === 'pickup' && st.item === 'axe') { this.axe.take(); this.hasAxe = true; }
+      if (st.kind === 'pickup' && st.item === 'hammer') { this.hammer.take(); this.hasHammer = true; }
       if (st.kind === 'build') for (const p of st.parts) this.cabin.setBuilt(p);
       if (st.kind === 'gather' && st.targets === 'tree') for (const t of this.trees.slice(0, 3)) t.setFelled();
-      if (st.kind === 'gather' && st.targets === 'stone') for (const s of this.stones.slice(0, 3)) s.take();
+      if (st.kind === 'gather' && st.targets === 'rock') for (const r of this.rocks.slice(0, 2)) r.setBroken();
       if (st.kind === 'light') this.cabin.light(true);
     }
     this.stepIndex = i;
@@ -697,8 +1126,11 @@ export class Story {
       step: this.step.id,
       inv: { ...this.inv, logs: this.inv.logs + this.pending('logs') + this.tokens.filter((t) => t.res === 'logs').length, stones: this.inv.stones + this.pending('stones') + this.tokens.filter((t) => t.res === 'stones').length },
       axe: this.hasAxe,
+      hammer: this.hasHammer,
       felled: this.trees.filter((t) => t.state !== 'standing').map((t) => t.index),
-      taken: this.stones.filter((s) => s.taken).map((s) => s.index),
+      smashed: this.rocks.filter((r) => r.broken).map((r) => r.index),
+      world: this.d.harvest.all(),
+      clock: this.d.harvest.clock,
       filled: { roof: this.cabin.parts.roof.filled, door: this.cabin.parts.door.filled, chimney: this.cabin.parts.chimney.filled },
       built: (Object.keys(this.cabin.parts) as PartId[]).filter((p) => this.cabin.parts[p].state === 'built'),
       lit: this.cabin.lit,
@@ -715,22 +1147,30 @@ export class Story {
       if (raw) data = JSON.parse(raw) as SaveData;
     } catch { data = null; }
     if (!data || data.v !== SAVE_VERSION) {
+      this.d.harvest.clear();
+      this.refreshTaken();
       if (this.d.active) this.d.env.hour = this.phase.startHour;
       return;
     }
+    this.d.harvest.load(data.world ?? [], data.clock ?? 0);
+    this.d.colliders.reset(this.d.gen);
+    this.refreshTaken();
     const i = this.phase.steps.findIndex((s) => s.id === data!.step);
     this.stepIndex = Math.max(0, i);
     this.inv = { logs: data.inv.logs ?? 0, stones: data.inv.stones ?? 0 };
     this.hasAxe = data.axe;
-    if (this.hasAxe) { this.axe.take(); this.d.rig.tool = 'axe'; }
+    this.hasHammer = !!data.hammer;
+    if (this.hasAxe) this.axe.take();
+    if (this.hasHammer) this.hammer.take();
     for (const k of data.felled) this.trees[k]?.setFelled();
-    for (const k of data.taken) this.stones[k]?.take();
+    for (const k of data.smashed ?? []) this.rocks[k]?.setBroken();
     for (const p of data.built) this.cabin.setBuilt(p);
-    for (const p of Object.keys(data.filled) as PartId[]) if (!data.built.includes(p)) { this.cabin.showSketch(p); this.cabin.setFilled(p, data.filled[p]); }
+    // Only parts already started come back as sketches; the current step shows its own (enterStep).
+    for (const p of Object.keys(data.filled) as PartId[]) if (!data.built.includes(p) && data.filled[p] > 0) { this.cabin.showSketch(p); this.cabin.setFilled(p, data.filled[p]); }
     if (data.lit) this.cabin.light(true);
     this.done = data.done;
     if (this.d.active) this.d.env.hour = data.hour;
-    if (this.done) this.spirit.want = { at: this.anchor('hearthSeat').clone(), face: this.anchor('hearth'), pose: 'sit', icon: null, lead: false };
+    if (this.done) this.spirit.want = { at: this.anchor('hearthSeat').clone(), face: this.anchor('hearth'), pose: 'sit', icon: null, lead: false, settled: true };
   }
 
   /** Forget this seed's progress (debug / tests). */
@@ -753,8 +1193,8 @@ export class Story {
     const nearest = (list: { pos: THREE.Vector3 }[]) => list.sort((a, b) => a.pos.distanceTo(p) - b.pos.distanceTo(p))[0]?.pos ?? null;
     switch (st.kind) {
       case 'meet': return this.anchor(st.near);
-      case 'pickup': return this.axe.pos;
-      case 'gather': return st.targets === 'tree' ? nearest(this.trees.filter((t) => t.standing)) : nearest(this.stones.filter((s) => !s.taken));
+      case 'pickup': return st.item === 'axe' ? this.axe.pos : this.hammer.pos;
+      case 'gather': return st.targets === 'tree' ? nearest(this.trees.filter((t) => t.standing)) : nearest(this.rocks.filter((r) => !r.broken));
       case 'build': return this.anchor(st.zone);
       case 'light': return this.d.env.hour >= st.readyAt ? this.cabin.hearthPos : this.anchor('doorstep');
       case 'rest': return this.revealT >= 0 && !this.done ? this.anchor(st.from) : null;

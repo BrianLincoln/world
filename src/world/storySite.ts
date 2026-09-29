@@ -7,8 +7,8 @@ import { clamp, hash01, lerp, mulberry32 } from '../core/rng';
 // thread place it identically.
 
 /** Story cabin footprint (local x = along the ridge, local +z = the door side). */
-export const RUIN_W = 6.6;
-export const RUIN_D = 5.0;
+export const RUIN_W = 7.4;
+export const RUIN_D = 5.6;
 
 export interface SitePoint { x: number; z: number }
 export interface StoryTree { x: number; z: number; sc: number; rot: number; lean: number; tone: number }
@@ -29,6 +29,8 @@ export interface StorySite {
   /** Where the spirit waits on the brook bank. */
   bank: SitePoint;
   stones: StoryStone[];
+  /** Boulders to smash for stones: [0] has the hammer lying on it. */
+  boulders: StoryStone[];
   /** Boulders marking the brook's spring. */
   spring: SitePoint;
   /** The next cabin, far across the valley (visible from here). */
@@ -147,8 +149,9 @@ export function findStorySite(seed: number, f: Field): StorySite {
       const L = (lx: number, lz: number) => siteLocal(s, lx, lz);
       const y = h + 0.05;
 
-      // Grove: seven trees in a loose cluster off the cabin's -x end.
-      const gc = L(-RUIN_W / 2 - 24, 5);
+      // Grove: seven trees in a loose cluster behind the cabin (the far side
+      // from the path you arrive by), so it isn't the first thing you see.
+      const gc = L(-5, -RUIN_D / 2 - 22);
       const trees: StoryTree[] = [];
       for (let tries = 0; tries < 80 && trees.length < 7; tries++) {
         const a = rnd() * Math.PI * 2;
@@ -201,12 +204,14 @@ export function findStorySite(seed: number, f: Field): StorySite {
       const src = brook[0];
       const spring = { x: src.x - (brook[1].x - src.x) * 0.6, z: src.z - (brook[1].z - src.z) * 0.6 };
 
-      // Spawn in front of the door, looking at the cabin with the axe in view.
-      const sp = L(3.4, RUIN_D / 2 + 10.5);
-      const look = L(1.2, -1.5);
-      const spawn = { x: sp.x, z: sp.z, yaw: Math.atan2(sp.x - look.x, sp.z - look.z) };
       const stump = L(-RUIN_W / 2 - 2.4, RUIN_D / 2 + 2.6);
-
+      // The hammer's boulder and two more, behind the chimney end (away from
+      // both the path you arrive by and the grove).
+      const boulders: StoryStone[] = [];
+      for (const [lx, lz, sc] of [[RUIN_W / 2 + 7, -RUIN_D / 2 - 6, 0.95], [RUIN_W / 2 + 10.5, -RUIN_D / 2 - 4.2, 0.8], [RUIN_W / 2 + 8.6, -RUIN_D / 2 - 9.8, 0.85]] as const) {
+        const p = L(lx, lz);
+        boulders.push({ x: p.x, z: p.z, rot: rnd() * 6.283, sc: sc * (0.95 + rnd() * 0.1) });
+      }
       const door = L(-0.9, RUIN_D / 2 + 1.2);
       const yard = L(-0.6, RUIN_D / 2 + 9);
       const paths = [
@@ -214,15 +219,26 @@ export function findStorySite(seed: number, f: Field): StorySite {
         { ax: L(RUIN_W / 2 + 1.5, 0.5).x, az: L(RUIN_W / 2 + 1.5, 0.5).z, bx: bank.x, bz: bank.z },
       ];
 
+      // The start: a small clearing in the woods 70-100 m out, joined to the
+      // yard by a winding path, so the cabin is round a bend, out of sight.
+      const approach = findApproach(f, rnd, s, yard, brook, trees);
+      if (!approach && strict) continue;
+      const route = approach ?? [yard, L(1, RUIN_D / 2 + 22)];
+      for (let i = 0; i + 1 < route.length; i++) paths.push({ ax: route[i].x, az: route[i].z, bx: route[i + 1].x, bz: route[i + 1].z });
+      const sp = route[route.length - 1];
+      const ahead = route[Math.max(0, route.length - 4)];
+      // The camera sits behind the explorer, looking up the path.
+      const spawn = { x: sp.x, z: sp.z, yaw: Math.atan2(sp.x - ahead.x, sp.z - ahead.z) };
+
       // The far light: seen from the doorstep if possible, else from the best
-      // open knoll within ~70 m (the spirit walks you there at night).
+      // open knoll within ~42 m (inside the spirit's yard) (the spirit walks you there at night).
       const ds = L(-0.4, RUIN_D / 2 + 2.2);
       let view = findFarCabin(seed, f, ds.x, ds.z, y, rot);
       let lookout: SitePoint = ds;
       if (view.margin < 4) {
         let bx = ds.x, bz = ds.z, bs = -Infinity;
-        for (let ri = 0; ri < 7; ri++) for (let ai = 0; ai < 20; ai++) {
-          const r = 18 + ri * 8, a = (ai / 20) * Math.PI * 2;
+        for (let ri = 0; ri < 5; ri++) for (let ai = 0; ai < 24; ai++) {
+          const r = 18 + ri * 6, a = (ai / 20) * Math.PI * 2;
           const px = x + Math.cos(a) * r, pz = z + Math.sin(a) * r;
           const ph = f.base(px, pz);
           if (ph < 3 || f.forest(px, pz, ph) > 0.15 || flatness(f, px, pz, 3) > 1.6) continue;
@@ -238,11 +254,11 @@ export function findStorySite(seed: number, f: Field): StorySite {
       let x0 = x - 30, z0 = z - 30, x1 = x + 30, z1 = z + 30;
       const fd = Math.hypot(far.x - lookout.x, far.z - lookout.z);
       const vEnd = { x: lookout.x + ((far.x - lookout.x) / fd) * 130, z: lookout.z + ((far.z - lookout.z) / fd) * 130 };
-      for (const p of [...brook, ...trees, spring, lookout, vEnd]) {
+      for (const p of [...brook, ...trees, spring, lookout, vEnd, ...route]) {
         x0 = Math.min(x0, p.x - 12); z0 = Math.min(z0, p.z - 12);
         x1 = Math.max(x1, p.x + 12); z1 = Math.max(z1, p.z + 12);
       }
-      const site: StorySite = { x, z, y, rot, spawn, stump, trees, seat, brook, bank, stones, spring, far, lookout, paths, box: [x0, z0, x1, z1] };
+      const site: StorySite = { x, z, y, rot, spawn, stump, trees, seat, brook, bank, stones, boulders, spring, far, lookout, paths, box: [x0, z0, x1, z1] };
       // Strict: the next cabin's light must be clearly visible from here.
       if (ok && (!strict || view.margin >= 4)) return site;
       if (ok && strict) {
@@ -274,8 +290,63 @@ export function findStorySite(seed: number, f: Field): StorySite {
   const y = Math.max(f.base(0, 0), 4) + 0.05;
   return {
     x: 0, z: 0, y, rot: 0, spawn: { x: 1.4, z: 15, yaw: 0 }, stump: { x: -5.7, z: 5.1 }, trees: [], seat: { x: -20, z: 0 },
-    brook: [], bank: { x: 36, z: 0 }, stones: [], spring: { x: 36, z: -40 }, far: findFarCabin(seed, f, 0, 0, y, 0).far, lookout: { x: 0, z: 5 }, paths: [], box: [-40, -40, 40, 40],
+    brook: [], bank: { x: 36, z: 0 }, stones: [], boulders: [{ x: 10, z: -9, rot: 0, sc: 0.95 }], spring: { x: 36, z: -40 }, far: findFarCabin(seed, f, 0, 0, y, 0).far, lookout: { x: 0, z: 5 }, paths: [], box: [-40, -40, 40, 40],
   };
+}
+
+/**
+ * A clearing in the woods 70-100 m from the cabin (roughly out its front)
+ * and a winding path from the yard to it, returned yard -> clearing. The bend
+ * keeps the cabin out of sight from the start; the path stays dry, off the
+ * brook and clear of the grove. Null if nothing suitable.
+ */
+function findApproach(f: Field, rnd: () => number, s: { x: number; z: number; rot: number }, yard: SitePoint, brook: BrookPt[], trees: StoryTree[]): SitePoint[] | null {
+  let best: SitePoint[] | null = null, bestScore = -Infinity;
+  const fx = Math.sin(s.rot), fz = Math.cos(s.rot);
+  for (let k = 0; k < 28; k++) {
+    const a = (rnd() - 0.5) * 2.4; // within ~70 deg of the door direction
+    const r = 70 + rnd() * 30;
+    const ca = Math.cos(a), sa = Math.sin(a);
+    const dx = fx * ca - fz * sa, dz = fz * ca + fx * sa;
+    const ex = s.x + dx * r, ez = s.z + dz * r;
+    const eh = f.base(ex, ez);
+    if (eh < 4 || flatness(f, ex, ez, 5) > 1.8) continue;
+    if (brook.some((b) => Math.hypot(b.x - ex, b.z - ez) < 14)) continue;
+    // Bend: a quadratic curve through a control point off to one side.
+    const bend = (rnd() < 0.5 ? -1 : 1) * (0.22 + rnd() * 0.18);
+    const mx = (yard.x + ex) / 2, mz = (yard.z + ez) / 2;
+    const L = Math.hypot(ex - yard.x, ez - yard.z);
+    const cx = mx - ((ez - yard.z) / L) * L * bend, cz = mz + ((ex - yard.x) / L) * L * bend;
+    const pts: SitePoint[] = [];
+    let ok = true, climb = 0, prevH = f.base(yard.x, yard.z);
+    const n = Math.ceil(L / 5);
+    for (let i = 0; i <= n && ok; i++) {
+      const t = i / n;
+      const px = (1 - t) * (1 - t) * yard.x + 2 * (1 - t) * t * cx + t * t * ex;
+      const pz = (1 - t) * (1 - t) * yard.z + 2 * (1 - t) * t * cz + t * t * ez;
+      const h = f.base(px, pz);
+      if (h < 2.5) ok = false;
+      if (brook.some((b) => Math.hypot(b.x - px, b.z - pz) < 6)) ok = false;
+      if (trees.some((tr) => Math.hypot(tr.x - px, tr.z - pz) < 4)) ok = false;
+      climb = Math.max(climb, Math.abs(h - prevH));
+      prevH = h;
+      pts.push({ x: px, z: pz });
+    }
+    if (!ok || climb > 2.6) continue;
+    // Wooded round the clearing (and along the way), so it feels like a walk
+    // out of the forest; the cabin hidden behind the bend.
+    let wood = 0;
+    for (let j = 0; j < 8; j++) {
+      const b = (j / 8) * Math.PI * 2;
+      const wx = ex + Math.cos(b) * 20, wz = ez + Math.sin(b) * 20;
+      wood += f.forest(wx, wz, f.base(wx, wz));
+    }
+    const mid = pts[Math.floor(pts.length / 2)];
+    const side = f.forest(mid.x + (cx - mx) * 0.25, mid.z + (cz - mz) * 0.25, f.base(mid.x, mid.z));
+    const score = wood + side * 3 - climb * 0.5;
+    if (score > bestScore) { bestScore = score; best = pts; }
+  }
+  return best;
 }
 
 /**

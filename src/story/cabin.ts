@@ -1,6 +1,8 @@
 import * as THREE from 'three';
 import { makeSolidMaterial } from '../gfx/materials';
 import { Puffs } from '../gfx/puffs';
+import { U } from '../gfx/materials';
+import { SmokeColumn } from './smoke';
 import { siteLocal, siteToLocal, type StorySite } from '../world/storySite';
 import { buildRuin, CAB, type CabinParts } from './geometry';
 import { bubbleCanvas, slotCanvas, tex, type IconName } from './icons';
@@ -57,6 +59,8 @@ export class RuinCabin {
   private ash: THREE.Mesh;
   readonly embers = new Puffs('#ffb45a', 24, 0.9, 0.9);
   readonly smoke = new Puffs('#f3ebe0', 36, 0, 0.55);
+  /** The tall plume from the lit chimney, seen from across the valley. */
+  readonly column: SmokeColumn;
   private smokeT = 0;
   private emberT = 0;
   private t = 0;
@@ -78,6 +82,7 @@ export class RuinCabin {
       return m;
     };
     const front = add(g.front), back = add(g.back), left = add(g.left), right = add(g.right);
+    add(g.floor);
     const roof = add(g.roof);
     const chimneyBase = add(g.chimneyBase);
     add(g.hearth, this.root, this.hearthMat);
@@ -160,6 +165,7 @@ export class RuinCabin {
     this.toWorld(this.hearthPos.set(CAB.hearth.x - 0.38, CAB.floor + 0.25, CAB.hearth.z));
     this.toWorld(this.doorPos.set((dr.x0 + dr.x1) / 2, 0, CAB.D / 2 + 0.9));
     this.toWorld(this.chimneyTop.set(ch.x, ch.top + 0.25, ch.z));
+    this.column = new SmokeColumn(this.chimneyTop.clone().setY(this.chimneyTop.y + 0.3));
     for (const w of [[1.7, 1.6, CAB.D / 2 + 0.1], [-1.6, 1.6, -CAB.D / 2 - 0.1], [1.4, 1.6, -CAB.D / 2 - 0.1], [-CAB.W / 2 - 0.1, 1.6, 0]]) {
       this.windows.push(this.toWorld(new THREE.Vector3(...w)));
     }
@@ -226,6 +232,8 @@ export class RuinCabin {
 
   light(instant = false) {
     this.lit = true;
+    // Restored saves come back with the plume already up.
+    if (instant) this.column.strength = this.column.target = 1;
     this.litT = instant ? 10 : 0;
     this.fire.visible = true;
     this.ash.visible = false;
@@ -307,6 +315,7 @@ export class RuinCabin {
         this.emberT = 0.18 + Math.random() * 0.3;
         this.embers.emit(this.hearthPos, 1, 0.022, 0.15, undefined, { life: 1.0, rise: 1.2, drag: 1.5, up: 0.6 });
       }
+      this.column.target = this.parts.chimney.state === 'built' ? 1 : 0;
       if (this.parts.chimney.state === 'built') {
         this.smokeT -= dt;
         if (this.smokeT <= 0) {
@@ -319,6 +328,7 @@ export class RuinCabin {
     this.mat.uniforms.uWin.value = win;
     this.embers.update(dt);
     this.smoke.update(dt);
+    this.column.update(dt, U.uNight.value as number);
 
     this.cutaway(cam, player);
   }
@@ -339,10 +349,17 @@ export class RuinCabin {
     const p = siteToLocal(this.site, player.x, player.z);
     const camY = cam.y - this.site.y, plY = player.y - this.site.y;
     const hw = CAB.W / 2, hd = CAB.D / 2;
-    const inBox = (q: { x: number; z: number }, y: number) => Math.abs(q.x) < hw + 0.1 && Math.abs(q.z) < hd + 0.1 && y < CAB.wallTop + CAB.rise;
-    const plIn = inBox(p, plY);
-    // A camera pressed up against (or inside) the cabin counts as inside.
-    const camIn = Math.abs(c.x) < hw + 1.0 && Math.abs(c.z) < hd + 1.0 && camY < CAB.wallTop + CAB.rise;
+    // Underside of the gable over a point (ridge along x), not a flat lid at
+    // ridge height: someone standing on a roof slope is below the ridge.
+    const roofY = (z: number) => CAB.wallTop + CAB.rise * Math.max(0, 1 - Math.abs(z) / hd);
+    const plIn = Math.abs(p.x) < hw + 0.1 && Math.abs(p.z) < hd + 0.1 && plY < roofY(p.z) - 0.25;
+    const onRoof = !plIn && plY > CAB.wallTop - 0.2 && Math.abs(p.x) < hw + 0.6 && Math.abs(p.z) < hd + CAB.over + 0.6;
+    // A camera inside the shell counts as inside; one pressed up against the
+    // walls does too, unless the explorer is up on the roof (the roof stays).
+    const camUnder = camY < roofY(c.z);
+    const camInside = Math.abs(c.x) < hw && Math.abs(c.z) < hd && camUnder;
+    const camNear = Math.abs(c.x) < hw + 1.0 && Math.abs(c.z) < hd + 1.0 && camUnder;
+    const camIn = camInside || (camNear && !onRoof);
     // A wall hides when the sightline from camera to explorer crosses it.
     const crosses = (axis: 'x' | 'z', plane: number, span: number) => {
       const a = c[axis] - plane, b = p[axis] - plane;

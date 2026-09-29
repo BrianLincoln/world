@@ -192,6 +192,15 @@ export class WorldGen {
     return h;
   }
 
+  /** Distance to the story set's own footpaths (the approach, the yard, the bank). */
+  storyPathDist(x: number, z: number): number {
+    const st = this.story;
+    if (x < st.box[0] || x > st.box[2] || z < st.box[1] || z > st.box[3]) return Infinity;
+    let d = Infinity;
+    for (const p of st.paths) d = Math.min(d, segDist(x, z, p));
+    return d;
+  }
+
   /** Distance to the story brook's centre line (Infinity when far). */
   brookDist(x: number, z: number): number {
     const st = this.story;
@@ -212,12 +221,18 @@ export class WorldGen {
     if (Math.abs(l.x) < RUIN_W / 2 + pad + r + (kind === 'tuft' ? 0 : 1.2) && Math.abs(l.z) < RUIN_D / 2 + pad + r) return true;
     const bd = this.brookDist(x, z);
     if (bd < (kind === 'tuft' ? 2.7 : kind === 'rock' ? 5.5 : 4.6) + r) return true;
-    if (kind === 'tuft') return false;
+    if (kind === 'tuft') return this.storyPathDist(x, z) < 2.1;
     for (const t of st.trees) if (Math.hypot(t.x - x, t.z - z) < 3.4 + r) return true;
     if (Math.hypot(st.stump.x - x, st.stump.z - z) < 2.5 + r) return true;
-    if (Math.hypot(st.spawn.x - x, st.spawn.z - z) < 3 + r) return true;
+    // The start clearing in the woods.
+    if (Math.hypot(st.spawn.x - x, st.spawn.z - z) < (kind === 'rock' ? 6 : 9) + r) return true;
     if (Math.hypot(st.bank.x - x, st.bank.z - z) < 3.5 + r) return true;
-    if (kind === 'rock') for (const p of st.paths) if (segDist(x, z, p) < 2 + r) return true;
+    for (const b of st.boulders) if (Math.hypot(b.x - x, b.z - z) < 3.2 + r) return true;
+    // The story's paths are wide, trodden and clear.
+    const pd = this.storyPathDist(x, z);
+    if (kind === 'tree' && pd < 5 + r) return true;
+    if (kind === 'bush' && pd < 3.6 + r) return true;
+    if (kind === 'rock' && pd < 2.6 + r) return true;
     // A view corridor from the lookout toward the far cabin's light.
     if (kind === 'tree' || kind === 'bush') {
       const lx = st.lookout.x, lz = st.lookout.z;

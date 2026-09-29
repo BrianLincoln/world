@@ -4,6 +4,8 @@
 // Materials are GLSL3 ShaderMaterials (three declares position/normal/uv and
 // the standard matrices for us).
 
+import { SAPLING } from '../world/harvest';
+
 export const COMMON = /* glsl */ `
 precision highp float;
 uniform vec3 uLightDir;
@@ -213,9 +215,27 @@ uniform float uTime;
 uniform float uBend;
 uniform float uWind;
 uniform float uHeightRef;
+// Taken out of the world (see world/harvest.ts): uHarvestGrid is the prop's
+// grid cell size (0 = not harvestable), uHarvestChan 0 = trees, 1 = rocks.
+// POI boulders carry aI1.z = 9 and are never taken. Returns 0 = gone, else
+// the prop's size factor: a regrowing tree is drawn from a sapling up.
+uniform sampler2D uHarvest;
+uniform float uHarvestGrid;
+uniform float uHarvestChan;
+float harvestScale(vec3 base) {
+  if (uHarvestGrid <= 0.0 || aI1.z > 5.0) return 1.0;
+  ivec2 c = ivec2(floor(base.xz / uHarvestGrid));
+  ivec2 t = ((c % 512) + 512) % 512;
+  vec4 h = texelFetch(uHarvest, t, 0);
+  if (uHarvestChan > 0.5) return max(h.g, h.a) > 0.5 ? 0.0 : 1.0;
+  if (h.b > 0.5 || h.r > 0.998) return 0.0;
+  return mix(1.0, ${SAPLING.toFixed(3)}, h.r);
+}
+// Set by main() from harvestScale before posing.
+float gGrow = 1.0;
 // Local-space vertex after scale, bend and yaw. hN = normalised height.
 vec3 propPose(vec3 p, vec3 base, out float hN) {
-  float sc = aI0.w;
+  float sc = aI0.w * gGrow;
   hN = clamp(p.y / uHeightRef, 0.0, 1.0);
   p.xz *= sc;
   p.y *= sc * aI1.y;
@@ -240,10 +260,12 @@ out float vKind;
 out float vTone;
 out vec3 vWorld;
 void main() {
-  float sc = aI0.w;
+  vec3 base = (modelMatrix * vec4(aI0.xyz, 1.0)).xyz;
+  gGrow = harvestScale(base);
+  if (gGrow <= 0.0) { gl_Position = vec4(0.0, 0.0, 2.0, 1.0); return; }
+  float sc = aI0.w * gGrow;
   float sy = aI1.y;
   vLocal = position;
-  vec3 base = (modelMatrix * vec4(aI0.xyz, 1.0)).xyz;
   if (uCutaway > 1.5) {
     // Hide whole trees whose canopy actually blocks the camera->player
     // sightline, instead of slicing them open. The canopy is a cone from
@@ -307,6 +329,8 @@ uniform vec3 uLightDir;
 uniform float uShadowReach;
 void main() {
   vec3 base = (modelMatrix * vec4(aI0.xyz, 1.0)).xyz;
+  gGrow = harvestScale(base);
+  if (gGrow <= 0.0) { gl_Position = vec4(0.0, 0.0, 2.0, 1.0); return; }
   float hN;
   vec3 p = propPose(position, base, hN);
   vec3 w = (modelMatrix * vec4(p + aI0.xyz, 1.0)).xyz;
@@ -340,6 +364,7 @@ uniform vec3 uKind[22];
 uniform vec3 uGlow;
 /** Story interactable signal strength (0 = none). */
 uniform float uGlint;
+uniform float uNearCut;
 /** Window glow override: < 0 = follow the night (every world cabin); else a lit/unlit story cabin. */
 uniform float uWin;
 /** Firelight on story interiors (0..1). */
@@ -357,7 +382,7 @@ void main() {
   if (uCutaway > 0.5) {
     // Cut away foliage between the camera and the player, and anything that
     // would brush the near plane.
-    if (-vView.z < 1.5) discard;
+    if (-vView.z < uNearCut) discard;
   }
   vec3 n = normalize(vN);
   if (uFlip > 0.5 && !gl_FrontFacing) n = -n;

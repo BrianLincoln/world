@@ -231,8 +231,10 @@ that uncertainty.
 - **Stepped fog on open water** still shows as wide concentric arcs from
   high altitude. Flat water can't be layered by ridges. It's acceptable at
   eye level.
-- **No cast shadows.** Hilda uses few, and a shadow map is the biggest single
-  GPU cost I'd add. The explorer gets a painted contact shadow.
+- **Cast shadows fall on the ground only.** Trees, bushes, rocks and cabins
+  shadow the terrain near the camera (see "Ground cast shadows" below). Props,
+  creatures and the explorer don't receive them, and creatures and the
+  explorer don't cast them (they have contact shadows).
 - **No collisions** with trees, rocks or cabins (you walk through them). Trees
   between the camera and the player are culled.
 - Draw calls (~500) are per node × prop type. Fine on desktop GPUs; merging
@@ -252,8 +254,9 @@ that uncertainty.
    forest type in lowland valleys. Also birch groves.
 3. **Hand-drawn texture:** subtle hatching in the shade band and wobbling
    outline widths (a noise-modulated sample offset) so lines feel inked.
-4. **Soft cast shadows** for trees onto ground near the camera only (one
-   small cascade, hard-edged, tinted with the shade colour).
+4. ~~Cast shadows near the camera~~: done as a ground-only mask (below).
+   Next steps there: the explorer and creatures as casters, and props
+   receiving (a real depth map would be needed for that).
 5. **Colliders:** trunk cylinders and cabin boxes from the scatter data
    already in the workers.
 6. **Boat and glider modes** on the existing movement interface. `WorldQuery`
@@ -474,6 +477,14 @@ that uncertainty.
 - **Perf:** a worst case of 17 creatures on screen adds ~440 k tris and 10 draw
   calls. The perf run with natural spawns is unchanged (avg 4.23 ms vs 4.25 ms,
   p99 7.2–7.3 ms, A/B'd twice).
+- **Soft contact (`Mobs.nudge`):** you nudge creatures aside rather than
+  walking through them. Your contact shape is a 0.4 × 1.7 m cylinder, 0.6 m
+  on a bike, or the mount's radius when riding. Overlap eases out at 12/s,
+  and the creature picks up your closing speed plus a small spring, so it
+  gets pushed ahead and slides off to the side. Only the creature moves;
+  you're never blocked. Tamed creatures also keep apart from each other, and
+  a ridden mount always wins. Wild flock-mates can still overlap each other
+  (their flocking keeps that rare).
 - **Known / next:** tamed creatures aren't saved across reloads (no backend;
   localStorage would do). Wild floofs ignore trees (they fly over forests by
   rule) and ridden floofs only collide with trunks. Crow folded wings still fan
@@ -567,6 +578,12 @@ that uncertainty.
   only Body, mode and the seat, so the camera and rig stay independent of
   the bike. A lead rope still pulls the right arm off the bar, so you can
   cycle a floof home.
+- **Switching mounts:** E on a bike or a creature climbs straight onto the
+  nearest other thing in reach (`nextMount` / `switchTo` in `main.ts`), and
+  hops off only when there's nothing else. The mount you leave stays where
+  it is. Reach from a mount is wider: 6.5 m to a creature (a floof on its
+  lead trails about 5 m back) and 4.5 m to a bike, from a mount no more than
+  3 m off the ground. The prompt names what E will do.
 - **Camera:** with the mouse idle for more than 1.2 s and speed above 3 m/s,
   the orbit drifts round behind the bike. Speed adds FOV and pull-back.
 - **Shots:** `node scripts/bike.mjs <dir> [parked,mount,ride,sprint,turn,hop,night,wild]`.
@@ -599,3 +616,187 @@ that uncertainty.
   overrides it at once. Bikes keep their own drift.
 - Verify with `node scripts/touch.mjs`, which drives real CDP touch events
   in a phone-landscape context and writes `shots/touch-*.png`.
+
+## Phones: resolution and adaptive quality (2026-09-28)
+It looked bad on an iPhone for two reasons in `main.ts`:
+- **The adaptive controller mistook a frame cap for a slow GPU.** iOS caps
+  requestAnimationFrame at 30 fps in Low Power Mode, and the "slow" test was
+  anything under 50 fps. So the phone always dropped to the lowest
+  resolution (55%) and shed terrain detail. On touch devices
+  (`isTouchDevice()`) the test is now under ~27 fps. Desktop keeps 50.
+- **Pixel-ratio cap 1.5 on a 3x screen** (rendering about half of native
+  per axis) made everything soft, with chunky outlines after FXAA. Touch
+  devices now cap at 2. Desktop keeps 1.5.
+- The layer-fog target went from RGBA32F to RGBA16F. Depths fit, and the
+  match only needs about 8% relative accuracy. 16F targets are renderable
+  on more mobile GPUs, and the pass uses half the bandwidth. Desktop shots
+  before and after this change came out the same.
+Not verified on a real device: Playwright's WebKit crashes on this macOS,
+so Safari rendering is untested here.
+
+## Ground cast shadows (2026-09-28)
+`gfx/groundShadow.ts`. Not a depth shadow map. Each caster is posed exactly as
+drawn (the prop pose is now a shared GLSL function, `propPose`, so shadows sway
+with the wind), flattened along the key light onto the plane of its own base,
+and drawn from straight above into a 2048² R8 coverage mask. The mask covers
+180 m around the camera and is snapped to texels so edges don't crawl. The
+terrain shader thresholds the filtered mask (crisp edges at any texel size)
+and drops the ground into the **shade band**, the same tone as a hill's far
+side, so it stays toon and never goes black. It fades out 55–85 m from the
+camera.
+- Why a mask instead of a shadow map: only the ground receives, so there's no
+  acne, no bias tuning, and no depth compare. On slopes the shadow is slightly
+  wrong (it's projected onto the base's plane), which isn't visible in play.
+- Casters are extra meshes in terrain nodes ≤128 m, on layer 1
+  (`SHADOW_LAYER`), which the main camera never renders. They're one draw per
+  node per kind: every variant shares one mesh reading the chunk's instance
+  rows directly (stride 8 = aI0 | aI1). Trees use the far LOD (~150 tris);
+  the flat silhouette looks the same. Their bounding spheres grow by 45 m so
+  shadows from nodes just outside the mask still land.
+- **Shadow length is capped** (`uShadowReach`, 1.5 m of run per metre of
+  height). The key light never drops below y = 0.24, which would give 4×
+  shadows. At 2.2, dusk put the whole foreground in shade and the frame went
+  muddy. 1.5 keeps long evening shadows without losing the lit ground.
+- At night the moon is the key light, so shadows are faint and blue. That fits.
+- Cost on an M1 Pro: ~0.4 ms per frame for the pass, with ~80 draw calls and
+  ~0.5 M triangles. Before capping the tree LOD and merging variants it was
+  ~110 calls and 1.2 M triangles. Adaptive quality sheds shadows after
+  resolution and before terrain detail, and restores them in reverse.
+  `?shadows=0` turns them off for A/B tests. The debug panel has an on/off
+  toggle, strength and reach under Render.
+- Frame-time A/B with `--perf` was too noisy to trust this session (another
+  Chrome tab was using the GPU; shadows off ranged from 9 to 27 ms), so the
+  number above is from timing the pass alone in a probe (40 passes between
+  `gl.finish()` calls). Still to do: an A/B on a quiet machine and on a real
+  iGPU.
+
+## Story phase 1: the wordless opening (2026-09-29)
+- **What:** you start in a clearing in the woods and follow a wide worn path
+  round a bend to a broken cabin. A cold hearth spirit meets you and shows you
+  the axe; you fell three trees and fix the roof and door (a flurry in a cloud
+  of dust). It shows you a hammer on a boulder behind the chimney end; you
+  smash rocks for stones, rebuild the chimney (knocking with the hammer) and
+  light the hearth at dusk. At night the spirit shows you the next cabin's
+  light across the valley. No text anywhere.
+- **Data-driven:** `src/story/phase1.ts` is a table of steps whose kinds
+  (`meet`, `pickup`, `gather`, `build`, `light`, `rest`) are all the director
+  (`story.ts`) knows. Each step names the spirit's anchor, pose, bubble icon,
+  warmth, start hour and hint behaviour. Later phases add tables.
+- **Guaranteed start** (`world/storySite.ts`, pure, runs in workers too):
+  spiral out from the origin for flat, dry, open ground; lay out the cabin
+  (7.4 x 5.6 m, room for a bed later) with the brook side +x, the grove
+  behind it (away from the arrival path), three boulders behind the chimney
+  end (the hammer on the first), a brook traced down the fall line and carved
+  into `height()` with sandy banks, and a curved approach path from a clearing
+  70-100 m out. The strict pass also requires the next cabin's light to be
+  visible (>= 4 m clearance, sparse trees count as a 14 m wall) from the
+  doorstep or a knoll within 42 m; after 30 good sites it takes the best view.
+  Natural POIs within 110 m are dropped; scatter keeps off the set
+  (`storyBlock`). Where the natural forest by the path is thin, the story
+  plants conifers (`Woods`) so you always set out from the woods.
+- **Gathering is a mechanic, not a script:** with the axe any world tree can
+  be felled, with the hammer any ordinary boulder smashed (landmark boulders,
+  tagged lean = 9 in the chunk data, can't). The grove and the three boulders
+  are just the first ones the spirit points you to. How it works
+  (`world/harvest.ts`): scatter trees sit one per 4 m grid cell and rocks one
+  per 9 m cell, so a cell id names a prop at every LOD. A 512 x 512 wrap-around
+  flag texture hides taken props in the prop and shadow-caster vertex shaders
+  (`harvested()`), no chunk rebuilds. The one you walk up to is swapped for an
+  identical story prop (proxy flag) that can glint and take hits; if it falls
+  or breaks it's taken (saved), and felled trees leave instanced stumps
+  until they grow back (see *Regrowth* below). Colliders skip taken props (`Colliders.skip`) and answer
+  `nearestTree` / `nearestRock`. Aliasing: two taken props exactly 2 km (trees)
+  or 4.6 km (rocks) apart share a flag; rare, and it only hides a far twin.
+  The planted woods by the start path can't be felled yet.
+- **One action for everything:** E, a click (pointer locked) or the on-screen
+  badge (touch). The badge shows what it does: mitten = pick up, axe = chop,
+  cracked stone = smash (both hold to keep swinging), hammer = repair (one
+  press hands over all you carry), flame = light. Beside it a device glyph
+  shows how: a mouse with its left button lit, or a finger on touch screens,
+  tapping for a press and pressing-and-staying for a hold. Nothing triggers by
+  walking into it. A gamepad can map its X to the same `KeyE` later.
+- **Regrowth** (`Harvest.update`, like most sandboxes: Palworld regrows in
+  place, Zelda respawns while you're away). A harvest clock counts in-game
+  hours from `env.hour` deltas, so time-lapses (and a bed, later) count;
+  jumps backwards don't. A felled tree is a bare stump for 10 h, then
+  sprouts (only unseen: > 25 m away and off screen, or > 120 m) and grows
+  over 36 h, drawn as the world tree scaled from 12% up: the harvest
+  texture's R byte holds its growth, quantised to 64 steps and uploaded at
+  most once a second. Its stump sinks away by 40%, it's solid from 60% and
+  can't be felled until it's full grown (`Colliders.busy`). Smashed rocks
+  come back after 20 h, unseen. Nothing comes back within 40 m of the cabin
+  (the clearing you made stays cleared). Saved: `clock` plus per-entry `at`
+  and `grow`. Felled world trees weren't being saved at all before this
+  (only rocks called `takeWorld`), so they came back on reload with no stump.
+- **Big boulders** (scatter rocks over scale 1.4, which couldn't be broken
+  before) take 5 blows and break into 3-4 small rocks (`rubbleOf`: seeded by
+  cell, a loose pile inside the footprint, under a step high so you walk
+  over them). The pieces tumble out and are smashed like any small rock for
+  stones. They are story `SmashRock`s (a handful of draws); which ones are
+  smashed is a bitmask on the boulder's entry, and they vanish when it
+  comes back. Landmark boulders (tors, stone circles, erratics, the spring)
+  still can't be broken.
+  `node scripts/regrow.mjs <dir>` checks all of it headless: break, rubble,
+  a piece, reload, fell, fast-forward (sprout only when away), grown, back.
+- **Tools, no inventory:** owned tools are worn (axe across the pack, hammer
+  at the hip) and drawn into the hand for the action that needs them, then
+  stowed again after 3 s unused.
+- **Only usable things glint** (hard warm rim + slow shimmer, `glintAmt`),
+  gentler on big trees and thin tools. A story tree you're working on cuts a
+  4.5 m hole round the camera instead of the usual 1.5 m, so its canopy never
+  fills the screen.
+- **Sketches** are an overlay pass (`story/overlay.ts`) after the composite,
+  before FXAA, with real alpha: dashed ink edges + hatched wash, fading where
+  the G-buffer says something is in front. Icon slots are billboards with a
+  minimum pixel size. The chimney's only appears once its step begins (a
+  reload used to bring back every unbuilt part's sketch).
+- **The spirit** (`story/spirit.ts`): pebble body, painted eyes, stubby arms,
+  feet, an ember in its chest. Cold = ash blue and frowning, warm = self-lit
+  amber (emissive >= 0.5 so the night grade can't turn it blue). It leads and
+  waits, tugs you after 20 s without progress, never leaves ~45 m of the cabin
+  (calls from the edge instead), and only shows its bubble within ~5 m. Its
+  head tuft was removed on feedback; it still wants a new silhouette hook.
+- **Cabin cutaway:** walls between camera and explorer, and the roof, hide
+  when either is inside; the floor and hearth never do.
+- **Chimney smoke** (`story/smoke.ts`): once the hearth is lit, a ~120 m
+  column of toon puffs (one instanced draw) swelling as it rises and leaning
+  with the wind, so you can find home from across the valley.
+- **Inventory** is a parchment tab per resource: its icon and a count
+  (`×3`), plus a green tick when you carry all that's needed. A row appears
+  when the story first reaches that resource's `gather` step and stays after,
+  greyed out at ×0 (`Story.opened()`). It used to be one icon per item and no
+  numbers, dropped on feedback: the row got long and vanished when empty.
+  Extra logs and stones are kept (for later crafting).
+- **Clock:** each step drifts the time to its start hour, then runs naturally
+  but never past the next step's hour, so dusk arrives only when the hearth
+  is ready; the ending time-lapses into night.
+- **Save:** localStorage per seed (`fjellheim.story.<seed>`, v2: includes
+  tools and everything felled / smashed). The lit cabin is the respawn point.
+  `?fresh=1` forgets, `?story=0` turns the story off (also off when the URL
+  sets a time, position or flight, for shots).
+- **Verify:** `node scripts/story.mjs <dir> seed=<s> [from=<step>]` plays the
+  whole thing with real key presses (tap E, hold E at trees and rocks) and
+  screenshots each stage; `scripts/spirit.mjs` does spirit close-ups.
+- **Known / next:** a bed (sleep through the night) inside the bigger cabin;
+  a new look for the spirit; felling the planted woods; shots whose subject
+  hugs the cabin can put the camera in a wall (the orbit camera only collides
+  with terrain); gamepad mapping.
+- **Crows keep off the home patch:** `groundScore` in `mobs/crow.ts` rejects
+  any landing spot within `BASE_CLEAR` (80 m) of the story cabin, and
+  `depart`'s random fallback gets pushed out past that ring too. Their flight
+  paths are untouched, so flocks still cross over the cabin now and then.
+
+### Phase 1 feel pass (2026-09-29)
+- Reach is about 0.5 m longer for the axe, trees, the hammer and rocks. A swing
+  started from the edge of reach steps the explorer in over its first 0.28 s,
+  so the blow still lands on the bark or stone.
+- A tool is stowed (axe across the pack, hammer at the hip) 0.7 s after its
+  last use, down from 3 s.
+- The hammer leans against the cabin side of its boulder, fitted to the
+  boulder's posed vertices (`SmashRock.extent`) so it can't clip. The grip
+  clears the boulder's flared base.
+- Both work prompts show the tool: the axe to chop, the hammer to smash.
+- `Want.settled`: the spirit's idle once nothing is being asked for (the
+  `rest` step and after). It sits facing the fire with its palms out and a
+  slow sway, and never points. When you're within 7 m it looks round at you
+  every 5-11 s with happy eyes. This is the base for whatever comes next.

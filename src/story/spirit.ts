@@ -6,10 +6,9 @@ import { Billboard } from './overlay';
 
 // The hearth spirit: a small round being made of the warmth of a house. A
 // soft pebble-round body with big painted eyes, stubby arms for pantomime,
-// two little feet, a glowing ember in its chest and a single curl of flame on
-// its head. Cold, it's the pale blue-grey of ash and its curl is a limp wisp
-// of smoke; as the house comes back to life it warms through apricot to a
-// bright glowing amber and the curl stands up and flickers.
+// two little feet and a glowing ember in its chest. Cold, it's the pale
+// blue-grey of ash; as the house comes back to life it warms through apricot
+// to a bright glowing amber.
 //
 // It never speaks. The director tells it where to be and what it wants
 // (`want`), and queues one-shot acts (celebrate, greet, hint); everything it
@@ -19,8 +18,6 @@ const R = 0.34;
 const COLD = new THREE.Color('#b8c6d8');
 const MID = new THREE.Color('#ecc9ae');
 const WARM = new THREE.Color('#f0924c');
-const CURL_COLD = new THREE.Color('#9ea9b8');
-const CURL_WARM = new THREE.Color('#ffb040');
 const HEART_COLD = new THREE.Color('#6d6874');
 const HEART_WARM = new THREE.Color('#ffb24a');
 
@@ -34,6 +31,9 @@ export interface Want {
   icon: IconName | null;
   /** Wait for the explorer to keep up while travelling. */
   lead: boolean;
+  /** Nothing to ask for: it just enjoys being there (no pointing; watches
+   *  `face`, looks round at you now and then when you're close). */
+  settled?: boolean;
 }
 
 type Act =
@@ -50,8 +50,7 @@ export interface SpiritHooks {
 }
 
 function bodyGeometry(): THREE.BufferGeometry {
-  // Pebble-round, a flat seat underneath and a soft point on top where the
-  // curl grows.
+  // Pebble-round, a flat seat underneath and a soft point on top.
   const prof: [number, number][] = [
     [0.0, -0.86], [0.42, -0.84], [0.72, -0.72], [0.92, -0.46], [1.0, -0.12], [0.98, 0.18], [0.88, 0.46],
     [0.7, 0.7], [0.46, 0.88], [0.2, 0.98], [0.0, 1.02],
@@ -67,37 +66,6 @@ function bodyGeometry(): THREE.BufferGeometry {
   const bodyN = body.index ? body.index.count : body.attributes.position.count;
   for (let i = bodyN; i < tint.count; i++) tint.setX(i, 0.55);
   return g;
-}
-
-function curlGeometry(): THREE.BufferGeometry {
-  // A tapered swept curl: up from the crown, leaning back, the tip rolling over.
-  const pts = [
-    new THREE.Vector3(0, -0.02, 0), new THREE.Vector3(0, 0.07, 0.01), new THREE.Vector3(0.005, 0.15, -0.005),
-    new THREE.Vector3(0.0, 0.22, -0.04), new THREE.Vector3(0, 0.26, -0.1), new THREE.Vector3(0, 0.24, -0.15), new THREE.Vector3(0, 0.2, -0.14),
-  ];
-  const curve = new THREE.CatmullRomCurve3(pts);
-  const N = 28, M = 12;
-  const frames = curve.computeFrenetFrames(N, false);
-  const pos: number[] = [], idx: number[] = [];
-  for (let i = 0; i <= N; i++) {
-    const t = i / N;
-    const c = curve.getPointAt(t);
-    const r = 0.065 * Math.pow(1 - t, 0.8) + 0.008;
-    for (let j = 0; j < M; j++) {
-      const a = (j / M) * Math.PI * 2;
-      const n = frames.normals[i].clone().multiplyScalar(Math.cos(a)).addScaledVector(frames.binormals[i], Math.sin(a));
-      pos.push(c.x + n.x * r, c.y + n.y * r, c.z + n.z * r);
-    }
-  }
-  for (let i = 0; i < N; i++) for (let j = 0; j < M; j++) {
-    const a = i * M + j, b = i * M + ((j + 1) % M), c2 = (i + 1) * M + j, d = (i + 1) * M + ((j + 1) % M);
-    idx.push(a, c2, b, b, c2, d);
-  }
-  const g = new THREE.BufferGeometry();
-  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
-  g.setIndex(idx);
-  g.computeVertexNormals();
-  return colored(g, '#ffffff');
 }
 
 function armGeometry() {
@@ -119,7 +87,6 @@ export class Spirit {
   readonly group = new THREE.Group();
   readonly batches: PartBatch[];
   private bodyB: PartBatch;
-  private curlB: PartBatch;
   private armB: PartBatch;
   private footB: PartBatch;
   private heartB: PartBatch;
@@ -144,7 +111,6 @@ export class Spirit {
   // Skeleton (never in the scene; its matrices feed the batches).
   private root = new THREE.Object3D();
   private body = new THREE.Object3D();
-  private curl = new THREE.Object3D();
   private arms = [new THREE.Object3D(), new THREE.Object3D()];
   private feet = [new THREE.Object3D(), new THREE.Object3D()];
   private heart = new THREE.Object3D();
@@ -157,20 +123,33 @@ export class Spirit {
   private sit = 0;
   private armX = [new Spring(), new Spring()];
   private armZ = [new Spring(), new Spring()];
-  private curlX = new Spring();
-  private curlZ = new Spring();
   private blinkAt = 1;
   private look = new THREE.Vector2();
   private eye = new THREE.Vector4(0, 0, 1, 0);
   private happyT = 0;
   private whimperT = 3;
   private pointT = 0;
+  private glanceT = 4;
   private beckonT = 0;
   private spin = 0;
   private tint = new THREE.Color();
-  private curlTint = new THREE.Color();
   private heartTint = new THREE.Color();
   player = new THREE.Vector3();
+  /** Its yard: it won't go further than `range` from `home` (the cabin). */
+  home: THREE.Vector3 | null = null;
+  range = 45;
+
+  /** Pull a destination back inside the yard; true if it had to. */
+  keepHome(p: THREE.Vector3): boolean {
+    if (!this.home) return false;
+    const dx = p.x - this.home.x, dz = p.z - this.home.z;
+    const d = Math.hypot(dx, dz);
+    if (d <= this.range) return false;
+    p.x = this.home.x + (dx / d) * this.range;
+    p.z = this.home.z + (dz / d) * this.range;
+    return true;
+  }
+
   /** Debug: pin the heading (close-up shots). */
   hold: number | null = null;
   /** Debug: pin the warmth. */
@@ -189,19 +168,17 @@ export class Spirit {
       ...face, eyePos: [...face.eyePos], eyeSize: [...face.eyeSize], pupil: [...face.pupil], lookRange: [...face.lookRange],
       mouthW: [...face.mouthW], blush: [...face.blush],
     }, 2);
-    this.curlB = new PartBatch(curlGeometry(), { keep: 0.9 }, 2);
     this.armB = new PartBatch(armGeometry(), { keep: 0.86 }, 4);
     this.footB = new PartBatch(footGeometry(), { keep: 0.86 }, 4);
     this.heartB = new PartBatch(heartGeometry(), { keep: 0.95 }, 2);
-    this.batches = [this.bodyB, this.curlB, this.armB, this.footB, this.heartB];
+    this.batches = [this.bodyB, this.armB, this.footB, this.heartB];
     for (const b of this.batches) this.group.add(b.mesh);
     this.bubble = new Billboard(tex(bubbleCanvas('axe')), 0.95, 44);
     this.bubble.alpha = 0;
 
     this.root.add(this.body);
-    this.body.add(this.curl, this.heart, ...this.arms);
+    this.body.add(this.heart, ...this.arms);
     this.root.add(...this.feet);
-    this.curl.position.set(0, 0.97 * R, -0.02);
     this.heart.position.set(0, -0.52 * R, 0.86 * R);
     this.heart.rotation.x = 0.55;
     this.arms[0].position.set(0.9 * R, -0.05 * R, 0.08 * R);
@@ -301,7 +278,12 @@ export class Spirit {
           this.moving = true;
           tv2.set(this.player.x - this.pos.x, 0, this.player.z - this.pos.z);
           const stop = tv2.clone().setLength(Math.max(0, tv2.length() - 1.0));
-          if (this.travel(tv2.set(this.pos.x + stop.x, 0, this.pos.z + stop.z), speed, dt) || toPlayer < 1.3 || act.t > 9) { act.phase = 'tug'; act.t = 0; }
+          tv2.set(this.pos.x + stop.x, 0, this.pos.z + stop.z);
+          // It never leaves its yard: past the edge it stops and calls you back.
+          const clamped = this.keepHome(tv2);
+          const there = this.travel(tv2, speed, dt);
+          if (toPlayer < 1.3 || (there && !clamped) || act.t > 9) { act.phase = 'tug'; act.t = 0; }
+          else if (there && clamped) { act.phase = 'hop'; act.t = 0; act.face = this.player.clone(); }
         } else if (act.phase === 'tug') {
           // Grab the coat and pull toward the target, three little tugs.
           this.vel.multiplyScalar(Math.exp(-10 * dt));
@@ -348,11 +330,22 @@ export class Spirit {
       } else {
         this.vel.multiplyScalar(Math.exp(-10 * dt));
         this.path = [];
-        // Idle at the spot: glance at the target and point now and then.
-        this.pointT -= dt;
-        if (w.face && this.pointT < -2.6) this.pointT = 1.6;
-        if (w.face && (this.pointT > 0 || pose === 'point')) { pointAt = w.face; lookAt = w.face; }
-        if (pose === 'warm' && w.face) lookAt = w.face;
+        if (w.settled) {
+          // Content by the fire: it watches the flames and, when you're
+          // close, looks round at you now and then, pleased you're there.
+          const near = toPlayer < 7;
+          this.glanceT -= dt;
+          if (this.glanceT <= 0) this.glanceT = near ? 5 + Math.random() * 6 : 2;
+          const glancing = near && this.glanceT < 1.8;
+          if (glancing && this.glanceT + dt >= 1.8) this.happyT = Math.max(this.happyT, 1.4);
+          lookAt = glancing ? this.player : w.face;
+        } else {
+          // Idle at the spot: glance at the target and point now and then.
+          this.pointT -= dt;
+          if (w.face && this.pointT < -2.6) this.pointT = 1.6;
+          if (w.face && (this.pointT > 0 || pose === 'point')) { pointAt = w.face; lookAt = w.face; }
+          if (pose === 'warm' && w.face) lookAt = w.face;
+        }
       }
       if (pose === 'shiver' && toPlayer < 16) {
         this.whimperT -= dt;
@@ -362,7 +355,8 @@ export class Spirit {
     this.pos.addScaledVector(this.vel, dt);
     const gy = this.hooks.ground(this.pos.x, this.pos.z);
     this.pos.y += (gy - this.pos.y) * e(20);
-    this.face(this.moving ? null : act?.kind === 'hint' && act.phase === 'tug' ? this.player : (pointAt ?? (pose === 'warm' ? w.face : lookAt)), dt);
+    const rest = w.settled && !act && !this.moving;
+    this.face(this.moving ? null : act?.kind === 'hint' && act.phase === 'tug' ? this.player : (pointAt ?? (pose === 'warm' || rest ? w.face : lookAt)), dt);
     if (this.hold !== null) this.heading = this.hold;
 
     // ---- body animation
@@ -390,7 +384,7 @@ export class Spirit {
     this.body.scale.set(1 / Math.sqrt(sy), sy, 1 / Math.sqrt(sy));
     this.body.position.y = R * 0.86 * sy + lift - this.sit * 0.07;
     const lean = this.tilt.step(THREE.MathUtils.clamp(hs * 0.05, 0, 0.25) - this.sit * 0.12 + (reach ? -0.2 : 0) + (pose === 'warm' ? 0.1 : 0), 90, 12, dt);
-    this.body.rotation.set(lean, 0, Math.sin(this.t * 42) * 0.03 * shiver + (walking ? Math.sin(this.hop * Math.PI * 2) * 0.06 : 0));
+    this.body.rotation.set(lean, 0, Math.sin(this.t * 42) * 0.03 * shiver + (walking ? Math.sin(this.hop * Math.PI * 2) * 0.06 : 0) + (rest ? Math.sin(this.t * 0.9) * 0.045 * this.sit : 0));
 
     // Feet: little alternating steps, tucked forward when sitting.
     for (let k = 0; k < 2; k++) {
@@ -421,16 +415,11 @@ export class Spirit {
       if (beckon && k === 0) { x = -1.2; z = 2.0 + Math.sin(this.t * 10) * 0.55; }
       if (k === pointArm && !armsUp && !reach) { x = -1.5; z = 0.25; }
       if (this.sit > 0.5 && !pointAt) { x = -0.5; z = s * 0.45; }
+      if (this.sit > 0.5 && rest) { x = -1.05 + Math.sin(this.t * 1.3 + k * 1.7) * 0.08; z = s * 0.3; }
       this.arms[k].rotation.set(this.armX[k].step(x, 120, 12, dt), 0, this.armZ[k].step(z, 120, 12, dt));
     }
 
-    // The curl: droops when cold, stands up and flickers when warm, lags motion.
     const wm = this.warmth;
-    const flick = Math.sin(this.t * 11) * 0.08 * wm + Math.sin(this.t * 17.3) * 0.05 * wm;
-    this.curl.rotation.x = this.curlX.step(-0.1 + (1 - wm) * 0.9 + hs * 0.08 + flick - lift * 1.2, 60, 6, dt);
-    this.curl.rotation.z = this.curlZ.step(Math.sin(this.t * 1.7) * 0.12 + flick * 0.8, 60, 6, dt);
-    const cs = 0.7 + wm * 0.55 + Math.sin(this.t * 9) * 0.05 * wm;
-    this.curl.scale.set(0.85 + wm * 0.3, cs, 0.85 + wm * 0.3);
     this.heart.scale.setScalar(0.85 + wm * 0.35 + Math.sin(this.t * 3) * 0.06 * wm);
 
     // Eyes: blink; sad half-lids when cold; happy arcs after good things.
@@ -455,10 +444,8 @@ export class Spirit {
     // Colour: ash-blue -> apricot -> amber, and a growing glow.
     if (wm < 0.5) this.tint.copy(COLD).lerp(MID, wm * 2);
     else this.tint.copy(MID).lerp(WARM, (wm - 0.5) * 2);
-    this.curlTint.copy(CURL_COLD).lerp(CURL_WARM, THREE.MathUtils.smoothstep(wm, 0.15, 0.8));
     this.heartTint.copy(HEART_COLD).lerp(HEART_WARM, THREE.MathUtils.smoothstep(wm, 0.05, 0.6));
     this.bodyB.material.uniforms.uEmber.value = THREE.MathUtils.smoothstep(wm, 0.55, 1) * 0.62;
-    this.curlB.material.uniforms.uEmber.value = THREE.MathUtils.smoothstep(wm, 0.2, 0.9) * 1.2;
     this.heartB.material.uniforms.uEmber.value = THREE.MathUtils.smoothstep(wm, 0.05, 0.5) * 0.85;
     this.armB.material.uniforms.uEmber.value = this.footB.material.uniforms.uEmber.value = this.bodyB.material.uniforms.uEmber.value;
     // Mouth: a little frown when cold, a "w" smile when warm or happy.
@@ -471,14 +458,15 @@ export class Spirit {
     this.root.updateMatrixWorld(true);
     for (const b of this.batches) b.begin();
     this.bodyB.push(this.body.matrixWorld, this.tint, this.eye);
-    this.curlB.push(this.curl.matrixWorld, this.curlTint);
     this.heartB.push(this.heart.matrixWorld, this.heartTint);
     for (const a of this.arms) this.armB.push(a.matrixWorld, this.tint);
     for (const f of this.feet) this.footB.push(f.matrixWorld, this.tint);
     for (const b of this.batches) b.end();
 
     // Thought bubble with what it wants next (hidden while travelling).
-    const icon = act?.kind === 'celebrate' ? 'heart' : this.moving || this.waiting ? null : w.icon;
+    // Only up close: from across the yard the pantomime does the talking.
+    const close = toPlayer < 5.5;
+    const icon = !close ? null : act?.kind === 'celebrate' ? 'heart' : this.moving || this.waiting ? null : w.icon;
     if (icon !== this.bubbleIcon && this.bubbleA < 0.05) {
       this.bubbleIcon = icon;
       if (icon) { this.bubble.texture = tex(bubbleCanvas(icon)); this.bubblePop = 1; }

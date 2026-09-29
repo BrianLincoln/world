@@ -8,6 +8,8 @@ import { Sfx } from './audio';
 import { iconCanvas } from './icons';
 import { OVERLAY_U } from './overlay';
 import { Story } from './story';
+import type { Colliders } from '../world/colliders';
+import type { Harvest } from '../world/harvest';
 
 // Glue between main.ts and the story: owns the sound engine and the overlay
 // scene, (re)builds the Story when the seed changes, and keeps text off the
@@ -21,6 +23,8 @@ export interface HostDeps {
   body: Body;
   camera: THREE.PerspectiveCamera;
   puffs(at: THREE.Vector3, n: number, size: number, spread: number): void;
+  colliders: Colliders;
+  harvest: Harvest;
 }
 
 export class StoryHost {
@@ -52,7 +56,7 @@ export class StoryHost {
     this.story?.dispose();
     this.story = new Story({
       scene: this.d.scene, overlay: this.overlay, gen, env: this.d.env, rig: this.d.rig, body: this.d.body, sfx: this.sfx,
-      camera: this.d.camera, puffs: this.d.puffs, saveKey: seedText, active: this.active,
+      camera: this.d.camera, puffs: this.d.puffs, colliders: this.d.colliders, harvest: this.d.harvest, saveKey: seedText, active: this.active,
     });
     return this.story;
   }

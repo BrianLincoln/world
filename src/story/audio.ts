@@ -166,6 +166,15 @@ export class Sfx {
     this.noise(t + 0.3, { a: 0.35, d: 0.4, peak: 0.12 }, 'bandpass', 700, 1800, 0.8);
   }
 
+  /** Hammer on stone: a hard click, grit and a dull knock. */
+  smash() {
+    if (!this.ok) return;
+    const t = this.ctx!.currentTime + 0.005;
+    this.tone('square', 1400 * (0.9 + Math.random() * 0.2), 700, t, { a: 0.001, d: 0.025, peak: 0.12 });
+    this.noise(t, { a: 0.001, d: 0.12, peak: 0.45 }, 'highpass', 2500, 1500, 0.8);
+    this.tone('sine', 160, 80, t, { a: 0.002, d: 0.12, peak: 0.4 });
+  }
+
   thud() {
     if (!this.ok) return;
     const t = this.ctx!.currentTime + 0.005;

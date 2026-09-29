@@ -49,7 +49,7 @@ change goes through this loop:
   For example, read G-buffer pixels with `_r.readRenderTargetPixels(_p.gbuf, ...)`.
 
 ### URL params
-`seed t x z yaw pitch dist mode=fly y paused=1 palette=<rose|golden|olive|coral|twilight|night> ui=0 capture=1`
+`seed t x z yaw pitch dist mode=fly y paused=1 palette=<rose|golden|olive|coral|twilight|night> ui=0 capture=1 shadows=0`
 (`capture` disables adaptive resolution and the loading veil so shots are
 deterministic).
 

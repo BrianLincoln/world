@@ -1,3 +1,4 @@
+import { HARVEST_TEX } from '../world/harvest';
 import * as THREE from 'three';
 import { BIOME } from './palette';
 import {
@@ -155,7 +156,13 @@ export const PROP_U = {
   uGlow: { value: col(BIOME.windowGlow) },
 };
 
-export function makePropMaterial(opts: { bend?: number; wind?: number; heightRef?: number; toneVar?: number; doubleSide?: boolean; flipBack?: boolean; cutaway?: 'near' | 'occluders' }) {
+/** Harvestable world props: which grid and which flag channel (see world/harvest.ts). */
+export interface HarvestOpt { grid: number; chan: 0 | 1 }
+function harvestU(h?: HarvestOpt) {
+  return { uHarvest: { value: HARVEST_TEX }, uHarvestGrid: { value: h?.grid ?? 0 }, uHarvestChan: { value: h?.chan ?? 0 } };
+}
+
+export function makePropMaterial(opts: { bend?: number; wind?: number; heightRef?: number; toneVar?: number; doubleSide?: boolean; flipBack?: boolean; cutaway?: 'near' | 'occluders'; harvest?: HarvestOpt; nearCut?: number }) {
   return mat(PROP_VERT, PROP_FRAG, {
     ...U,
     ...PROP_U,
@@ -167,6 +174,9 @@ export function makePropMaterial(opts: { bend?: number; wind?: number; heightRef
     uFlip: { value: opts.flipBack ? 1 : 0 },
     // 1 = discard near the camera; 2 = also hide whole instances blocking the player.
     uCutaway: { value: opts.cutaway === 'occluders' ? 2 : opts.cutaway === 'near' ? 1 : 0 },
+    ...harvestU(opts.harvest),
+    // Near-plane cut distance (m): a story tree you're chopping cuts a wider hole round the camera.
+    uNearCut: { value: opts.nearCut ?? 1.5 },
     uGlint: { value: 0 },
     uWin: { value: -1 },
     uFire: { value: 0 },
@@ -179,8 +189,9 @@ export const CASTER_U = {
 };
 
 /** Flattens a prop kind into the ground shadow mask (see CASTER_VERT). */
-export function makeCasterMaterial(opts: { bend?: number; wind?: number; heightRef?: number }) {
+export function makeCasterMaterial(opts: { bend?: number; wind?: number; heightRef?: number; harvest?: HarvestOpt }) {
   return mat(CASTER_VERT, CASTER_FRAG, {
+    ...harvestU(opts.harvest),
     uTime: U.uTime,
     uLightDir: U.uLightDir,
     uShadowReach: CASTER_U.uShadowReach,

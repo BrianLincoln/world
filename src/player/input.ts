@@ -45,14 +45,17 @@ export class Input {
       if (e.button === 0 && !document.pointerLockElement) {
         el.requestPointerLock?.();
       }
-      // Left click while looking around is the story's "use" (like E).
-      if (e.button === 0 && document.pointerLockElement === el) this.edges.add('Mouse0');
+      // Left click while looking around is the story's "use" (like E); held, it keeps using (chopping).
+      if (e.button === 0 && document.pointerLockElement === el) { this.edges.add('Mouse0'); this.keys.add('Mouse0'); }
       // Right button is an action (lasso), reported like a key: 'Mouse2'.
       if (e.button === 2) this.edges.add('Mouse2');
       else this.dragging = true;
     });
     el.addEventListener('contextmenu', (e) => e.preventDefault());
-    window.addEventListener('pointerup', () => (this.dragging = false));
+    window.addEventListener('pointerup', (e) => {
+      this.dragging = false;
+      if (e.button === 0) this.keys.delete('Mouse0');
+    });
     window.addEventListener('mousemove', (e) => {
       if (document.pointerLockElement === this.el || this.dragging) {
         this.lookX += e.movementX;
@@ -79,6 +82,11 @@ export class Input {
       up: k('Space'),
       down: k('KeyC') || k('KeyQ') || k('ControlLeft'),
     };
+  }
+
+  /** Is a key (or 'Mouse0') held right now? */
+  held(code: string): boolean {
+    return this.keys.has(code);
   }
 
   /** A held on-screen button, reported as the key it stands in for. */

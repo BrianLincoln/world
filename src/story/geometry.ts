@@ -13,9 +13,9 @@ export const K = { foliage: 0, trunk: 1, rock: 2, wall: 7, roof: 8, trim: 9, gla
 
 /** Cabin measurements (local): floor, wall top, ridge rise, eave overhangs. */
 export const CAB = {
-  W: RUIN_W, D: RUIN_D, floor: 0.3, wallTop: 2.8, rise: 2.2, over: 0.45, overXL: 0.35, overXR: 0.1, thick: 0.16,
+  W: RUIN_W, D: RUIN_D, floor: 0.3, wallTop: 2.8, rise: 2.45, over: 0.45, overXL: 0.35, overXR: 0.1, thick: 0.16,
   door: { x0: -1.4, x1: -0.4, y0: 0.3, y1: 2.35 },
-  chimney: { x: RUIN_W / 2 + 0.62, z: -0.3, size: 0.9, top: 5.95, course: 0.28, broken: 5 },
+  chimney: { x: RUIN_W / 2 + 0.62, z: -0.3, size: 0.9, top: 6.2, course: 0.28, broken: 5 },
   hearth: { x: RUIN_W / 2 - 0.16, z: -0.3 },
 } as const;
 
@@ -121,6 +121,7 @@ export interface CabinParts {
   back: THREE.BufferGeometry;
   left: THREE.BufferGeometry;
   right: THREE.BufferGeometry;
+  floor: THREE.BufferGeometry;
   /** Roof boards that survived, rafters, ridge, bargeboards. */
   roof: THREE.BufferGeometry;
   /** The missing boards (the roof repair). */
@@ -187,7 +188,8 @@ export function buildRuin(): CabinParts {
   footing(back, W + 0.32, 0.3, 0, -D / 2 - 0.01);
   footing(left, 0.3, D, -W / 2 - 0.01, 0);
   footing(right, 0.3, D, W / 2 + 0.01, 0);
-  left.push(kbox(W - 0.1, 0.08, D - 0.1, 0, floor - 0.04, 0, K.wood));
+  // The floor is its own mesh: it must never go with a wall in the cutaway.
+  const floorGeo = kbox(W - 0.1, 0.08, D - 0.1, 0, floor - 0.04, 0, K.wood);
 
   // --- roof: board courses parallel to the ridge on both slopes
   const theta = Math.atan2(rise, D / 2);
@@ -328,7 +330,7 @@ export function buildRuin(): CabinParts {
   debris.push(kbox(1.2, 0.07, 0.44, 1.2, 0.09, D / 2 + 1.5, K.boards, -0.12, -0.7, 0.1));
 
   return {
-    front: merge(front), back: merge(back), left: merge(left), right: merge(right),
+    front: merge(front), back: merge(back), left: merge(left), right: merge(right), floor: merge([floorGeo]),
     roof: merge(roof), roofPatch: merge(patch), roofSketch: merge(sketch),
     chimneyBase: merge(base), chimneyTop: merge(top), chimneySketch: merge(csk), rubble: merge(rubble),
     hearth: merge(hearth), coldAsh: merge(ash), door: merge(door), doorSketch, debris: merge(debris),
@@ -358,6 +360,16 @@ export function buildAxe(): THREE.BufferGeometry {
   head.translate(0, 0.76, 0);
   parts.push(core(head, K.steel));
   return merge(parts);
+}
+
+/** A claw hammer: cut-wood handle along +y from the origin, iron head at the top (face toward +x). */
+export function buildHammer(): THREE.BufferGeometry {
+  const handle = new THREE.CylinderGeometry(0.024, 0.03, 0.46, 10, 2);
+  handle.translate(0, 0.23, 0);
+  const grip = new THREE.SphereGeometry(0.034, 10, 8).translate(0, 0.0, 0);
+  const head = new RoundedBoxGeometry(0.22, 0.075, 0.075, 2, 0.02).translate(0.02, 0.47, 0);
+  const face = new THREE.CylinderGeometry(0.045, 0.045, 0.05, 12).rotateZ(Math.PI / 2).translate(0.14, 0.47, 0);
+  return merge([core(handle, K.cut), core(grip, K.cut), core(head, K.steel), core(face, K.steel)]);
 }
 
 /** A cut log: bark barrel with pale ringed ends. Centred, along x. */

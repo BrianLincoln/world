@@ -64,6 +64,7 @@ const t0 = Date.now();
 const timeline = [];
 let last = '';
 let stuckT = 0, lastPos = null;
+let chopping = false;
 const seen = new Set();
 await shot('00-start');
 if (hintTest) {
@@ -136,6 +137,12 @@ while (Date.now() - t0 < 420000) {
   // Stop at the goal (trees: keep pushing into the trunk; chopping triggers).
   const stopAt = st.step === 'build' || st.step === 'repair' || st.step === 'chimney' ? 1.5 : 0.5;
   await hold(dGoal > stopAt);
+  // Everything is the action: tap E at the goal (the repair zone is wider),
+  // and hold it at a tree so the swings keep coming.
+  const atGoal = dGoal < (st.step === 'repair' || st.step === 'chimney' ? 5 : 2.3);
+  const chop = (st.step === 'logs' || st.step === 'stones') && atGoal;
+  if (chop !== chopping) { chopping = chop; if (chop) await K.down('KeyE'); else await K.up('KeyE'); }
+  if (atGoal && !chop) await K.press('KeyE');
   if (st.step === 'logs' && !seen.has('chop') && dGoal < 1.9) {
     seen.add('chop');
     await W(150);

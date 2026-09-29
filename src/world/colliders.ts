@@ -44,13 +44,28 @@ interface Cell {
   cabins: Float32Array;
   /** x, z, radius. Walk-through; only for keeping placed things out of them. */
   bushes: Float32Array;
+  /** Full world-space instance rows (x, y, z, scale, rot, yScale, lean, tone), aligned with trees / rocks. */
+  treeRows: Float32Array;
+  rockRows: Float32Array;
   used: number;
 }
+
+/** A world prop found by `nearestTree` / `nearestRock`: its instance row (world space). */
+export interface PropHit { row: Float32Array; x: number; z: number; radius: number; d: number }
 
 export class Colliders {
   enabled = true;
   private cells = new Map<string, Cell>();
   private tick = 0;
+  /** Props taken out of the world (felled, smashed or stood in for) are left out. */
+  skip: ((kind: 'tree' | 'rock', x: number, z: number) => boolean) | null = null;
+  /** Solid but not to be taken (a regrowing tree): `nearestTree` / `nearestRock` pass over it. */
+  busy: ((kind: 'tree' | 'rock', x: number, z: number) => boolean) | null = null;
+
+  /** Rebuild the cell holding a point (after a prop there was taken or restored). */
+  invalidate(x: number, z: number) {
+    this.cells.delete(`${Math.floor(x / CELL)},${Math.floor(z / CELL)}`);
+  }
 
   constructor(private gen: WorldGen) {}
 
@@ -79,6 +94,20 @@ export class Colliders {
   private build(x0: number, z0: number): Cell {
     const r = buildChunk(this.gen, { id: 0, seed: this.gen.seed, x0, z0, size: CELL, propsOnly: true });
     const S = INST_STRIDE;
+    const keep = (data: Float32Array, kind: 'tree' | 'rock') => {
+      const rows: number[] = [];
+      for (let i = 0; i < data.length; i += S) {
+        const x = x0 + data[i], z = z0 + data[i + 2];
+        if (this.skip?.(kind, x, z) && !(kind === 'rock' && data[i + 6] > 5)) continue;
+        rows.push(x, data[i + 1], z, ...data.subarray(i + 3, i + 8));
+      }
+      return new Float32Array(rows);
+    };
+    const treeRows = keep(r.trees, 'tree');
+    const rockRows = keep(r.rocks, 'rock');
+    // From here on, positions are already world space.
+    r.trees = treeRows.map((v, i) => (i % S === 0 ? v - x0 : i % S === 2 ? v - z0 : v));
+    r.rocks = rockRows.map((v, i) => (i % S === 0 ? v - x0 : i % S === 2 ? v - z0 : v));
     const trees = new Float32Array((r.trees.length / S) * 4);
     for (let i = 0, k = 0; i < r.trees.length; i += S, k += 4) {
       const sc = r.trees[i + 3];
@@ -116,7 +145,32 @@ export class Colliders {
       bushes[k + 1] = z0 + r.bushes[i + 2];
       bushes[k + 2] = BUSH_R * r.bushes[i + 3];
     }
-    return { trees, rocks, cabins, bushes, used: this.tick };
+    return { trees, rocks, cabins, bushes, treeRows, rockRows, used: this.tick };
+  }
+
+  /** Nearest world tree trunk within `max` m of (x, z), measured to the bark. */
+  nearestTree(x: number, z: number, max: number): PropHit | null {
+    return this.nearest('tree', x, z, max, Infinity);
+  }
+
+  /** Nearest ordinary boulder (not a landmark) up to `maxScale` within `max` m. */
+  nearestRock(x: number, z: number, max: number, maxScale: number): PropHit | null {
+    return this.nearest('rock', x, z, max, maxScale);
+  }
+
+  private nearest(kind: 'tree' | 'rock', x: number, z: number, max: number, maxScale: number): PropHit | null {
+    let best: PropHit | null = null;
+    this.forCells(x, z, max, (c) => {
+      const R = kind === 'tree' ? c.treeRows : c.rockRows;
+      for (let i = 0; i < R.length; i += INST_STRIDE) {
+        if (kind === 'rock' && (R[i + 6] > 5 || R[i + 3] > maxScale)) continue;
+        if (this.busy?.(kind, R[i], R[i + 2])) continue;
+        const radius = (kind === 'tree' ? TRUNK_R : ROCK_R) * R[i + 3];
+        const d = Math.hypot(R[i] - x, R[i + 2] - z) - radius;
+        if (d < max && (!best || d < best.d)) best = { row: R.slice(i, i + INST_STRIDE), x: R[i], z: R[i + 2], radius, d };
+      }
+    });
+    return best;
   }
 
   /** Build at most one missing cell around a point per call, so walking never hitches. */

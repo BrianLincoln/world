@@ -117,7 +117,8 @@ export function buildChunk(gen: WorldGen, req: ChunkRequest): ChunkResult {
       biome[v * 4] = gen.forestDensity(wx, wz, h);
       biome[v * 4 + 1] = gen.rockiness(wx, wz, h);
       // Brook banks read as sand/shingle (the path colour) a couple of metres out.
-      biome[v * 4 + 2] = Math.min(paths.length ? pathDist(wx, wz) : 30, gen.brookDist(wx, wz) - 2.6);
+      // The story's own paths are drawn about twice as wide as the world's.
+      biome[v * 4 + 2] = Math.min(paths.length ? pathDist(wx, wz) : 30, gen.brookDist(wx, wz) - 2.6, gen.storyPathDist(wx, wz) - 1.05);
       biome[v * 4 + 3] = gen.flowers(wx, wz);
       if (h < minY) minY = h;
       if (h > maxY) maxY = h;
@@ -320,7 +321,8 @@ export function buildChunk(gen: WorldGen, req: ChunkRequest): ChunkResult {
         cabins.push(p.x - x0, p.y, p.z - z0, 1, p.rot, 1, p.variant ?? 0, 0.5);
       } else if (p.boulders) {
         for (const b of p.boulders) {
-          rocks.push(b.x - x0, b.y, b.z - z0, b.sx, b.rot, b.sy / b.sx, 0, 0.3 + 0.4 * ((b.x * 13.7 + b.z) % 1 + 1) % 1);
+          // lean = 9 tags POI boulders: never harvested (see world/harvest.ts).
+          rocks.push(b.x - x0, b.y, b.z - z0, b.sx, b.rot, b.sy / b.sx, 9, 0.3 + 0.4 * ((b.x * 13.7 + b.z) % 1 + 1) % 1);
         }
       }
     }

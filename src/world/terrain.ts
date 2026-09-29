@@ -3,6 +3,7 @@ import { CHUNK_RES, INST_STRIDE, type ChunkRequest, type ChunkResult } from './c
 import ChunkWorker from './chunk.worker.ts?worker';
 import { buildBoulder, buildBush, buildCabin, buildConifer, buildFlower, buildTuft, TREE_HEIGHT } from '../gfx/geometry';
 import { SHADOW_LAYER } from '../gfx/groundShadow';
+import { ROCK_CELL, TREE_CELL } from './harvest';
 import { makeCasterMaterial, makePropMaterial, makeTerrainMaterial, makeWaterMaterial } from '../gfx/materials';
 
 // Streams terrain as a camera-centred quadtree. Every node is a fixed
@@ -134,9 +135,9 @@ export class Terrain {
       trees: {
         name: 'trees',
         geos: [...treeLods, ...treeLods2],
-        material: makePropMaterial({ bend: 0.24, wind: 0.012, heightRef: TREE_HEIGHT, toneVar: 0.22, doubleSide: true, cutaway: 'occluders' }),
+        material: makePropMaterial({ bend: 0.24, wind: 0.012, heightRef: TREE_HEIGHT, toneVar: 0.22, doubleSide: true, cutaway: 'occluders', harvest: { grid: TREE_CELL, chan: 0 } }),
         lodFor: (s) => (s <= 64 ? 0 : s <= 128 ? 1 : 2),
-        caster: { material: makeCasterMaterial({ bend: 0.24, wind: 0.012, heightRef: TREE_HEIGHT }), lod: 2 },
+        caster: { material: makeCasterMaterial({ bend: 0.24, wind: 0.012, heightRef: TREE_HEIGHT, harvest: { grid: TREE_CELL, chan: 0 } }), lod: 2 },
       },
       bushes: {
         name: 'bushes',
@@ -148,9 +149,9 @@ export class Terrain {
       rocks: {
         name: 'rocks',
         geos: [buildBoulder(5, 3), buildBoulder(5, 2), buildBoulder(5, 1)],
-        material: makePropMaterial({ toneVar: 0.18 }),
+        material: makePropMaterial({ toneVar: 0.18, harvest: { grid: ROCK_CELL, chan: 1 } }),
         lodFor: (s) => (s <= 128 ? 0 : s <= 512 ? 1 : 2),
-        caster: { material: makeCasterMaterial({}), lod: 1 },
+        caster: { material: makeCasterMaterial({ harvest: { grid: ROCK_CELL, chan: 1 } }), lod: 1 },
       },
       tufts: {
         name: 'tufts',

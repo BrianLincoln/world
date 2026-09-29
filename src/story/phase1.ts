@@ -12,10 +12,10 @@ export type Resource = 'logs' | 'stones';
 /** Named places the spirit can wait at or point to (resolved by the site). */
 export type Anchor =
   | 'hearthSpot' | 'hearthSeat' | 'hearth' | 'door' | 'doorstep' | 'stumpSpot' | 'axe' | 'seat' | 'grove'
-  | 'yard' | 'cabin' | 'roof' | 'bank' | 'stones' | 'chimneySpot' | 'chimney' | 'far' | 'lookout';
+  | 'yard' | 'cabin' | 'roof' | 'bank' | 'stones' | 'chimneySpot' | 'chimney' | 'far' | 'lookout' | 'hammerSpot' | 'hammer' | 'rocks';
 
 /** Interactable groups a step can switch on (they glint while it's active). */
-export type TargetTag = 'axe' | 'tree' | 'stone' | 'hearth';
+export type TargetTag = 'axe' | 'hammer' | 'tree' | 'rock' | 'hearth';
 
 interface StepBase {
   id: string;
@@ -43,7 +43,7 @@ export type StepDef =
   /** Done when the explorer comes within `radius` of an anchor. */
   | (StepBase & { kind: 'meet'; near: Anchor; radius: number })
   /** Pick up a tool (every target with the tag). */
-  | (StepBase & { kind: 'pickup'; targets: TargetTag; item: 'axe' })
+  | (StepBase & { kind: 'pickup'; targets: TargetTag; item: 'axe' | 'hammer' })
   /** Collect enough of a resource to finish `for` (minus what's already built in). */
   | (StepBase & { kind: 'gather'; targets: TargetTag; resource: Resource; for: PartId[] })
   /** Bring the resource to the sketched parts; fall back to `gather` if you run out. */
@@ -71,11 +71,12 @@ export const PHASE1: PhaseDef = {
     { id: 'chimney', resource: 'stones', need: 3 },
   ],
   steps: [
-    { id: 'meet', kind: 'meet', near: 'door', radius: 9, anchor: 'hearthSpot', face: 'hearth', pose: 'shiver', icon: null, warmth: 0, hour: 7.3, hint: 'tug', onDone: 'greet' },
+    { id: 'meet', kind: 'meet', near: 'door', radius: 13, anchor: 'hearthSpot', face: 'hearth', pose: 'shiver', icon: null, warmth: 0, hour: 7.3, hint: 'tug', onDone: 'greet' },
     { id: 'axe', kind: 'pickup', targets: 'axe', item: 'axe', anchor: 'stumpSpot', face: 'axe', icon: 'axe', warmth: 0.06, hour: 7.9, hint: 'tug', onDone: 'celebrate' },
-    { id: 'logs', kind: 'gather', targets: 'tree', resource: 'logs', for: ['roof', 'door'], anchor: 'seat', face: 'grove', pose: 'sit', icon: 'log', warmth: 0.14, hour: 9.0, hint: 'tug' },
-    { id: 'repair', kind: 'build', parts: ['roof', 'door'], resource: 'logs', gather: 'logs', zone: 'yard', zoneRadius: 6.5, anchor: 'yard', face: 'roof', icon: 'log', warmth: 0.28, hour: 11.5, hint: 'tug', onDone: 'celebrate' },
-    { id: 'stones', kind: 'gather', targets: 'stone', resource: 'stones', for: ['chimney'], anchor: 'bank', face: 'stones', icon: 'stone', warmth: 0.46, hour: 13.2, hint: 'tug' },
+    { id: 'logs', kind: 'gather', targets: 'tree', resource: 'logs', for: ['roof', 'door'], anchor: 'seat', face: 'grove', pose: 'sit', icon: 'log', warmth: 0.14, hour: 9.0, hint: 'tug', onDone: 'celebrate' },
+    { id: 'repair', kind: 'build', parts: ['roof', 'door'], resource: 'logs', gather: 'logs', zone: 'yard', zoneRadius: 6.5, anchor: 'yard', face: 'roof', icon: 'log', warmth: 0.24, hour: 10.6, hint: 'tug', onDone: 'celebrate' },
+    { id: 'hammer', kind: 'pickup', targets: 'hammer', item: 'hammer', anchor: 'hammerSpot', face: 'hammer', icon: 'hammer', warmth: 0.36, hour: 12.2, hint: 'tug', onDone: 'celebrate' },
+    { id: 'stones', kind: 'gather', targets: 'rock', resource: 'stones', for: ['chimney'], anchor: 'hammerSpot', face: 'rocks', icon: 'stone', warmth: 0.46, hour: 13.4, hint: 'tug', onDone: 'celebrate' },
     { id: 'chimney', kind: 'build', parts: ['chimney'], resource: 'stones', gather: 'stones', zone: 'chimneySpot', zoneRadius: 5.5, anchor: 'chimneySpot', face: 'chimney', icon: 'stone', warmth: 0.58, hour: 15.0, hint: 'tug', onDone: 'celebrate' },
     { id: 'hearth', kind: 'light', targets: 'hearth', readyAt: 18.35, anchor: 'hearthSpot', face: 'hearth', pose: 'warm', icon: 'flame', warmth: 0.68, easeTo: 18.75, hint: 'tug', onDone: 'celebrate' },
     { id: 'home', kind: 'rest', reveal: 'far', from: 'lookout', revealAt: 20.6, anchor: 'hearthSeat', face: 'hearth', pose: 'sit', icon: null, warmth: 1, easeTo: 21.3, hint: 'none' },

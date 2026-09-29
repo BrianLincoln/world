@@ -5,7 +5,7 @@ import * as THREE from 'three';
 // canvases feed the HUD (as data URLs) and the in-world billboards (as
 // textures), so an icon always looks the same wherever it appears.
 
-export type IconName = 'axe' | 'log' | 'stone' | 'flame' | 'heart' | 'home';
+export type IconName = 'axe' | 'log' | 'stone' | 'flame' | 'heart' | 'home' | 'check' | 'hand' | 'hammer' | 'smash' | 'finger' | 'mouse' | 'mouseDown' | 'fingerDown';
 
 const INK = '#4a2e36';
 const SIZE = 128;
@@ -166,8 +166,182 @@ function drawHome(g: CanvasRenderingContext2D) {
   ink(g, 4);
 }
 
+/** "That's enough": a fat hand-inked tick on a soft green disc. */
+function drawCheck(g: CanvasRenderingContext2D) {
+  g.beginPath();
+  g.arc(64, 64, 50, 0, Math.PI * 2);
+  g.fillStyle = '#9cc47a';
+  g.fill();
+  ink(g, 7);
+  g.beginPath();
+  g.moveTo(38, 66);
+  g.quadraticCurveTo(48, 74, 56, 86);
+  g.quadraticCurveTo(70, 58, 92, 40);
+  g.strokeStyle = INK;
+  g.lineWidth = 17;
+  g.stroke();
+  g.strokeStyle = '#fffaf0';
+  g.lineWidth = 9;
+  g.stroke();
+}
+
+/** "Pick it up": an open mitten reaching, palm down. */
+function drawHand(g: CanvasRenderingContext2D) {
+  g.save();
+  g.translate(64, 64);
+  g.rotate(-0.35);
+  // Cuff.
+  g.beginPath();
+  g.roundRect(-22, 20, 44, 26, 8);
+  g.fillStyle = '#efe5d4';
+  g.fill();
+  ink(g);
+  // Mitten: a rounded paddle with a thumb.
+  g.beginPath();
+  g.moveTo(-20, 22);
+  g.bezierCurveTo(-26, -8, -24, -40, 0, -42);
+  g.bezierCurveTo(24, -42, 26, -8, 20, 22);
+  g.closePath();
+  g.fillStyle = '#b8473a';
+  g.fill();
+  ink(g);
+  g.beginPath();
+  g.moveTo(20, 6);
+  g.bezierCurveTo(40, 2, 44, -18, 34, -22);
+  g.bezierCurveTo(26, -24, 22, -12, 20, -8);
+  g.fillStyle = '#b8473a';
+  g.fill();
+  ink(g);
+  g.restore();
+}
+
+/** "Build it": a mallet mid-knock with two little impact ticks. */
+function drawHammer(g: CanvasRenderingContext2D) {
+  g.save();
+  g.translate(60, 70);
+  g.rotate(-0.6);
+  g.beginPath();
+  g.roundRect(-6, -10, 12, 58, 6);
+  g.fillStyle = '#d9b27a';
+  g.fill();
+  ink(g);
+  g.beginPath();
+  g.roundRect(-30, -34, 60, 28, 8);
+  g.fillStyle = '#9a6248';
+  g.fill();
+  ink(g);
+  g.beginPath();
+  g.moveTo(-22, -26); g.lineTo(-22, -14);
+  g.moveTo(22, -26); g.lineTo(22, -14);
+  g.strokeStyle = '#6f4232';
+  g.lineWidth = 4;
+  g.stroke();
+  g.restore();
+  g.beginPath();
+  g.moveTo(96, 30); g.lineTo(108, 22);
+  g.moveTo(100, 44); g.lineTo(114, 44);
+  g.strokeStyle = INK;
+  g.lineWidth = 6;
+  g.stroke();
+}
+
+/** "Break it": a stone with a crack and flying chips. */
+function drawSmash(g: CanvasRenderingContext2D) {
+  g.save();
+  g.translate(0, 8);
+  drawStone(g);
+  g.restore();
+  g.beginPath();
+  g.moveTo(66, 42); g.lineTo(58, 60); g.lineTo(70, 70); g.lineTo(62, 92);
+  g.strokeStyle = INK;
+  g.lineWidth = 6;
+  g.stroke();
+  for (const [x, y, r] of [[26, 30, 7], [100, 26, 6], [110, 50, 5], [18, 56, 5]]) {
+    g.beginPath();
+    g.arc(x, y, r, 0, Math.PI * 2);
+    g.fillStyle = '#b3a8a4';
+    g.fill();
+    ink(g, 4);
+  }
+}
+
+/** A pointing finger (touch screens): `down` = pressing, with a ripple. */
+function drawFinger(g: CanvasRenderingContext2D, down: boolean) {
+  if (down) {
+    g.beginPath();
+    g.arc(52, 22, 16, 0, Math.PI * 2);
+    g.strokeStyle = 'rgba(255, 214, 128, 0.9)';
+    g.lineWidth = 6;
+    g.stroke();
+  }
+  g.save();
+  g.translate(0, down ? 6 : 0);
+  // Index finger up, fist below.
+  g.beginPath();
+  g.moveTo(42, 70);
+  g.lineTo(42, 24);
+  g.quadraticCurveTo(52, 10, 62, 24);
+  g.lineTo(62, 62);
+  g.quadraticCurveTo(70, 56, 78, 62);
+  g.quadraticCurveTo(86, 58, 92, 66);
+  g.quadraticCurveTo(100, 64, 102, 74);
+  g.lineTo(100, 96);
+  g.quadraticCurveTo(96, 118, 72, 118);
+  g.lineTo(56, 118);
+  g.quadraticCurveTo(34, 116, 30, 96);
+  g.lineTo(26, 80);
+  g.quadraticCurveTo(28, 70, 42, 70);
+  g.closePath();
+  g.fillStyle = '#f2d7c0';
+  g.fill();
+  ink(g, 6);
+  g.beginPath();
+  g.moveTo(62, 62); g.lineTo(62, 76);
+  g.moveTo(78, 62); g.lineTo(78, 78);
+  g.moveTo(92, 66); g.lineTo(92, 80);
+  g.strokeStyle = INK;
+  g.lineWidth = 4;
+  g.stroke();
+  g.restore();
+}
+
+/** A mouse with its left button lit (computers): `down` = the button pressed in. */
+function drawMouse(g: CanvasRenderingContext2D, down: boolean) {
+  g.beginPath();
+  g.roundRect(34, 16, 60, 98, 30);
+  g.fillStyle = '#fbf3e4';
+  g.fill();
+  ink(g, 6);
+  // Left button.
+  g.beginPath();
+  g.moveTo(64, 18);
+  g.lineTo(64, 56);
+  g.lineTo(36, 56);
+  g.lineTo(36, 46);
+  g.quadraticCurveTo(36, 18, 64, 18);
+  g.closePath();
+  g.fillStyle = down ? '#e8a13e' : '#f0c26a';
+  g.fill();
+  ink(g, 5);
+  g.beginPath();
+  g.moveTo(64, 18); g.lineTo(64, 56);
+  g.moveTo(36, 56); g.lineTo(92, 56);
+  g.strokeStyle = INK;
+  g.lineWidth = 5;
+  g.stroke();
+  if (down) {
+    g.beginPath();
+    g.moveTo(20, 20); g.lineTo(30, 28);
+    g.moveTo(14, 40); g.lineTo(26, 42);
+    g.strokeStyle = INK;
+    g.lineWidth = 5;
+    g.stroke();
+  }
+}
+
 const DRAW: Record<IconName, (g: CanvasRenderingContext2D) => void> = {
-  axe: drawAxe, log: drawLog, stone: drawStone, flame: drawFlame, heart: drawHeart, home: drawHome,
+  axe: drawAxe, log: drawLog, stone: drawStone, flame: drawFlame, heart: drawHeart, home: drawHome, check: drawCheck, hand: drawHand, hammer: drawHammer, smash: drawSmash,
+  finger: (g) => drawFinger(g, false), fingerDown: (g) => drawFinger(g, true), mouse: (g) => drawMouse(g, false), mouseDown: (g) => drawMouse(g, true),
 };
 
 /** The bare icon on a transparent ground. */
