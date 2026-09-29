@@ -556,7 +556,7 @@ export class Story {
   private advance() {
     const st = this.step;
     if (st.onDone === 'celebrate') this.spirit.celebrate();
-    if (st.onDone === 'greet') this.spirit.greet();
+    if (st.onDone === 'greet') this.spirit.greet(this.anchor('doorstep'));
     this.stepIndex = Math.min(this.stepIndex + 1, this.phase.steps.length - 1);
     this.enterStep();
     this.dirty = true;

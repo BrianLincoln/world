@@ -39,6 +39,8 @@ export interface Want {
 type Act =
   | { kind: 'celebrate'; t: number }
   | { kind: 'greet'; t: number }
+  /** Hurry to `to` (e.g. out of the cabin), then carry on with the queue. */
+  | { kind: 'emerge'; t: number; to: THREE.Vector3 }
   | { kind: 'hint'; t: number; phase: 'go' | 'tug' | 'back' | 'hop'; target: THREE.Vector3; face: THREE.Vector3 | null; hops: number };
 
 export interface SpiritHooks {
@@ -202,7 +204,11 @@ export class Spirit {
     this.acts = this.acts.filter((a) => a.kind !== 'celebrate');
     this.acts.push({ kind: 'celebrate', t: 0 });
   }
-  greet() { this.acts.push({ kind: 'greet', t: 0 }); }
+  /** Wave hello; with `at`, first hurry there (out the door to meet you). */
+  greet(at?: THREE.Vector3) {
+    if (at) this.acts.push({ kind: 'emerge', t: 0, to: at.clone() });
+    this.acts.push({ kind: 'greet', t: 0 });
+  }
   hint(target: THREE.Vector3, face: THREE.Vector3 | null) {
     if (this.acts.some((a) => a.kind === 'hint')) return;
     this.acts.push({ kind: 'hint', t: 0, phase: 'go', target: target.clone(), face: face?.clone() ?? null, hops: 0 });
@@ -272,6 +278,12 @@ export class Spirit {
         beckon = act.t < 1.4 ? 1 : 0;
         bounce = act.t < 0.9 ? 0.6 : 0;
         if (act.t > 1.8) this.acts.shift();
+      } else if (act.kind === 'emerge') {
+        speed = 4.6;
+        this.moving = true;
+        pose = 'stand';
+        lookAt = null;
+        if (this.travel(act.to, speed, dt) || act.t > 8) { this.acts.shift(); this.moving = false; }
       } else if (act.kind === 'hint') {
         if (act.phase === 'go') {
           speed = 5.2;
