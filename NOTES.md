@@ -800,3 +800,28 @@ camera.
   `rest` step and after). It sits facing the fire with its palms out and a
   slow sway, and never points. When you're within 7 m it looks round at you
   every 5-11 s with happy eyes. This is the base for whatever comes next.
+
+### Greeting, per-blow resources, tools on the pack (2026-09-29)
+Supersedes the hammer notes in the feel pass above.
+- **The spirit greets you at the doorstep.** The 'meet' step fires at 24 m
+  from the door (was 13). The spirit then hurries out (`emerge` act) to the
+  doorstep and waves. On five seeds this fires about 26 m from the cabin,
+  always with the cabin on screen after the approach path's bend. The wave
+  plays while you close in from ~8 m to 3 m.
+- **Resources come out per blow**, not at the fall or break: a log or stone
+  on blows 1 and 3 (`yields` + `spill` in story.ts), nothing after. Totals
+  are unchanged (2 per tree, 2 per boulder). Big boulders give stones on
+  blows 1, 3 and 5 plus their rubble. Tool reach is now `CHOP_REACH` 2.2 m /
+  `SMASH_REACH` 2.15 m from the surface. The swing's step-in still lands the
+  blow on the bark or stone.
+- **The hammer is stowed on the pack**, crossed with the axe in an X. Both
+  are visible when neither is in hand.
+- **The hammer prop is fitted by ray casts** (`SmashRock.surface` against the
+  posed boulder mesh). Head-height rays alone floated the hammer 0.4-0.6 m
+  off the rock on 4 of 7 seeds, because the boulders sit lower than the
+  ground beside them and the head ended up above the rock. Now ~30 sample
+  points on the head and handle are tested for leans between 0.12 and
+  1.25 rad. For each lean, the grip stands as close as it can without any
+  point entering the rock. It takes the lean nearest 0.42 at which the
+  *head* is what touches. On the seeds checked, leans come out 0.7-1.1 and
+  the head sits within ~2 cm of the rock.
