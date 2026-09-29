@@ -36,6 +36,8 @@ export class TouchControls {
   private stickOrigin = { x: 0, y: 0 };
   private looks = new Map<number, { x: number; y: number }>();
   private pinch = 0;
+  /** Seconds since a finger last steered the camera (0 while one is down). */
+  lookIdle = 99;
   private last: TouchContext = { ride: null, lasso: null, down: false, fly: true };
 
   constructor(private input: Input, el: HTMLElement) {
@@ -86,6 +88,10 @@ export class TouchControls {
     // iOS Safari: no page pinch-zoom or double-tap zoom over the game.
     document.addEventListener('gesturestart', (e) => e.preventDefault());
     document.addEventListener('dblclick', (e) => e.preventDefault());
+  }
+
+  update(dt: number) {
+    this.lookIdle = this.looks.size ? 0 : this.lookIdle + dt;
   }
 
   /** Show only the buttons that do something right now. */

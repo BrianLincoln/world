@@ -381,6 +381,7 @@ function frame(ts?: number) {
   if (player.current.name !== 'fly') colliders.prefetch(player.body.pos.x, player.body.pos.z);
   player.update(ctx);
   input.endFrame();
+  if (touch) followOnTouch(dt);
 
   const body = player.body;
   if (cycling && player.current.name !== 'bike') dismountBike(); // tumbled into deep water
@@ -512,6 +513,25 @@ let skidT = 0;
 let trailT = 0;
 let trailEmit = 0;
 const v3 = new THREE.Vector3();
+
+/**
+ * Touch: with no finger on the camera, it swings round behind the way you're
+ * going, so the stick alone is enough to explore. It leaves you alone while
+ * you run towards it (no whip-around) and eases the pitch back to a
+ * comfortable angle. Bikes keep their own drift (below).
+ */
+function followOnTouch(dt: number) {
+  touch!.update(dt);
+  if (cycling || touch!.lookIdle < 0.4) return;
+  const v = player.body.vel;
+  const hs = Math.hypot(v.x, v.z);
+  if (hs < 0.8) return;
+  const d = Math.atan2(Math.sin(Math.atan2(-v.x, -v.z) - orbit.yaw), Math.cos(Math.atan2(-v.x, -v.z) - orbit.yaw));
+  const ease = Math.min(1, (touch!.lookIdle - 0.4) / 0.6) * Math.min(1, (hs - 0.8) / 3);
+  if (Math.abs(d) < 2.3) orbit.yaw += d * (1 - Math.exp(-0.8 * ease * dt));
+  const pitch = player.current.name === 'fly' || riding ? orbit.pitch : 0.2;
+  orbit.pitch += (pitch - orbit.pitch) * (1 - Math.exp(-0.8 * ease * dt));
+}
 
 /** The lasso reticle over the aimed mob, and the context prompt. */
 const aimV = new THREE.Vector3();

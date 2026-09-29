@@ -592,5 +592,10 @@ that uncertainty.
 - Buttons are contextual and mirror the keyboard prompt: Jump (▲ while flying
   or riding), Ride / Hop off (E), Lasso / Lead / Let go (R), ▼ (C) and Fly (F).
   On touch, the keyboard help, the prompt and the stats HUD are hidden.
+- Follow camera (`followOnTouch` in main): with no finger on the look side
+  for 0.4 s, the camera eases round behind the direction of travel (~0.8/s,
+  so holding the stick sideways circles gently), unless you're running
+  towards it (>130° off), and pitch eases back to 0.2 on foot. A look finger
+  overrides it at once. Bikes keep their own drift.
 - Verify with `node scripts/touch.mjs`, which drives real CDP touch events
   in a phone-landscape context and writes `shots/touch-*.png`.

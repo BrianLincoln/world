@@ -51,6 +51,18 @@ await touch('touchEnd', [[120, 246, 1]]);
 await touch('touchEnd', []);
 await page.waitForTimeout(600);
 console.log('after look', await info());
+// Follow camera: hold the stick hard right. With the camera following, the
+// path curves (you circle); without it, it would be a straight strafe.
+const xz = async () => (await info()).pos.split(' · ')[1].split(', ').map(Number);
+await touch('touchStart', [[120, 300, 5]]);
+for (let i = 1; i <= 6; i++) { await touch('touchMove', [[120 + i * 9, 300, 5]]); await page.waitForTimeout(16); }
+const pts = [];
+for (let i = 0; i < 5; i++) { pts.push(await xz()); await page.waitForTimeout(700); }
+await page.screenshot({ path: path.join(outDir, 'touch-follow.png') });
+await touch('touchEnd', []);
+const dirs = pts.slice(1).map((p, i) => Math.round((Math.atan2(p[2] - pts[i][2], p[0] - pts[i][0]) * 180) / Math.PI));
+console.log('strafe-right travel direction per 0.7s (deg, should turn):', dirs);
+await page.waitForTimeout(500);
 // Pinch zoom out.
 await touch('touchStart', [[520, 200, 3], [640, 200, 4]]);
 for (let i = 1; i <= 10; i++) { await touch('touchMove', [[520 + i * 5, 200, 3], [640 - i * 5, 200, 4]]); await page.waitForTimeout(16); }
