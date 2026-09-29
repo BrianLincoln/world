@@ -152,6 +152,13 @@ export class Spirit {
     return true;
   }
 
+  /**
+   * On its little bike (story/journey.ts): it sits on the saddle at `seat`,
+   * facing `heading`, hands forward on the bars, and looks at `look` (or
+   * straight ahead). The director moves it; its own brain rests.
+   */
+  riding: { seat: THREE.Vector3; heading: number; look: THREE.Vector3 | null } | null = null;
+
   /** Debug: pin the heading (close-up shots). */
   hold: number | null = null;
   /** Debug: pin the warmth. */
@@ -262,9 +269,14 @@ export class Spirit {
     let speed = 3.1;
     let happy = false;
     let bounce = 0;
-    const act = this.acts[0];
+    const ride = this.riding;
+    const act = ride ? undefined : this.acts[0];
     this.moving = false;
-    if (act) {
+    if (ride) {
+      this.vel.set(0, 0, 0);
+      pose = 'sit';
+      lookAt = ride.look;
+    } else if (act) {
       act.t += dt;
       if (act.kind === 'celebrate') {
         this.vel.multiplyScalar(Math.exp(-10 * dt));
@@ -366,9 +378,11 @@ export class Spirit {
     }
     this.pos.addScaledVector(this.vel, dt);
     const gy = this.hooks.ground(this.pos.x, this.pos.z);
-    this.pos.y += (gy - this.pos.y) * e(20);
+    if (ride) this.pos.copy(ride.seat).setY(ride.seat.y - 0.05);
+    else this.pos.y += (gy - this.pos.y) * e(20);
     const rest = w.settled && !act && !this.moving;
     this.face(this.moving ? null : act?.kind === 'hint' && act.phase === 'tug' ? this.player : (pointAt ?? (pose === 'warm' || rest ? w.face : lookAt)), dt);
+    if (ride) this.heading = ride.heading;
     if (this.hold !== null) this.heading = this.hold;
 
     // ---- body animation
@@ -428,6 +442,7 @@ export class Spirit {
       if (k === pointArm && !armsUp && !reach) { x = -1.5; z = 0.25; }
       if (this.sit > 0.5 && !pointAt) { x = -0.5; z = s * 0.45; }
       if (this.sit > 0.5 && rest) { x = -1.05 + Math.sin(this.t * 1.3 + k * 1.7) * 0.08; z = s * 0.3; }
+      if (ride) { x = -1.25; z = s * 0.32; }
       this.arms[k].rotation.set(this.armX[k].step(x, 120, 12, dt), 0, this.armZ[k].step(z, 120, 12, dt));
     }
 

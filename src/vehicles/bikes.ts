@@ -38,6 +38,8 @@ export interface Bike {
   moved: boolean;
   /** Where the bars rest when parked. */
   restSteer: number;
+  /** Size (1 = a grown-up's bike). */
+  scale?: number;
   skel: BikeSkeleton;
 }
 
@@ -226,6 +228,33 @@ export class Bikes {
     }
   }
 
+  /**
+   * Stand a bike of our own at (x, z) (the story's gift, the spirit's little
+   * one): kept for the session like a ridden one. Replaces one with this key.
+   */
+  place(key: string, x: number, z: number, heading: number, tintIndex: number, scale = 1): Bike {
+    this.bikes.delete(key);
+    const h = hashInt(Math.round(x), Math.round(z), this.gen.seed, 815);
+    const k: Bike = {
+      key, pos: new THREE.Vector3(x, this.gen.height(x, z), z), heading,
+      pitch: 0, lean: PARK_LEAN, steer: 0, roll: (h % 628) / 100, crank: 0, stand: 1,
+      tint: new THREE.Color(FRAME_TINTS[tintIndex % FRAME_TINTS.length]),
+      ridden: false, moved: true, restSteer: 0.25, skel: new BikeSkeleton(), scale,
+    };
+    k.pitch = this.groundPitch(k);
+    this.bikes.set(key, k);
+    return k;
+  }
+
+  /** Put a bike back on its stand somewhere else (the gift bike going home). */
+  move(k: Bike, x: number, z: number, heading: number) {
+    k.pos.set(x, this.gen.height(x, z), z);
+    k.heading = heading;
+    k.stand = 1;
+    k.lean = PARK_LEAN;
+    k.pitch = this.groundPitch(k);
+  }
+
   // ------------------------------------------------------------ riding
 
   /** The parked bike you could climb onto from `p`, if any. */
@@ -316,10 +345,10 @@ export class Bikes {
   }
 
   private groundPitch(k: Bike) {
-    const fx = Math.sin(k.heading), fz = Math.cos(k.heading), h = WHEELBASE / 2;
+    const fx = Math.sin(k.heading), fz = Math.cos(k.heading), h = (WHEELBASE / 2) * (k.scale ?? 1);
     const hf = this.floor(k, k.pos.x + fx * h, k.pos.z + fz * h);
     const hr = this.floor(k, k.pos.x - fx * h, k.pos.z - fz * h);
-    return Math.atan2(hf - hr, WHEELBASE);
+    return Math.atan2(hf - hr, WHEELBASE * (k.scale ?? 1));
   }
 
   /** Ground under a wheel: terrain, or a boulder the ridden bike is rolling over. */

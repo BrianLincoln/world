@@ -257,6 +257,8 @@ export interface BikePose {
   crank: number;
   /** 0 = kickstand folded, 1 = down. */
   stand: number;
+  /** Size (1 = a grown-up's bike; the hearth spirit's is little). */
+  scale?: number;
 }
 
 export class BikeSkeleton {
@@ -287,6 +289,7 @@ export class BikeSkeleton {
   pose(p: BikePose) {
     this.root.position.copy(p.pos);
     this.root.rotation.set(-p.pitch, p.heading, -p.lean);
+    this.root.scale.setScalar(p.scale ?? 1);
     this.steer.quaternion.setFromAxisAngle(STEER_AXIS, p.steer);
     this.front.rotation.x = p.roll;
     this.rear.rotation.x = p.roll;

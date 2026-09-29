@@ -112,14 +112,35 @@ export class WorldGen {
       const links = home.links.map((i) => net.towers[i]);
       const score = (t: Tower) => Math.hypot(t.x - home.x, t.z - home.z) * (t.parent === home.id ? 1 : 1.6);
       const next = links.sort((a, b) => score(a) - score(b))[0] ?? net.towers[1];
+      // Dry all the way (sampled every 6 m)?
+      const dry = (l: [number, number][]) => {
+        for (let i = 0; i + 1 < l.length; i++) {
+          const [ax, az] = l[i], [bx, bz] = l[i + 1];
+          const n = Math.ceil(Math.hypot(bx - ax, bz - az) / 6);
+          for (let k = 0; k <= n; k++) if (this.baseHeight(ax + (bx - ax) * (k / n), az + (bz - az) * (k / n)) < 1.6) return false;
+        }
+        return true;
+      };
+      // A gently wandering line a to b, or a detour through a dry midpoint off
+      // to one side when the straight way crosses water.
+      const span = (ax: number, az: number, bx: number, bz: number, depth = 0): [number, number][] => {
+        const d = Math.hypot(bx - ax, bz - az);
+        const t = d > 60 ? this.tracePath(ax, az, bx, bz, 0.06) : null;
+        const line = t ? (Math.hypot(t[0][0] - ax, t[0][1] - az) < 1 ? t : t.reverse()) : [[ax, az], [bx, bz]] as [number, number][];
+        if (dry(line) || depth > 1 || d < 30) return line;
+        const px = -(bz - az) / d, pz = (bx - ax) / d;
+        for (const o of [0.2, -0.2, 0.35, -0.35, 0.5, -0.5, 0.7, -0.7]) {
+          const mx = (ax + bx) / 2 + px * d * o, mz = (az + bz) / 2 + pz * d * o;
+          if (this.baseHeight(mx, mz) < 2.5) continue;
+          const l = [...span(ax, az, mx, mz, depth + 1), ...span(mx, mz, bx, bz, depth + 1).slice(1)];
+          if (dry(l)) return l;
+        }
+        return line;
+      };
       const leg = (pts: [number, number][]) => {
         const out: [number, number][] = [];
         for (let i = 0; i + 1 < pts.length; i++) {
-          const [ax, az] = pts[i], [bx, bz] = pts[i + 1];
-          const d = Math.hypot(bx - ax, bz - az);
-          const line = d > 60 ? this.tracePath(ax, az, bx, bz, 0.06) : null;
-          // tracePath runs in a canonical direction; keep ours.
-          const seg = line ? (Math.hypot(line[0][0] - ax, line[0][1] - az) < 1 ? line : line.reverse()) : [[ax, az], [bx, bz]] as [number, number][];
+          const seg = span(pts[i][0], pts[i][1], pts[i + 1][0], pts[i + 1][1]);
           out.push(...(out.length ? seg.slice(1) : seg));
         }
         return out;

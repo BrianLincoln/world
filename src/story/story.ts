@@ -167,6 +167,8 @@ export class Story {
   private t = 0;
   /** Suppress text UI while the opening runs. */
   get silent() { return this.d.active && !this.done; }
+  /** Phase 2 (story/journey.ts) has the spirit: the house leaves it alone. */
+  lent = false;
 
   constructor(private d: StoryDeps) {
     const gen = d.gen;
@@ -1049,7 +1051,7 @@ export class Story {
     } else if (this.complete() && this.stepT > 0.3) {
       this.advance();
     }
-    if (st.kind === 'rest') this.restLogic(dt);
+    if (st.kind === 'rest' && !this.lent) this.restLogic(dt);
 
     // The spirit warms as things come back to life.
     const next = this.phase.steps[Math.min(this.stepIndex + 1, this.phase.steps.length - 1)];
@@ -1072,7 +1074,7 @@ export class Story {
 
     // Hints: ~20 s without anything useful and the spirit comes to fetch you.
     this.idleT += dt;
-    if (st.hint === 'tug' && this.idleT > HINT_AFTER && !this.spirit.busy && this.stepT > 4) {
+    if (st.hint === 'tug' && !this.lent && this.idleT > HINT_AFTER && !this.spirit.busy && this.stepT > 4) {
       const h = this.hintTarget();
       if (h) {
         this.spirit.hint(h.at, h.face);

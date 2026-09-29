@@ -24,6 +24,7 @@ import { Harvest } from './world/harvest';
 import { Bikes, type Bike } from './vehicles/bikes';
 import { TowerDebug } from './ui/towerDebug';
 import { Beacons } from './story/beacons';
+import { Journey, STAGES, type Stage } from './story/journey';
 import { Colliders } from './world/colliders';
 import { Terrain } from './world/terrain';
 import { SEA_LEVEL, WorldGen } from './world/worldgen';
@@ -233,6 +234,7 @@ colliders.busy = (kind, x, z) => { const [gi, gj] = Harvest.cellOf(kind, x, z); 
 storyHost = new StoryHost({ scene, post, env, rig, body: player.body, camera, puffs: (at, n, size, spread) => puffs.emit(at, n, size, spread), colliders, harvest }, storyActive);
 if (params.has('fresh')) try { localStorage.removeItem(`fjellheim.story.${seedText}`); } catch { /* ignore */ }
 storyHost.build(gen, seedText);
+if (params.has('fresh')) try { localStorage.removeItem(`fjellheim.journey.${seedText}`); } catch { /* ignore */ }
 // Dev views of the beacon-tower network (L sight lines, M map; panel only).
 const towerDebug = new TowerDebug();
 storyHost.overlay.add(towerDebug.group);
@@ -254,6 +256,20 @@ const beacons = new Beacons({
   hidePlayer: (on) => { rig.root.visible = !on; },
 });
 scene.add(beacons.group);
+// Phase 2: the bike, the ride to the home tower, the first two towers (story only).
+let journey = null as Journey | null;
+function makeJourney() {
+  const host = storyHost!;
+  const story = host.story;
+  journey = host.active && story ? new Journey({
+    gen, story, bikes, beacons, body: player.body, sfx: host.sfx, saveKey: seedText,
+    cycling: () => cycling,
+    place: (x, z, h) => { if (riding) dismount(); if (cycling) dismountBike(); player.set('walk', ctx); placePlayer(x, z); player.body.heading = h; orbit.yaw = h + Math.PI; orbit.pitch = 0.2; orbit.snap(); },
+    mount: (k) => mountBike(k),
+  }) : null;
+}
+makeJourney();
+if (params.get('journey') && STAGES.includes(params.get('journey') as Stage)) journey?.jump(params.get('journey') as Stage);
 if (params.get('lit') === 'all') beacons.debugSet('all');
 if (params.get('beacons') === '0') beacons.group.visible = false;
 
@@ -341,6 +357,7 @@ function setSeed(s: string) {
   bikes.reset(gen, x, z, orbit.yaw, !storyHost?.active);
   towerDebug.setGen(gen);
   beacons.setGen(gen, s);
+  makeJourney();
   const u = new URL(location.href);
   u.searchParams.set('seed', s);
   history.replaceState(null, '', u);
@@ -371,6 +388,7 @@ const ui = new DebugUI({
     mobs.spawnFlockAt(name, b.pos.x + Math.sin(b.heading) * 18, b.pos.z + Math.cos(b.heading) * 18, mobCtx);
   },
   crowPlump: { get: () => crowStyle.plump, set: (v) => { crowStyle.plump = v; crow.setPlump(v); } },
+  journey: { stages: STAGES, jump: (s) => journey?.jump(s as Stage) },
   towers: {
     settings: towerDebug.settings,
     count: () => gen.towers.towers.length,
@@ -639,6 +657,7 @@ function frame(ts?: number) {
   puffs.update(dt);
   if (storyHost?.story) storyHost.story.external = beacons.action(mode);
   storyHost?.story?.update(dt, input, mode);
+  journey?.update(dt);
   towerDebug.update(body.pos, body.heading, orbit.yaw);
   for (const ev of body.events) if (ev.type === 'land' && ev.impact > 6) orbit.bump(Math.min(2.2, (ev.impact - 6) * 0.14));
   const focus = body.pos.clone();
@@ -965,6 +984,9 @@ window.__ow = {
   focusAt: (x: number | null, y = 0, z = 0) => { focusOverride = x === null ? null : new THREE.Vector3(x, y, z); orbit.snap(); },
   /** Frame the nearest bicycle from `dist` m, from `side` (rad around it, 0 = its left). */
   goToTower: (i: number) => goToTower(i),
+  /** Phase 2: the journey director; `journeyJump(stage)` jumps to a step. */
+  journey: () => journey,
+  journeyJump: (s: Stage) => journey?.jump(s),
   /** Stop the clock (true) and step frames by hand with `advance`, or hand it back (false). */
   manual: (on: boolean) => { if (manualStep && !on) { manualStep = false; timer.update(); requestAnimationFrame(frame); } else manualStep = on; },
   /** Run `n` frames of exactly `dt` seconds each (only in manual mode). */

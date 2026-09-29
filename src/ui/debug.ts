@@ -27,6 +27,8 @@ export interface DebugHooks {
   /** Crow shape, 0 sleek .. 1 round. */
   crowPlump: { get(): number; set(v: number): void };
   towers: { settings: { links: boolean; map: boolean; index: number }; count(): number; go(i: number): void; overview(): void; light(which: 'all' | 'none' | 'break' | number): void };
+  /** Phase 2's journey: its steps, jump to one. */
+  journey: { stages: string[]; jump(stage: string): void };
 }
 
 export class DebugUI {
@@ -133,6 +135,10 @@ export class DebugUI {
     fw2.add({ l: () => h.towers.light('break') }, 'l').name('break the nearest lock');
     fw2.add({ l: () => h.towers.light('all') }, 'l').name('light all towers');
     fw2.add({ l: () => h.towers.light('none') }, 'l').name('unlight all towers');
+    const fj = this.gui.addFolder('Journey (phase 2)');
+    const js = { stage: 'gift' };
+    fj.add(js, 'stage', h.journey.stages).name('step');
+    fj.add({ j: () => h.journey.jump(js.stage) }, 'j').name('jump to step');
 
     const fm = this.gui.addFolder('Player');
     const mode = { mode: h.modeName() };

@@ -655,6 +655,8 @@ export class Beacons {
 
   /** Mouse / touch look while you're the head. */
   look(dx: number, dy: number) {
+    // Looking round yourself takes over from a guided turn.
+    if (Math.abs(dx) + Math.abs(dy) > 3) this.guideT = 0;
     this.viewYaw -= dx * 0.0022;
     this.viewPitch = THREE.MathUtils.clamp(this.viewPitch - dy * 0.0022, -0.9, 0.7);
   }
@@ -666,6 +668,25 @@ export class Beacons {
     this.dropLock();
     this.save();
   }
+
+  /** Light or unlight one tower at once (the journey's dev jumps), with no ceremony. */
+  setLit(id: number, on: boolean) {
+    const s = this.state.get(id);
+    if (!s) return;
+    if (on) this.lit.add(id); else this.lit.delete(id);
+    s.lit = on ? 1 : 0;
+    s.litT = 99;
+    this.dropLock();
+    this.save();
+  }
+
+  /** Turn the view out of the head round to tower `id` (the journey showing you where next). */
+  guide(id: number) {
+    this.guideId = id;
+    this.guideT = 2.4;
+  }
+  private guideId = -1;
+  private guideT = 0;
 
   /** Debug: be tower `id`'s head right away (it's lit if it wasn't), looking out of its face. */
   debugEnter(id: number) {
@@ -1189,8 +1210,8 @@ export class Beacons {
     else if (!this.slurp) this.arms[0].group.visible = this.arms[1].group.visible = false;
     if (u >= end) {
       this.free = null;
-      // You're standing at its door: step away before it'll take you in.
-      this.disarmed = t.id;
+      // No disarm here: you're outside the room at the lock, and walking
+      // straight in (as the hearth spirit shows you) should just work.
       sp.group.visible = false;
       this.arms[0].group.visible = this.arms[1].group.visible = false;
       this.dropLock();
@@ -1583,6 +1604,16 @@ export class Beacons {
 
   /** Aim snaps to the nearest lit tower you can fly to, near the middle of your view. */
   private updateAim(from: Tower, dt: number) {
+    if (this.guideT > 0 && this.towers[this.guideId]) {
+      // A slow turn round to where you go next, then it's yours again.
+      this.guideT -= dt;
+      const g = this.towers[this.guideId];
+      const e0 = this.eyeAt(from, this.viewYaw);
+      const gy = Math.atan2(g.head.x - e0.x, g.head.z - e0.z), gp = Math.atan2(g.head.y - e0.y, Math.hypot(g.head.x - e0.x, g.head.z - e0.z));
+      const k = 1 - Math.exp(-1.8 * dt);
+      this.viewYaw += Math.atan2(Math.sin(gy - this.viewYaw), Math.cos(gy - this.viewYaw)) * k;
+      this.viewPitch += (gp - this.viewPitch) * k;
+    }
     const eye = this.eyeAt(from, this.viewYaw);
     const look = new THREE.Vector3(Math.sin(this.viewYaw) * Math.cos(this.viewPitch), Math.sin(this.viewPitch), Math.cos(this.viewYaw) * Math.cos(this.viewPitch));
     let best: Tower | null = null, bestA = AIM_CONE;
