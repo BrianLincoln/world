@@ -37,6 +37,7 @@ export class DebugUI {
 
   constructor(h: DebugHooks) {
     this.gui = new GUI({ title: 'World' });
+    this.gui.close();
     this.gui.domElement.style.setProperty('--width', '270px');
     const world = { seed: h.getSeed(), regenerate: () => h.setSeed(world.seed), random: () => { h.randomSeed(); world.seed = h.getSeed(); this.gui.controllersRecursive().forEach((c) => c.updateDisplay()); } };
     const fw = this.gui.addFolder('Seed');
