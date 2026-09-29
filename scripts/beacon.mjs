@@ -112,6 +112,34 @@ for (const s of shots) {
     }
     await page.evaluate(() => window.__ow.manual(false));
   }
+  if (s === 'travel') {
+    // The tower camera and an ember flight: from a lit neighbour of home, look round, aim home, fly, arrive, get out.
+    const ids = await page.evaluate(() => { const g = window.__ow.gen().towers; const from = g.home.links[0]; const other = g.towers[from].links.find((i) => i !== 0); return { from, other }; });
+    await set('none');
+    await page.evaluate(({ from }) => { window.__ow.beacons.debugSet(0); window.__ow.beacons.debugSet(from); window.__ow.beacons.debugEnter(from); }, ids);
+    await idle();
+    await page.evaluate(() => { window.__ow.manual(true); window.__ow.advance(60); });
+    await page.screenshot({ path: `${out}/${seed}-t0-view.png` });
+    if (ids.other !== undefined) { await page.evaluate((o) => { window.__ow.beacons.debugLookAt(o); window.__ow.advance(40); }, ids.other); await page.screenshot({ path: `${out}/${seed}-t1-unlit.png` }); }
+    await page.evaluate(() => { window.__ow.beacons.debugLookAt(0); window.__ow.beacons.look(40, 0); window.__ow.advance(60); });
+    console.log('aim', await page.evaluate(() => ({ aim: window.__ow.beacons.aim?.id, action: window.__ow.beacons.action('carried') })));
+    await page.screenshot({ path: `${out}/${seed}-t2-aim-home.png` });
+    const dur = await page.evaluate(() => { window.__ow.beacons.act('carried'); return window.__ow.beacons.slurp.dur; });
+    console.log('flight', dur);
+    let now = 0;
+    for (const f of [0.06, 0.15, 0.35, 0.55, 0.75, 0.9, 0.97]) {
+      const n = Math.round((f * dur - now) * 60); now += n / 60;
+      await page.evaluate((n) => window.__ow.advance(n), n);
+      await page.screenshot({ path: `${out}/${seed}-t3-fly-${Math.round(f * 100)}.png` });
+    }
+    await page.evaluate(() => window.__ow.advance(90));
+    console.log('arrived', await page.evaluate(() => ({ inside: window.__ow.beacons.inside?.id, phase: window.__ow.beacons.slurp?.phase })));
+    await page.screenshot({ path: `${out}/${seed}-t4-arrived.png` });
+    await page.evaluate(() => { window.__ow.beacons.escape(); window.__ow.advance(150); });
+    await page.screenshot({ path: `${out}/${seed}-t5-out.png` });
+    console.log('out', await page.evaluate(() => ({ busy: window.__ow.beacons.busy, vis: window.__ow.rig.root.visible })));
+    await page.evaluate(() => window.__ow.manual(false));
+  }
   if (s === 'variety') {
     await set('none');
     for (const id of [1, 2, 4, 6]) { await frame(id, 0.6, 0.1, 150, 22); await idle(); await page.screenshot({ path: `${out}/${seed}-var-${id}.png` }); }

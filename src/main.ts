@@ -247,7 +247,7 @@ let camBlend = 1;
 /** Sandbox only: how long the pick stays in the mitten after a swing at a tower's lock. */
 let sandboxPickT = 0;
 const beacons = new Beacons({
-  gen, body: player.body, rig, sfx: storyHost.sfx, saveKey: seedText, setMode: (m) => player.set(m, ctx),
+  gen, body: player.body, rig, sfx: storyHost.sfx, saveKey: seedText, setMode: (m) => player.set(m, ctx), overlay: storyHost.overlay,
   // In the story you need the pick from phase 1; the sandbox lends you one.
   canSmash: () => (storyHost.active && storyHost.story ? storyHost.story.hasPick : true),
   showPick: () => { if (storyHost.active && storyHost.story) storyHost.story.showTool('pick'); else sandboxPickT = 0.8; },

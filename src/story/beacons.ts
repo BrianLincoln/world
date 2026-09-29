@@ -13,6 +13,7 @@ import type { WorldGen } from '../world/worldgen';
 import type { Sfx } from './audio';
 import { propMesh } from './props';
 import { inside, rockShape, SPAN, span, TowerRocks, type Rock } from './towerRock';
+import { TowerView, type ViewTower } from './towerView';
 
 // Beacon towers at runtime: drawing them (bodies, the door boulder and the
 // hollow head, at any distance) and everything that happens at them.
@@ -51,6 +52,9 @@ const SOLID_R = 90;
 const WALK_SLOPE = 1.15;
 /** How far up the feet can step onto rock, and the body's height, for walls (m). */
 const STEP_UP = 0.5, BODY_H = 1.7;
+/** Aim snaps to a lit tower within this angle of the middle of the view (rad). */
+const AIM_CONE = 0.2;
+const RES = new THREE.Vector2();
 /** Being slurped in and out (s). */
 const IN_REACH = 0.3, IN_PULL = 0.45, IN_RISE = 0.85, OUT_DROP = 0.6, OUT_PUSH = 0.4;
 
@@ -67,6 +71,8 @@ export interface BeaconDeps {
   canSmash(): boolean;
   /** Draw the pick into the mitten for a swing. */
   showPick(): void;
+  /** The overlay scene (drawn over the finished frame): the tower camera's markers. */
+  overlay: THREE.Scene;
   /** Hide the explorer (while you're the head) or bring them back. */
   hidePlayer(on: boolean): void;
 }
@@ -497,7 +503,15 @@ interface ClimbPlan {
   eye: THREE.Vector3; axis: THREE.Vector3;
 }
 interface Freeing { tower: Tower; lock: Lock; t: number; spot: THREE.Vector3; lit: boolean; camYaw: number; side: number; plan?: ClimbPlan }
-interface Slurp { tower: Tower; phase: 'reach' | 'pull' | 'rise' | 'view' | 'drop' | 'push'; t: number; from: THREE.Vector3; camFrom: THREE.Vector3 }
+interface Slurp {
+  tower: Tower;
+  phase: 'reach' | 'pull' | 'rise' | 'view' | 'fly' | 'drop' | 'push';
+  t: number; from: THREE.Vector3; camFrom: THREE.Vector3;
+  /** Ember flight: where to, how long it takes (s), and the arc's ends. */
+  to?: Tower; dur?: number; a?: THREE.Vector3; b?: THREE.Vector3;
+}
+/** Something the journey (story/journey.ts) listens for. */
+export type BeaconEvent = 'opened' | 'lit' | 'inHead' | 'outHead' | 'arrived';
 interface Chunk { mesh: THREE.Mesh; vel: THREE.Vector3; spin: THREE.Vector3; rest: boolean; t: number }
 
 export class Beacons {
@@ -575,8 +589,13 @@ export class Beacons {
     this.doorNear = new HeadBatch(buildHead(4), this.doorMat, 60);
     this.doorFar = new HeadBatch(buildHead(2), this.doorMat, 200);
     this.arms = [new Arm(this.spirit.mat), new Arm(this.spirit.mat)];
+    this.view = new TowerView([...seeds.map((sd) => buildBoulder(sd, 1)), buildHead(2)]);
+    d.overlay.add(this.view.group);
+    this.ember = new THREE.Mesh(new THREE.IcosahedronGeometry(1, 2), makeSolidMaterial('#ffb35c', 0.8));
+    this.ember.visible = false;
+    this.ember.frustumCulled = false;
     this.group.add(...[...this.bodyNear, ...this.bodyFar, ...this.homeNear, ...this.homeFar].map((b) => b.mesh), this.headNear.mesh, this.headFar.mesh, this.doorNear.mesh, this.doorFar.mesh,
-      this.arms[0].group, this.arms[1].group, this.spirit.group, this.sparks.group, this.dust.group);
+      this.arms[0].group, this.arms[1].group, this.spirit.group, this.ember, this.sparks.group, this.dust.group);
     this.setGen(d.gen, d.saveKey);
   }
 
@@ -609,9 +628,9 @@ export class Beacons {
 
   // ------------------------------------------------------------ actions
 
-  /** What the one action would do right now: smash a lock, or leave the head. */
-  action(mode: string): 'pick' | 'down' | null {
-    if (this.slurp) return this.slurp.phase === 'view' ? 'down' : null;
+  /** What the one action would do right now: smash a lock, fly to the tower you're aimed at, or leave the head. */
+  action(mode: string): 'pick' | 'down' | 'ember' | null {
+    if (this.slurp) return this.slurp.phase === 'view' ? (this.aim ? 'ember' : 'down') : null;
     if (this.free || mode !== 'walk' || !this.lock || this.lock.broken) return null;
     if (!this.d.canSmash()) return null;
     const b = this.d.body, p = this.lock.pos;
@@ -622,6 +641,7 @@ export class Beacons {
   act(mode: string): boolean {
     const a = this.action(mode);
     if (a === 'down') { this.leave(); return true; }
+    if (a === 'ember' && this.aim) { this.travel(this.aim); return true; }
     if (a === 'pick') { this.swing(); return true; }
     return false;
   }
@@ -645,6 +665,29 @@ export class Beacons {
     else for (const t of id === 'all' ? this.towers : [this.towers[id]].filter(Boolean)) { this.lit.add(t.id); this.state.get(t.id)!.lit = 1; }
     this.dropLock();
     this.save();
+  }
+
+  /** Debug: be tower `id`'s head right away (it's lit if it wasn't), looking out of its face. */
+  debugEnter(id: number) {
+    const t = this.towers[id];
+    if (!t) return;
+    if (!this.lit.has(t.id)) this.debugSet(t.id);
+    const g = t.door.ground;
+    this.d.body.pos.set(g.x, g.y, g.z);
+    this.d.setMode('carried');
+    this.d.hidePlayer(true);
+    this.slurp = { tower: t, phase: 'view', t: 0, from: this.d.body.pos.clone(), camFrom: new THREE.Vector3() };
+    this.viewYaw = t.yaw;
+    this.viewPitch = -0.08;
+  }
+
+  /** Debug: turn the head view toward tower `id`. */
+  debugLookAt(id: number) {
+    const s = this.slurp, t = this.towers[id];
+    if (!s || !t) return;
+    const e = this.eyeAt(s.tower, this.viewYaw);
+    this.viewYaw = Math.atan2(t.head.x - e.x, t.head.z - e.z);
+    this.viewPitch = Math.atan2(t.head.y - e.y, Math.hypot(t.head.x - e.x, t.head.z - e.z));
   }
 
   /** Debug: open the nearest sealed tower's lock at once (the spirit sequence plays). */
@@ -696,7 +739,8 @@ export class Beacons {
   /** While you're the head (or rising into it / dropping out), where the camera is and looks. */
   viewCam(): { pos: THREE.Vector3; at: THREE.Vector3 } | null {
     const s = this.slurp;
-    if (!s || (s.phase !== 'rise' && s.phase !== 'view' && s.phase !== 'drop')) return null;
+    if (!s || (s.phase !== 'rise' && s.phase !== 'view' && s.phase !== 'drop' && s.phase !== 'fly')) return null;
+    if (s.phase === 'fly') return this.flyCam(s);
     const t = s.tower, h = t.head;
     // You are the head: it turns all the way round with your look, and the
     // eye rides round with it, just in front of the face.
@@ -745,6 +789,7 @@ export class Beacons {
     this.updateRubble(dt);
     this.updateHeads(dt);
     this.draw(cam);
+    this.drawView(cam, dt);
     this.sparks.update(dt);
     this.dust.update(dt);
     this.lastFeet.copy(b.pos);
@@ -814,6 +859,7 @@ export class Beacons {
     for (let i = 0; i < 30 && this.solidAt(spot.clone().setY(spot.y + 1)); i++) spot.addScaledVector(fwd, 0.5);
     spot.y = this.floorUnder(spot.x, spot.z, spot.y + 2);
     this.free = { tower: t, lock, t: 0, spot, lit: false, camYaw, side };
+    this.onEvent?.('opened', t);
     this.lit.add(t.id); // saved now: it's open and its spirit is out
     this.save();
     this.d.sfx.thud();
@@ -1119,6 +1165,7 @@ export class Beacons {
     } else if (!f.lit) {
       // The head blazes on.
       f.lit = true;
+      this.onEvent?.('lit', t);
       const s = this.state.get(t.id)!;
       s.litT = 0;
       const h = t.head;
@@ -1453,7 +1500,11 @@ export class Beacons {
         this.d.sfx.whoosh();
       }
     } else if (s.phase === 'rise') {
-      if (s.t >= IN_RISE) { s.phase = 'view'; s.t = 0; this.d.sfx.chirp(false); }
+      if (s.t >= IN_RISE) { s.phase = 'view'; s.t = 0; this.d.sfx.chirp(false); this.onEvent?.('inHead', t); }
+    } else if (s.phase === 'view') {
+      this.updateAim(s.tower, dt);
+    } else if (s.phase === 'fly') {
+      this.updateFlight(s, dt);
     } else if (s.phase === 'drop') {
       if (s.t >= OUT_DROP) {
         s.phase = 'push'; s.t = 0;
@@ -1461,6 +1512,7 @@ export class Beacons {
         b.heading = t.yaw;
         this.d.hidePlayer(false);
         this.lowered = t.yaw;
+        this.aim = null;
       }
     } else if (s.phase === 'push') {
       // Lowered back down onto the floor of the room, facing the doorway.
@@ -1474,6 +1526,7 @@ export class Beacons {
         b.vel.set(0, 0, 0);
         this.disarmed = t.id;
         this.slurp = null;
+        this.onEvent?.('outHead', t);
       }
     }
     if (hands > 0.01 && !this.free) {
@@ -1494,6 +1547,154 @@ export class Beacons {
   camNow = new THREE.Vector3();
   /** Set (to the doorway's direction) when you've just been put back in a room: the camera cuts to look in through the doorway. */
   lowered: number | null = null;
+
+  /** Told when a lock breaks, a tower lights, you go into or out of a head, or you arrive by ember. */
+  onEvent: ((e: BeaconEvent, t: Tower) => void) | null = null;
+  /** The lit tower you're aimed at from inside a head (the tower camera). */
+  aim: Tower | null = null;
+  /** How aimed-at each tower is (eased), for its glow. */
+  private aimK = new Map<number, number>();
+  private view: TowerView;
+  private viewK = 0;
+  private ember: THREE.Mesh;
+
+  /** Where you can fly from a lit tower: lit towers it can see, and home (from home, every lit tower). */
+  targets(from: Tower): Tower[] {
+    const ok = (t: Tower) => t !== from && this.lit.has(t.id);
+    if (from.home) return this.towers.filter(ok);
+    const out = from.links.map((i) => this.towers[i]).filter(ok);
+    const home = this.d.gen.towers.home;
+    if (ok(home) && !out.includes(home)) out.push(home);
+    return out;
+  }
+
+  /** Every tower shown from a head: the ones it can see, lit or not, and wherever you can fly. */
+  private sight(from: Tower): Tower[] {
+    const out = new Set(from.links.map((i) => this.towers[i]));
+    for (const t of this.targets(from)) out.add(t);
+    return [...out];
+  }
+
+  /** Where the camera sits for the view out of a head, looking along `yaw`. */
+  private eyeAt(t: Tower, yaw: number) {
+    const h = t.head;
+    return new THREE.Vector3(h.x, h.y + h.sy * 0.14, h.z).addScaledVector(new THREE.Vector3(Math.sin(yaw), 0, Math.cos(yaw)), h.sx * 1.12);
+  }
+
+  /** Aim snaps to the nearest lit tower you can fly to, near the middle of your view. */
+  private updateAim(from: Tower, dt: number) {
+    const eye = this.eyeAt(from, this.viewYaw);
+    const look = new THREE.Vector3(Math.sin(this.viewYaw) * Math.cos(this.viewPitch), Math.sin(this.viewPitch), Math.cos(this.viewYaw) * Math.cos(this.viewPitch));
+    let best: Tower | null = null, bestA = AIM_CONE;
+    for (const t of this.targets(from)) {
+      const d = new THREE.Vector3(t.head.x, t.head.y, t.head.z).sub(eye).normalize();
+      const a = Math.acos(THREE.MathUtils.clamp(d.dot(look), -1, 1));
+      // Looking well down at your own doorway is the way out, never a trip.
+      if (a < bestA && this.viewPitch > -0.5) { bestA = a; best = t; }
+    }
+    if (best !== this.aim && best) this.d.sfx.chirp(false);
+    this.aim = best;
+    if (best) {
+      // Ease the view onto it.
+      const d = new THREE.Vector3(best.head.x, best.head.y, best.head.z).sub(eye);
+      const wantYaw = Math.atan2(d.x, d.z), wantPitch = Math.atan2(d.y, Math.hypot(d.x, d.z));
+      const e = 1 - Math.exp(-4 * dt);
+      this.viewYaw += Math.atan2(Math.sin(wantYaw - this.viewYaw), Math.cos(wantYaw - this.viewYaw)) * e;
+      this.viewPitch += (wantPitch - this.viewPitch) * e;
+    }
+  }
+
+  /** Burst into an ember and fly to another lit tower's head. */
+  private travel(to: Tower) {
+    const s = this.slurp;
+    if (!s || s.phase !== 'view') return;
+    const a = this.eyeAt(s.tower, this.viewYaw);
+    const b = this.eyeAt(to, to.yaw);
+    const d = a.distanceTo(b);
+    s.phase = 'fly'; s.t = 0; s.to = to; s.a = a; s.b = b;
+    s.dur = 2.6 + d / 480;
+    this.aim = null;
+    this.sparks.emit(a, 30, 0.22, 5);
+    this.d.sfx.whoosh();
+    this.d.sfx.chirp(true);
+    // You (unseen) are there already, so the world streams in round it.
+    const g = to.door.ground;
+    this.d.body.pos.set(g.x, g.y, g.z);
+    this.d.body.vel.set(0, 0, 0);
+  }
+
+  /**
+   * The ember's arc from a to b (k 0..1): up and out along your look, high
+   * over the land (higher for longer trips), then round to come in to the far
+   * head's eyes straight from the front, never through its rock.
+   */
+  private arc(sl: Slurp, k: number, out = new THREE.Vector3()) {
+    const a = sl.a!, b = sl.b!, to = sl.to!;
+    const d = a.distanceTo(b);
+    const h = 30 + d * 0.12;
+    const p1 = a.clone().addScaledVector(b.clone().sub(a).setY(0).normalize(), d * 0.3).setY(Math.max(a.y, b.y) + h);
+    const p2 = b.clone().add(new THREE.Vector3(Math.sin(to.yaw), 0, Math.cos(to.yaw)).multiplyScalar(Math.min(120, d * 0.35))).setY(b.y + h * 0.6);
+    const v = 1 - k;
+    return out.set(0, 0, 0).addScaledVector(a, v * v * v).addScaledVector(p1, 3 * v * v * k).addScaledVector(p2, 3 * v * k * k).addScaledVector(b, k * k * k);
+  }
+
+  private updateFlight(s: Slurp, dt: number) {
+    const k = THREE.MathUtils.smootherstep(s.t / s.dur!, 0, 1);
+    const p = this.arc(s, k);
+    const u = s.t / s.dur!;
+    this.ember.visible = u > 0.08 && u < 0.97;
+    this.ember.position.copy(p);
+    this.ember.scale.setScalar(0.34 + 0.05 * Math.sin(this.time * 23));
+    if (Math.random() < dt * 40) this.sparks.emit(p, 1, 0.1, 0.6, undefined, { life: 0.7, rise: -1, drag: 2, up: 0.3 });
+    if (s.t >= s.dur!) {
+      const to = s.to!;
+      this.sparks.emit(s.b!, 26, 0.24, 5);
+      this.d.sfx.whoosh();
+      this.d.sfx.chirp(true);
+      this.state.get(to.id)!.litT = 0;
+      s.tower = to; s.phase = 'view'; s.t = 0;
+      this.viewYaw = to.yaw; this.viewPitch = -0.08;
+      this.ember.visible = false;
+      this.onEvent?.('arrived', to);
+    }
+  }
+
+  /** The camera on an ember flight: out of the eyes, behind the ember along its arc, and into the far head's eyes. */
+  private flyCam(s: Slurp): { pos: THREE.Vector3; at: THREE.Vector3 } {
+    const u = s.t / s.dur!;
+    const k = THREE.MathUtils.smootherstep(u, 0, 1);
+    const p = this.arc(s, k);
+    const ahead = this.arc(s, Math.min(1, k + 0.03)).sub(this.arc(s, Math.max(0, k - 0.03))).normalize();
+    const follow = p.clone().addScaledVector(ahead, -13).add(new THREE.Vector3(0, 3, 0));
+    const followAt = p.clone().addScaledVector(ahead, 12);
+    // Leaving: from the view out of the head. Arriving: into the far eyes, turning to look out.
+    const k0 = THREE.MathUtils.smootherstep(u, 0, 0.14), k1 = THREE.MathUtils.smootherstep(u, 0.84, 1);
+    const startAt = s.a!.clone().add(new THREE.Vector3(Math.sin(this.viewYaw), Math.sin(this.viewPitch), Math.cos(this.viewYaw)).multiplyScalar(10));
+    const to = s.to!;
+    const endAt = s.b!.clone().add(new THREE.Vector3(Math.sin(to.yaw), -0.08, Math.cos(to.yaw)).multiplyScalar(10));
+    this.camPos.lerpVectors(s.a!, follow, k0).lerp(s.b!, k1);
+    this.camAt.lerpVectors(startAt, followAt, k0).lerp(endAt, k1);
+    return { pos: this.camPos, at: this.camAt };
+  }
+
+  /** The tower camera's overlay: towers in sight as silhouettes, lit ones glowing. */
+  private drawView(cam: THREE.PerspectiveCamera, dt: number) {
+    const s = this.slurp;
+    const on = !!s && s.phase === 'view';
+    this.viewK += ((on ? 1 : 0) - this.viewK) * (1 - Math.exp(-(on ? 3 : 8) * dt));
+    const from = s?.tower;
+    if (!from || this.viewK < 0.01) { this.view.update([], cam, RES); return; }
+    const list: ViewTower[] = [];
+    for (const t of this.sight(from)) {
+      const want = this.aim === t ? 1 : 0;
+      const k = (this.aimK.get(t.id) ?? 0) + (want - (this.aimK.get(t.id) ?? 0)) * (1 - Math.exp(-8 * dt));
+      this.aimK.set(t.id, k);
+      this.state.get(t.id)!.hl = k;
+      list.push({ t, lit: this.lit.has(t.id), aimed: k, alpha: this.viewK });
+    }
+    RES.set(innerWidth, innerHeight);
+    this.view.update(list, cam, RES);
+  }
 
   private leave() {
     const s = this.slurp;
@@ -1518,7 +1719,7 @@ export class Beacons {
       s.bob = 0;
       // Dead stone until it's lit: no watching, no stirring. The one you're
       // inside keeps still too (you're looking out of it).
-      if (inside === t && this.slurp && this.slurp.phase !== 'reach' && this.slurp.phase !== 'pull') {
+      if (inside === t && this.slurp && this.slurp.phase !== 'reach' && this.slurp.phase !== 'pull' && this.slurp.phase !== 'fly') {
         // You are this head: it turns with your look.
         let dy = this.viewYaw - t.yaw;
         dy = Math.atan2(Math.sin(dy), Math.cos(dy));

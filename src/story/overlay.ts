@@ -14,7 +14,7 @@ export const OVERLAY_U = {
   uTime: { value: 0 },
 };
 
-const OCCLUDE = /* glsl */ `
+export const OCCLUDE = /* glsl */ `
 uniform sampler2D tND;
 uniform vec2 uRes;
 uniform float uThrough;
@@ -134,7 +134,7 @@ void main() {
 }
 `;
 
-function overlayMat(vert: string, frag: string, uniforms: Record<string, THREE.IUniform>) {
+export function overlayMat(vert: string, frag: string, uniforms: Record<string, THREE.IUniform>) {
   return new THREE.ShaderMaterial({
     glslVersion: THREE.GLSL3, vertexShader: vert, fragmentShader: frag,
     uniforms: { ...OVERLAY_U, uThrough: { value: 0.05 }, ...uniforms },

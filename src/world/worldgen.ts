@@ -1,7 +1,7 @@
 import { Simplex } from '../core/noise';
 import { clamp, hash01, hashInt, lerp, mulberry32, smoothstep } from '../core/rng';
 import { brookQuery, findStorySite, RUIN_D, RUIN_W, siteToLocal, type StorySite } from './storySite';
-import { buildTowerNet, HOME_VIEW, type TowerNet } from './towers';
+import { buildTowerNet, HOME_VIEW, type Tower, type TowerNet } from './towers';
 
 // The world is a pure function of (seed, x, z). Nothing here touches three.js
 // so it runs identically inside chunk workers and on the main thread.
@@ -34,6 +34,9 @@ export interface Poi {
 
 export interface PathSeg { ax: number; az: number; bx: number; bz: number }
 
+/** Phase 2's guided routes: polylines (x, z) and the tower they lead to second. */
+export interface Journey { toHome: [number, number][]; toNext: [number, number][]; next: number }
+
 interface Peak { x: number; z: number; h: number; r: number }
 
 export class WorldGen {
@@ -53,6 +56,7 @@ export class WorldGen {
   private poiCache = new Map<number, Poi[]>();
   private pathCache = new Map<number, PathSeg[]>();
   private _story: StorySite | null = null;
+  private _journey: Journey | null = null;
   private _towers: TowerNet | null = null;
   private towerCells: Map<number, number[]> | null = null;
   private bq = { d: 0, bed: 0, t: 0, i: 0 };
@@ -91,6 +95,40 @@ export class WorldGen {
       }
     }
     return this._towers;
+  }
+
+  /**
+   * Phase 2's journey (see story/journey.ts): the path the hearth spirit
+   * leads you along from the cabin yard to the home tower's doorway, the
+   * tower it takes you to next (a neighbour of home that looks back at it,
+   * the nearest), and the path there. Real footpaths: drawn, and kept clear
+   * of trees like any other.
+   */
+  get journey(): Journey {
+    if (!this._journey) {
+      const net = this.towers, home = net.home, st = this.story;
+      const front = (t: Tower, d: number): [number, number] => [t.door.ground.x + Math.sin(t.yaw) * d, t.door.ground.z + Math.cos(t.yaw) * d];
+      const yard: [number, number] = [st.x + Math.sin(st.rot) * 9, st.z + Math.cos(st.rot) * 9];
+      const links = home.links.map((i) => net.towers[i]);
+      const score = (t: Tower) => Math.hypot(t.x - home.x, t.z - home.z) * (t.parent === home.id ? 1 : 1.6);
+      const next = links.sort((a, b) => score(a) - score(b))[0] ?? net.towers[1];
+      const leg = (pts: [number, number][]) => {
+        const out: [number, number][] = [];
+        for (let i = 0; i + 1 < pts.length; i++) {
+          const [ax, az] = pts[i], [bx, bz] = pts[i + 1];
+          const d = Math.hypot(bx - ax, bz - az);
+          const line = d > 60 ? this.tracePath(ax, az, bx, bz, 0.06) : null;
+          // tracePath runs in a canonical direction; keep ours.
+          const seg = line ? (Math.hypot(line[0][0] - ax, line[0][1] - az) < 1 ? line : line.reverse()) : [[ax, az], [bx, bz]] as [number, number][];
+          out.push(...(out.length ? seg.slice(1) : seg));
+        }
+        return out;
+      };
+      const toHome = leg([yard, front(home, 30), front(home, 0)]);
+      const toNext = leg([front(home, 0), front(home, 26), front(next, 30), front(next, 0)]);
+      this._journey = { toHome, toNext, next: next.id };
+    }
+    return this._journey;
   }
 
   /** Distance to the nearest beacon tower's centre (towers near (x, z) only; Infinity if none within `max`). */
@@ -506,7 +544,7 @@ export class WorldGen {
   }
 
   /** Meandering polyline between two points, or null if it would cross water. */
-  private tracePath(ax: number, az: number, bx: number, bz: number): [number, number][] | null {
+  private tracePath(ax: number, az: number, bx: number, bz: number, wiggle = 0.12): [number, number][] | null {
     // Canonical direction so A->B and B->A trace the identical line.
     if (ax > bx || (ax === bx && az > bz)) {
       [ax, bx] = [bx, ax];
@@ -517,7 +555,7 @@ export class WorldGen {
     const px = -(bz - az) / d;
     const pz = (bx - ax) / d;
     const pts: [number, number][] = [];
-    const amp = Math.min(40, d * 0.12);
+    const amp = Math.min(40, d * wiggle);
     for (let i = 0; i <= n; i++) {
       const t = i / n;
       const env = Math.sin(t * Math.PI);
@@ -547,6 +585,15 @@ export class WorldGen {
         const maxz = Math.max(s.az, s.bz) + margin;
         if (maxx < x0 || minx > x1 || maxz < z0 || minz > z1) continue;
         out.push(s);
+      }
+    }
+    // The journey's paths (cabin -> home tower -> the next tower).
+    const j = this.journey;
+    for (const line of [j.toHome, j.toNext]) {
+      for (let i = 0; i + 1 < line.length; i++) {
+        const [ax, az] = line[i], [bx, bz] = line[i + 1];
+        if (Math.max(ax, bx) + margin < x0 || Math.min(ax, bx) - margin > x1 || Math.max(az, bz) + margin < z0 || Math.min(az, bz) - margin > z1) continue;
+        out.push({ ax, az, bx, bz });
       }
     }
     // The story cabin's own little worn paths.

@@ -5,7 +5,7 @@ import * as THREE from 'three';
 // canvases feed the HUD (as data URLs) and the in-world billboards (as
 // textures), so an icon always looks the same wherever it appears.
 
-export type IconName = 'axe' | 'log' | 'stone' | 'flame' | 'heart' | 'home' | 'check' | 'hand' | 'hammer' | 'pick' | 'smash' | 'antlers' | 'up' | 'down' | 'finger' | 'mouse' | 'mouseDown' | 'fingerDown';
+export type IconName = 'axe' | 'log' | 'stone' | 'flame' | 'heart' | 'home' | 'check' | 'hand' | 'hammer' | 'pick' | 'smash' | 'antlers' | 'up' | 'down' | 'ember' | 'bike' | 'finger' | 'mouse' | 'mouseDown' | 'fingerDown';
 
 const INK = '#4a2e36';
 const SIZE = 128;
@@ -450,8 +450,54 @@ function drawDown(g: CanvasRenderingContext2D) {
   g.restore();
 }
 
+/** Fly as an ember: a glowing spark on a high arc, its dotted trail behind. */
+function drawEmber(g: CanvasRenderingContext2D) {
+  g.lineCap = 'round';
+  g.strokeStyle = '#ffcf73';
+  g.lineWidth = 8;
+  g.setLineDash([2, 15]);
+  g.beginPath();
+  g.moveTo(16, 108);
+  g.quadraticCurveTo(34, 26, 80, 40);
+  g.stroke();
+  g.setLineDash([]);
+  g.beginPath();
+  g.arc(90, 44, 20, 0, Math.PI * 2);
+  g.fillStyle = '#ffb35c';
+  g.fill();
+  ink(g);
+  g.beginPath();
+  g.arc(85, 38, 7, 0, Math.PI * 2);
+  g.fillStyle = '#fff1c9';
+  g.fill();
+}
+
+/** A bicycle: two wheels, a frame, bars and a saddle. */
+function drawBike(g: CanvasRenderingContext2D) {
+  g.lineCap = 'round';
+  g.lineJoin = 'round';
+  for (const x of [32, 96]) {
+    g.beginPath();
+    g.arc(x, 82, 22, 0, Math.PI * 2);
+    g.strokeStyle = '#4a2e36';
+    g.lineWidth = 9;
+    g.stroke();
+  }
+  g.beginPath();
+  g.moveTo(32, 82); g.lineTo(56, 50); g.lineTo(86, 50); g.lineTo(96, 82);
+  g.moveTo(56, 50); g.lineTo(64, 82); g.lineTo(86, 50);
+  g.moveTo(50, 40); g.lineTo(64, 40);
+  g.moveTo(86, 50); g.lineTo(82, 34); g.lineTo(94, 32);
+  g.strokeStyle = '#4a2e36';
+  g.lineWidth = 13;
+  g.stroke();
+  g.strokeStyle = '#d9604a';
+  g.lineWidth = 7;
+  g.stroke();
+}
+
 const DRAW: Record<IconName, (g: CanvasRenderingContext2D) => void> = {
-  up: drawUp, down: drawDown,
+  up: drawUp, down: drawDown, ember: drawEmber, bike: drawBike,
   antlers: drawAntlers,
   axe: drawAxe, log: drawLog, stone: drawStone, flame: drawFlame, heart: drawHeart, home: drawHome, check: drawCheck, hand: drawHand, hammer: drawHammer, pick: drawPick, smash: drawSmash,
   finger: (g) => drawFinger(g, false), fingerDown: (g) => drawFinger(g, true), mouse: (g) => drawMouse(g, false), mouseDown: (g) => drawMouse(g, true),
