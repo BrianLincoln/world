@@ -12,6 +12,7 @@ import type { Tower } from '../world/towers';
 import type { WorldGen } from '../world/worldgen';
 import type { Sfx } from './audio';
 import { propMesh } from './props';
+import { inside, rockShape, SPAN, span, TowerRocks, type Rock } from './towerRock';
 
 // Beacon towers at runtime: drawing them (bodies, the door boulder and the
 // hollow head, at any distance) and everything that happens at them.
@@ -42,6 +43,12 @@ const LOCK_STAND = 1.5;
 const T_OUT = 0.45, T_LOOK = 1.05, T_HAPPY = 1.9, T_TURN = 3.8, T_REACH = 4.7;
 /** The climb: arms stretching up to the capstone, a tug on the grip, hauling up (s). */
 const ARMS_UP = 1.0, ARMS_HOLD = 0.35, HAUL = 2.6;
+/** Tower rock collides within this distance of a tower's centre (m). */
+const SOLID_R = 90;
+/** Rock tops steeper than this (rise over run) aren't floor: you slide off. */
+const WALK_SLOPE = 1.15;
+/** How far up the feet can step onto rock, and the body's height, for walls (m). */
+const STEP_UP = 0.5, BODY_H = 1.7;
 /** Being slurped in and out (s). */
 const IN_REACH = 0.3, IN_PULL = 0.45, IN_RISE = 0.85, OUT_DROP = 0.6, OUT_PUSH = 0.4;
 
@@ -486,6 +493,12 @@ export class Beacons {
   private viewPitch = 0;
   private near: Tower | null = null;
   private nearD = Infinity;
+  /** Every tower's rock as solid shapes (see towerRock.ts). */
+  private rocks: TowerRocks;
+  /** The explorer's feet at the end of the last frame (a landing checks where they came from). */
+  private lastFeet = new THREE.Vector3(0, -Infinity, 0);
+  /** How far out the camera is let go along its line (eases back out after rock pulls it in). */
+  private camK = 1;
   private camPos = new THREE.Vector3();
   private camAt = new THREE.Vector3();
 
@@ -495,7 +508,8 @@ export class Beacons {
     this.homeMat.uniforms.uKind = { value: homeKinds };
     // Three boulder shapes, so no two towers are the same stack of pebbles.
     const seeds = [7, 19, 33];
-    this.bodyNear = seeds.map((sd) => new BoulderBatch(buildBoulder(sd, 3), this.stoneMat, 200));
+    const shapes = seeds.map((sd) => buildBoulder(sd, 3));
+    this.bodyNear = shapes.map((g) => new BoulderBatch(g, this.stoneMat, 200));
     this.bodyFar = seeds.map((sd) => new BoulderBatch(buildBoulder(sd, 1), this.stoneMat, 700));
     this.homeNear = seeds.map((sd) => new BoulderBatch(buildBoulder(sd, 3), this.homeMat, 12));
     this.homeFar = seeds.map((sd) => new BoulderBatch(buildBoulder(sd, 1), this.homeMat, 12));
@@ -507,7 +521,9 @@ export class Beacons {
         uEmber: { value: new THREE.Color('#ff9a45') }, uCore: { value: new THREE.Color('#ffcf73') }, uHollow: { value: new THREE.Color('#150e13') },
       },
     });
-    this.headNear = new HeadBatch(buildHead(4), this.headMat, 60);
+    const head = buildHead(4);
+    this.rocks = new TowerRocks(shapes.map(rockShape), rockShape(head));
+    this.headNear = new HeadBatch(head, this.headMat, 60);
     this.headFar = new HeadBatch(buildHead(2), this.headMat, 200);
     this.doorMat = new THREE.ShaderMaterial({ glslVersion: THREE.GLSL3, vertexShader: HEAD_VERT, fragmentShader: HEAD_FRAG, uniforms: this.headMat.uniforms, side: THREE.DoubleSide });
     this.doorNear = new HeadBatch(buildHead(4), this.doorMat, 60);
@@ -523,6 +539,7 @@ export class Beacons {
     this.d.gen = gen;
     this.d.saveKey = saveKey;
     this.towers = gen.towers.towers;
+    this.rocks.clear();
     this.state.clear();
     for (const t of this.towers) this.state.set(t.id, { lit: 0, home: t.home ? 1 : 0, tilt: 0, look: 0, hl: 0, bob: 0, litT: 99 });
     this.lit.clear();
@@ -668,6 +685,7 @@ export class Beacons {
     this.draw(cam);
     this.sparks.update(dt);
     this.dust.update(dt);
+    this.lastFeet.copy(b.pos);
   }
 
   private dropLock() {
@@ -1042,13 +1060,88 @@ export class Beacons {
     return Math.hypot(q.x, q.z) < deep && q.y > -0.8 && q.y < 0.6;
   }
 
+  /** The tower whose rock is near enough to matter at (x, z), or null. */
+  private solidNear(x: number, z: number): Tower | null {
+    const t = this.near;
+    return t && Math.hypot(x - t.x, z - t.z) < SOLID_R ? t : null;
+  }
+
   /**
-   * The door boulder is a hollow shell: solid while it's sealed, a room with
-   * a doorway once it's open. Pushes the body out of the shell's wall.
+   * Is the top of rock `r` over (x, z) (already in SPAN, with its slope)
+   * somewhere you can stand? Not too steep, and open to the sky: a top
+   * buried inside another boulder is no floor. The hollow door boulder
+   * buries nothing (its inside is the room).
+   */
+  private standable(rs: Rock[], r: Rock, x: number, z: number): boolean {
+    if (SPAN.slope > WALK_SLOPE) return false;
+    const top = SPAN.top;
+    for (const o of rs) {
+      if (o === r || o.hollow || !span(o, x, z)) continue;
+      if (SPAN.bot < top - 0.05 && top < SPAN.top - 0.05) return false;
+    }
+    SPAN.top = top;
+    return true;
+  }
+
+  /**
+   * Keep a body out of tower rock. Every boulder and the head is solid to
+   * its drawn shape: walls where it's too tall to step onto, floors on its
+   * open, walkable top (see `surface`). Coming down from above (a fall, the
+   * parachute, a crow, a bike jump, dev flight) you land on whatever top
+   * you pass through, however fast. The door boulder is a hollow shell:
+   * solid while it's sealed, a room with a doorway once it's open.
    */
   collide(pos: THREE.Vector3, vel: THREE.Vector3, r: number) {
-    const t = this.near;
-    if (!t || this.nearD > 60 || this.slurp) return;
+    if (this.slurp) return;
+    const t = this.solidNear(pos.x, pos.z);
+    if (!t) return;
+    const rs = this.rocks.of(t);
+    // Landing: the explorer's feet were over this top last frame and are
+    // under it now. (Other bodies aren't tracked frame to frame.)
+    const me = Math.hypot(pos.x - this.lastFeet.x, pos.z - this.lastFeet.z) < 6;
+    const prevY = me ? this.lastFeet.y : pos.y;
+    let land = -Infinity;
+    for (const rk of rs) {
+      if (!span(rk, pos.x, pos.z, true)) continue;
+      const top = SPAN.top;
+      if (pos.y < top && prevY >= top - STEP_UP && top > land && this.standable(rs, rk, pos.x, pos.z)) land = top;
+    }
+    if (land > -Infinity) pos.y = land;
+    // Walls: out along the line from the boulder's axis, past its rock at
+    // any height the body spans.
+    for (let pass = 0; pass < 2; pass++) {
+      for (const rk of rs) {
+        if (rk.hollow) continue;
+        if (span(rk, pos.x, pos.z, true) && SPAN.top <= pos.y + STEP_UP && this.standable(rs, rk, pos.x, pos.z)) continue;
+        this.pushOut(rk, pos, vel, r);
+      }
+    }
+    this.shell(t, pos, vel, r);
+  }
+
+  /** Push a body (feet at pos, radius r) radially out of one rock's walls. */
+  private pushOut(rk: Rock, pos: THREE.Vector3, vel: THREE.Vector3, rad: number) {
+    let ux = pos.x - rk.x, uz = pos.z - rk.z;
+    const d = Math.hypot(ux, uz);
+    if (d < 1e-4) { ux = 1; uz = 0; } else { ux /= d; uz /= d; }
+    const lo = pos.y + STEP_UP, hi = pos.y + BODY_H;
+    const wall = (at: number) => span(rk, rk.x + ux * at, rk.z + uz * at) && SPAN.bot < hi && SPAN.top > lo;
+    let a = Math.max(0, d - rad);
+    if (!wall(a)) return;
+    const far = rk.sx * 1.7;
+    let b = a;
+    while (b < far && wall(b)) { a = b; b += 0.5; }
+    for (let i = 0; i < 7; i++) { const m = (a + b) / 2; if (wall(m)) a = m; else b = m; }
+    const to = b + rad + 0.01;
+    if (to <= d) return;
+    pos.x = rk.x + ux * to;
+    pos.z = rk.z + uz * to;
+    const into = vel.x * ux + vel.z * uz;
+    if (into < 0) { vel.x -= into * ux; vel.z -= into * uz; }
+  }
+
+  /** The door boulder's shell walls (horizontal push only, no popping up or down). */
+  private shell(t: Tower, pos: THREE.Vector3, vel: THREE.Vector3, r: number) {
     const b = t.boulders[1];
     const q = this.shellQ(t, pos.x, pos.y + 1.3, pos.z);
     const d = q.length();
@@ -1063,7 +1156,6 @@ export class Beacons {
     if (!open) { if (d >= 1 + rn) return; target = 1 + rn; }
     else if (d > 1 + rn || d < inner - rn) return;
     else target = d > (1 + inner) / 2 ? 1 + rn : inner - rn;
-    // Push along the horizontal only (no popping up or down).
     const qh = Math.hypot(q.x, q.z) || 1e-4;
     const want = Math.sqrt(Math.max(0, target * target - q.y * q.y));
     const k = want / qh;
@@ -1080,50 +1172,59 @@ export class Beacons {
   }
 
   /**
-   * Floors: the buried base boulder is a low mound you walk over (exactly
-   * its rendered dome), and the door boulder's top is floor if you come down
-   * on it from above.
+   * Floor: the highest open, walkable rock top under (x, z) that's no more
+   * than a step above the feet. -Infinity if none.
    */
   surface(x: number, z: number, feetY: number): number {
-    const t = this.near;
-    if (!t || this.nearD > 60) return -Infinity;
+    const t = this.solidNear(x, z);
+    if (!t) return -Infinity;
+    const rs = this.rocks.of(t);
     let best = -Infinity;
-    const base = t.boulders[0];
-    const bd = Math.hypot(x - base.x, z - base.z) / (base.sx * 0.97);
-    if (bd < 1) {
-      const top = base.y + base.sy * Math.sqrt(1 - bd * bd);
-      if (feetY >= top - 0.9) best = top;
+    for (const rk of rs) {
+      if (!span(rk, x, z, true)) continue;
+      const top = SPAN.top;
+      if (top > feetY + STEP_UP || top <= best) continue;
+      if (this.standable(rs, rk, x, z)) best = top;
     }
-    const b = t.boulders[1];
-    const q = this.shellQ(t, x, b.y, z);
-    const qh = Math.hypot(q.x, q.z);
-    if (qh >= 0.98) return best;
-    const top = b.y + b.sy * Math.sqrt(1 - qh * qh);
-    return feetY >= top - 0.6 ? Math.max(best, top) : best;
+    return best;
   }
 
-  /** Inside the room, keep the camera inside too (unless it's looking in through the doorway). */
-  clampCamera(cam: THREE.Vector3, focus: THREE.Vector3) {
-    const t = this.near;
-    if (!t || this.nearD > 60 || !this.lit.has(t.id) || this.inside || this.free) return;
-    // Only when you're the one in the room (not a cinematic's focus).
-    const b = this.d.body.pos;
-    if (!this.inRoom(t, b.x, b.y, b.z, 0.9)) return;
-    const qf = this.shellQ(t, focus.x, focus.y, focus.z);
-    if (qf.length() > 0.9) return;
-    const qc = this.shellQ(t, cam.x, cam.y, cam.z);
-    if (qc.length() < 0.8) return;
-    // Where the focus -> camera line leaves the hollow.
-    let lo = 0, hi = 1;
-    const tmp = new THREE.Vector3();
-    for (let i = 0; i < 18; i++) {
-      const m = (lo + hi) / 2;
-      tmp.lerpVectors(qf, qc, m);
-      if (tmp.length() < 0.8) lo = m; else hi = m;
+  /** Is a world point inside tower rock (the door boulder's hollow and doorway are open air)? */
+  solidAt(p: THREE.Vector3): boolean {
+    const t = this.solidNear(p.x, p.z);
+    if (!t) return false;
+    for (const rk of this.rocks.of(t)) {
+      if (rk.hollow) {
+        const q = this.shellQ(t, p.x, p.y, p.z);
+        const d = q.length();
+        if (d >= 1 || q.y < -0.56) continue;
+        if (!this.lit.has(t.id)) return true;
+        if (d > 0.86 && !this.inDoorway(q.divideScalar(d || 1), 0)) return true;
+      } else if (inside(rk, p.x, p.y, p.z)) return true;
     }
-    tmp.lerpVectors(qf, qc, lo).normalize();
-    if (this.inDoorway(tmp, 0.05)) return;
-    cam.lerpVectors(focus, cam, Math.max(0, lo - 0.04));
+    return false;
+  }
+
+  /**
+   * Keep the camera out of tower rock: pull it in along its line to the
+   * focus, to just short of the first rock in the way. It snaps in and eases
+   * back out. In a door boulder's room, that keeps it inside the room unless
+   * it's looking in through the doorway.
+   */
+  clampCamera(cam: THREE.Vector3, focus: THREE.Vector3, dt: number) {
+    let k = 1;
+    const t = this.solidNear(cam.x, cam.z) ?? this.solidNear(focus.x, focus.z);
+    if (t && !this.inside && !this.solidAt(focus)) {
+      const L = cam.distanceTo(focus);
+      const n = Math.ceil(L / 0.3);
+      const p = new THREE.Vector3();
+      for (let i = 1; i <= n; i++) {
+        p.lerpVectors(focus, cam, i / n);
+        if (this.solidAt(p)) { k = Math.max(0, ((i - 1) / n) - 0.5 / Math.max(L, 1e-3)); break; }
+      }
+    }
+    this.camK = Math.min(k, this.camK + (1 - this.camK) * (1 - Math.exp(-3 * dt)));
+    if (this.camK < 1) cam.lerpVectors(focus, cam, this.camK);
   }
 
   private updateSlurp(dt: number, mode: string, grounded: boolean) {

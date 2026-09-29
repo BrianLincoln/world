@@ -70,6 +70,7 @@ const world: WorldQuery = {
     beacons?.collide(pos, vel, r);
   },
   ramp: (x, z, r, maxRise) => colliders.ramp(x, z, r, maxRise),
+  landmarks: (pos, vel, r) => beacons?.collide(pos, vel, r),
   waterLevel: SEA_LEVEL,
 };
 
@@ -101,6 +102,7 @@ const mobCtx: MobCtx = {
   collide: (pos, vel, r) => {
     colliders.push(pos, vel, r);
     storyHost?.story?.collide(pos, vel, r);
+    beacons?.collide(pos, vel, r);
   },
   puff: (at, n, size, spread) => puffs.emit(at, n, size, spread),
 };
@@ -484,9 +486,15 @@ const timer = new THREE.Timer();
 timer.connect(document);
 let elapsed = 0;
 
+/** Test harness: frames stepped by hand at a fixed dt (see __ow.advance). */
+let manualStep = false;
+let stepDt: number | null = null;
+/** Stepped frames that don't draw (only the last of an `advance` does). */
+let skipRender = false;
+
 function frame(ts?: number) {
   timer.update(ts);
-  const rawDt = timer.getDelta();
+  const rawDt = stepDt ?? timer.getDelta();
   const dt = Math.min(rawDt, 0.05);
   adaptResolution(rawDt);
   elapsed += dt;
@@ -675,7 +683,7 @@ function frame(ts?: number) {
     beacons.lowered = null;
   }
   // In a tower's room, the camera stays inside it too.
-  beacons.clampCamera(camera.position, focus);
+  beacons.clampCamera(camera.position, focus, dt);
   beacons.camNow.copy(camera.position);
   // You are the tower's head: the camera looks out through its eyes.
   const vc = beacons.viewCam();
@@ -702,9 +710,11 @@ function frame(ts?: number) {
   terrain.update(camera.position);
 
   renderer.info.reset();
-  groundShadow.update(renderer, terrain.root, camera.position);
-  const s = env.sky;
-  post.render(scene, camera, s.fog, s.outline, s.tint, s.tintAmt, s.lift);
+  if (!skipRender) {
+    groundShadow.update(renderer, terrain.root, camera.position);
+    const s = env.sky;
+    post.render(scene, camera, s.fog, s.outline, s.tint, s.tintAmt, s.lift);
+  }
 
   ui.tick(dt, () => {
     const p = player.body.pos;
@@ -718,7 +728,7 @@ function frame(ts?: number) {
     setTimeout(() => veil?.remove(), 1000);
     veil = null;
   }
-  requestAnimationFrame(frame);
+  if (!manualStep) requestAnimationFrame(frame);
 }
 let skidT = 0;
 let hoofT = 0;
@@ -946,6 +956,10 @@ window.__ow = {
   focusAt: (x: number | null, y = 0, z = 0) => { focusOverride = x === null ? null : new THREE.Vector3(x, y, z); orbit.snap(); },
   /** Frame the nearest bicycle from `dist` m, from `side` (rad around it, 0 = its left). */
   goToTower: (i: number) => goToTower(i),
+  /** Stop the clock (true) and step frames by hand with `advance`, or hand it back (false). */
+  manual: (on: boolean) => { if (manualStep && !on) { manualStep = false; timer.update(); requestAnimationFrame(frame); } else manualStep = on; },
+  /** Run `n` frames of exactly `dt` seconds each (only in manual mode). */
+  advance: (n: number, dt = 1 / 60) => { for (let i = 0; i < n; i++) { stepDt = dt; skipRender = i < n - 1; frame(); } stepDt = null; skipRender = false; },
   _world: world,
   beacons,
   _towerDebug: towerDebug,

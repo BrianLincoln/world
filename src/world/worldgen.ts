@@ -30,8 +30,6 @@ export interface Poi {
   story?: 'ruin' | 'far';
   /** Beacon towers: the tower's id in `WorldGen.towers`. */
   tower?: number;
-  /** Beacon towers: how many of `boulders` form the stack itself (the head is last). */
-  stack?: number;
 }
 
 export interface PathSeg { ax: number; az: number; bx: number; bz: number }
@@ -435,7 +433,7 @@ export class WorldGen {
     void this.towers;
     for (const id of this.towerCells!.get(key) ?? []) {
       const t = this.towers.towers[id];
-      out.push({ kind: 'tower', tower: id, x: t.x, z: t.z, y: t.y, rot: t.yaw, clear: t.foot * 1.5 + 16, boulders: [...t.boulders, t.head], stack: t.boulders.indexOf(t.slab) + 1 });
+      out.push({ kind: 'tower', tower: id, x: t.x, z: t.z, y: t.y, rot: t.yaw, clear: t.foot * 1.5 + 16, boulders: [...t.boulders, t.head] });
     }
     const inThis = (x: number, z: number) => Math.floor(x / POI_CELL) === cx && Math.floor(z / POI_CELL) === cz;
     if (inThis(st.x, st.z)) out.push({ kind: 'cabin', story: 'ruin', x: st.x, z: st.z, y: st.y, rot: st.rot, clear: 13, variant: 0 });

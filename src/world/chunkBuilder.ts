@@ -324,15 +324,13 @@ export function buildChunk(gen: WorldGen, req: ChunkRequest): ChunkResult {
         // distance); here they only collide and cast ground shadows: tone
         // + 2 hides an instance in PROP_VERT.
         const hide = p.kind === 'tower' ? 2 : 0;
-        p.boulders.forEach((b, bi) => {
+        p.boulders.forEach((b) => {
           // lean = 9 tags POI boulders: never harvested (see world/harvest.ts).
-          // A tower's stack (8) is handled by story/beacons.ts: an exact floor
-          // over the buried base, a shell with a doorway for the door boulder.
-          // The prop colliders model every rock as a column from the ground,
-          // which made the floating boulders above invisible walls inside the
-          // room, so they leave the whole stack out. Loose rocks stay solid.
-          const inStack = p.kind === 'tower' && (bi < (p.stack ?? 0) || bi === p.boulders!.length - 1);
-          const lean = inStack ? 8 : 9;
+          // Every boulder of a tower (8) collides in story/beacons.ts instead,
+          // against its exact drawn shape: the prop colliders model a rock as a
+          // column from the ground, which walled off the door boulder's room
+          // and missed the stack overhead entirely.
+          const lean = p.kind === 'tower' ? 8 : 9;
           rocks.push(b.x - x0, b.y, b.z - z0, b.sx, b.rot, b.sy / b.sx, lean, hide + 0.3 + 0.4 * ((b.x * 13.7 + b.z) % 1 + 1) % 1);
         });
       }

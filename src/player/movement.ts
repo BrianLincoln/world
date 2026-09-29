@@ -20,6 +20,11 @@ export interface WorldQuery {
    * (a fast bike rides up them instead: see `ramp`).
    */
   collide?(pos: THREE.Vector3, vel: THREE.Vector3, radius: number, rampMax?: number): void;
+  /**
+   * Only the big landmarks (beacon towers): what even free flight can't pass
+   * through. Walls push out, and coming down onto a top lands on it.
+   */
+  landmarks?(pos: THREE.Vector3, vel: THREE.Vector3, radius: number): void;
   /** Highest boulder surface under a circle, for rocks up to `maxRise` tall; -Infinity if none. */
   ramp?(x: number, z: number, radius: number, maxRise: number): number;
   waterLevel: number;
@@ -326,6 +331,9 @@ export class FlyMode implements MovementMode {
       b.pos.y = floor;
       b.vel.y = Math.max(0, b.vel.y);
     }
+    const y0 = b.pos.y;
+    world.landmarks?.(b.pos, b.vel, BODY_RADIUS);
+    if (b.pos.y > y0) b.vel.y = Math.max(0, b.vel.y);
     return null;
   }
 }
