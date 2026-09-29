@@ -38,7 +38,7 @@ export class TouchControls {
   private pinch = 0;
   private last: TouchContext = { ride: null, lasso: null, down: false, fly: true };
 
-  constructor(private input: Input, private el: HTMLElement) {
+  constructor(private input: Input, el: HTMLElement) {
     document.body.classList.add('touch');
     this.root = document.createElement('div');
     this.root.id = 'touch';
