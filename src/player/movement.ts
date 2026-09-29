@@ -330,6 +330,16 @@ export class FlyMode implements MovementMode {
   }
 }
 
+/**
+ * Held by something else (a beacon spirit's arms): the body is placed from
+ * outside each frame and nothing here moves it.
+ */
+export class CarriedMode implements MovementMode {
+  readonly name = 'carried';
+  enter(b: Body) { b.grounded = false; }
+  update(): string | null { return null; }
+}
+
 /** How a mount moves. Speeds in m/s. */
 export interface MountSpec {
   name: string;

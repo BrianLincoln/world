@@ -868,7 +868,7 @@ export class CharacterRig {
 
     // Which pose family we're in.
     this.airTime = b.grounded ? 0 : this.airTime + dt;
-    const state: State = seat ? (seat.bike ? 'bike' : 'ride') : mode === 'walk' ? (this.airTime > 0.1 ? 'air' : 'ground') : (mode as State) in this.w ? (mode as State) : 'ground';
+    const state: State = seat ? (seat.bike ? 'bike' : 'ride') : mode === 'walk' ? (this.airTime > 0.1 ? 'air' : 'ground') : mode === 'carried' ? 'air' : (mode as State) in this.w ? (mode as State) : 'ground';
     const rate = state === 'ground' ? 16 : 9;
     let sum = 0;
     for (const s of STATES) {

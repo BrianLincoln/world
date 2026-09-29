@@ -148,13 +148,13 @@ while (Date.now() - t0 < 420000) {
     await W(2600); await shot('04c-fall');
     await ev(() => window.__ow.focusAt(null));
   }
-  if (st.step === 'hearth' && st.hour >= 18.3 && !seen.has('dusk')) {
+  if (st.step === 'hearth' && !seen.has('dusk')) {
     seen.add('dusk');
     await hold(false);
     const a = await ev(() => { const s = window.__ow.story(); return { x: s.cabin.hearthPos.x, z: s.cabin.hearthPos.z }; });
     const Q = await S();
-    await look('10-dusk-outside', ...Q.cab, 0.5, 0.15, 17, 500);
-    await look('10b-dusk-hearth', ...Q.sp, 1.2, 0.3, 5, 500);
+    await look('10-hearth-outside', ...Q.cab, 0.5, 0.15, 17, 500);
+    await look('10b-hearth', ...Q.sp, 1.2, 0.3, 5, 500);
   }
   // Unstick: a hop if we haven't moved.
   if (lastPos && Math.hypot(g.b.x - lastPos.x, g.b.z - lastPos.z) < 0.05 && held) {

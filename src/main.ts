@@ -11,7 +11,7 @@ import { Sky } from './gfx/sky';
 import { CharacterRig } from './player/character';
 import { Input } from './player/input';
 import { TouchControls, isTouchDevice } from './ui/touch';
-import { BikeMode, BODY_RADIUS, FlyMode, GlideMode, MovementController, RideMode, SwimMode, WalkMode, type MoveContext, type WorldQuery } from './player/movement';
+import { BikeMode, BODY_RADIUS, CarriedMode, FlyMode, GlideMode, MovementController, RideMode, SwimMode, WalkMode, type MoveContext, type WorldQuery } from './player/movement';
 import { Crow, crowStyle } from './mobs/crow';
 import { Mobs } from './mobs/manager';
 import type { Mob, MobCtx } from './mobs/types';
@@ -22,6 +22,8 @@ import { DebugUI } from './ui/debug';
 import { StoryHost } from './story/host';
 import { Harvest } from './world/harvest';
 import { Bikes, type Bike } from './vehicles/bikes';
+import { TowerDebug } from './ui/towerDebug';
+import { Beacons } from './story/beacons';
 import { Colliders } from './world/colliders';
 import { Terrain } from './world/terrain';
 import { SEA_LEVEL, WorldGen } from './world/worldgen';
@@ -60,11 +62,12 @@ const bikes = new Bikes(gen, colliders);
 let storyHost: StoryHost | null = null;
 const world: WorldQuery = {
   groundHeight: (x, z) => gen.height(x, z),
-  floorHeight: (x, z, feetY, r) => Math.max(gen.height(x, z), colliders.surface(x, z, feetY, r), storyHost?.story?.surface(x, z, feetY, r, 0.5) ?? -Infinity),
+  floorHeight: (x, z, feetY, r) => Math.max(gen.height(x, z), colliders.surface(x, z, feetY, r), storyHost?.story?.surface(x, z, feetY, r, 0.5) ?? -Infinity, beacons?.surface(x, z, feetY) ?? -Infinity),
   collide: (pos, vel, r, rampMax) => {
     colliders.push(pos, vel, r, rampMax);
     bikes.push(pos, vel, r);
     storyHost?.story?.collide(pos, vel, r);
+    beacons?.collide(pos, vel, r);
   },
   ramp: (x, z, r, maxRise) => colliders.ramp(x, z, r, maxRise),
   waterLevel: SEA_LEVEL,
@@ -72,7 +75,7 @@ const world: WorldQuery = {
 
 const rideMode = new RideMode();
 const bikeMode = new BikeMode();
-const player = new MovementController([new WalkMode(), new SwimMode(), new FlyMode(), new GlideMode(), rideMode, bikeMode], 'walk');
+const player = new MovementController([new WalkMode(), new SwimMode(), new FlyMode(), new GlideMode(), rideMode, bikeMode, new CarriedMode()], 'walk');
 const rig = new CharacterRig();
 scene.add(rig.root);
 if (params.get('eyes') === 'round') rig.eyeType = 'round';
@@ -228,6 +231,26 @@ colliders.busy = (kind, x, z) => { const [gi, gj] = Harvest.cellOf(kind, x, z); 
 storyHost = new StoryHost({ scene, post, env, rig, body: player.body, camera, puffs: (at, n, size, spread) => puffs.emit(at, n, size, spread), colliders, harvest }, storyActive);
 if (params.has('fresh')) try { localStorage.removeItem(`fjellheim.story.${seedText}`); } catch { /* ignore */ }
 storyHost.build(gen, seedText);
+// Dev views of the beacon-tower network (L sight lines, M map; panel only).
+const towerDebug = new TowerDebug();
+storyHost.overlay.add(towerDebug.group);
+towerDebug.setGen(gen);
+if (params.get('towers') === '1') towerDebug.settings.links = towerDebug.settings.map = true;
+// Beacon towers: drawn at any distance, their spirits lift you up and down.
+if (params.has('fresh')) try { localStorage.removeItem(`fjellheim.towers.${seedText}`); } catch { /* ignore */ }
+let hadCine = false;
+/** Sandbox only: how long the pick stays in the mitten after a swing at a tower's lock. */
+let sandboxPickT = 0;
+const beacons = new Beacons({
+  gen, body: player.body, rig, sfx: storyHost.sfx, saveKey: seedText, setMode: (m) => player.set(m, ctx),
+  // In the story you need the pick from phase 1; the sandbox lends you one.
+  canSmash: () => (storyHost.active && storyHost.story ? storyHost.story.hasPick : true),
+  showPick: () => { if (storyHost.active && storyHost.story) storyHost.story.showTool('pick'); else sandboxPickT = 0.8; },
+  hidePlayer: (on) => { rig.root.visible = !on; },
+});
+scene.add(beacons.group);
+if (params.get('lit') === 'all') beacons.debugSet('all');
+if (params.get('beacons') === '0') beacons.group.visible = false;
 
 /** Find dry, gentle ground near a point: spiral search. */
 function findSpawn(x0: number, z0: number): [number, number] {
@@ -240,6 +263,23 @@ function findSpawn(x0: number, z0: number): [number, number] {
     }
   }
   return [x0, z0];
+}
+
+/** Dev: stand in front of tower `i`'s face, looking up at it. */
+function goToTower(i: number) {
+  const t = gen.towers.towers[Math.max(0, Math.min(gen.towers.towers.length - 1, i))];
+  if (riding) dismount();
+  if (cycling) dismountBike();
+  player.set('walk', ctx);
+  // In front of the doorway, facing it, the camera behind you.
+  const fx = Math.sin(t.yaw), fz = Math.cos(t.yaw);
+  const g = t.door.ground;
+  placePlayer(g.x + fx * 9, g.z + fz * 9);
+  player.body.heading = t.yaw + Math.PI;
+  orbit.yaw = t.yaw;
+  orbit.pitch = 0.05;
+  orbit.targetDistance = 12;
+  orbit.snap();
 }
 
 function placePlayer(x: number, z: number) {
@@ -294,6 +334,8 @@ function setSeed(s: string) {
   placePlayer(x, z);
   if (storyHost?.active && story) { orbit.yaw = story.spawnPoint().yaw; orbit.snap(); }
   bikes.reset(gen, x, z, orbit.yaw, !storyHost?.active);
+  towerDebug.setGen(gen);
+  beacons.setGen(gen, s);
   const u = new URL(location.href);
   u.searchParams.set('seed', s);
   history.replaceState(null, '', u);
@@ -324,6 +366,24 @@ const ui = new DebugUI({
     mobs.spawnFlockAt(name, b.pos.x + Math.sin(b.heading) * 18, b.pos.z + Math.cos(b.heading) * 18, mobCtx);
   },
   crowPlump: { get: () => crowStyle.plump, set: (v) => { crowStyle.plump = v; crow.setPlump(v); } },
+  towers: {
+    settings: towerDebug.settings,
+    count: () => gen.towers.towers.length,
+    go: (i) => goToTower(i),
+    light: (w) => (w === 'break' ? beacons.debugBreak() : beacons.debugSet(w)),
+    overview: () => {
+      const h = gen.towers.home;
+      if (riding) dismount();
+      if (cycling) dismountBike();
+      player.set('fly', ctx);
+      player.body.pos.set(h.x, h.flame.y + 420, h.z);
+      player.body.vel.set(0, 0, 0);
+      orbit.pitch = 1.3;
+      orbit.targetDistance = 60;
+      orbit.snap();
+      towerDebug.settings.links = true;
+    },
+  },
   faceCam: (on) => {
     rig.holdStill = on;
     if (on) {
@@ -436,9 +496,11 @@ function frame(ts?: number) {
     resize();
   }
 
-  if (input.pressed('KeyF') && !riding && !cycling) player.set(player.current.name === 'fly' ? 'walk' : 'fly', ctx);
-  storyHost?.story?.handleAction(input);
-  if (input.pressed('KeyE')) {
+  if (input.pressed('KeyF') && !riding && !cycling && !beacons.busy) player.set(player.current.name === 'fly' ? 'walk' : 'fly', ctx);
+  // Only take the press (pressed() consumes it) when a tower is on offer.
+  const beaconUsed = !!beacons.action(player.current.name) && (input.pressed('KeyE') || input.pressed('Mouse0')) && beacons.act(player.current.name);
+  if (!beaconUsed) storyHost?.story?.handleAction(input);
+  if (input.pressed('KeyE') && !beaconUsed) {
     // Something else in reach? Climb straight across; otherwise E hops off.
     const next = nextMount();
     if (next && (riding || cycling)) switchTo(next);
@@ -449,13 +511,19 @@ function frame(ts?: number) {
   const lassoKey = input.pressed('KeyR') || input.pressed('Mouse2');
   if (lassoKey && mobs.act() === 'throw') rig.throwLasso();
   if (input.pressed('KeyH')) ui.toggle();
+  if (ui.shown && input.pressed('KeyL')) towerDebug.settings.links = !towerDebug.settings.links;
+  if (ui.shown && input.pressed('KeyM')) towerDebug.settings.map = !towerDebug.settings.map;
   if (input.pressed('KeyT')) env.hour = (Math.floor(env.hour) + 1) % 24;
   const [lx, ly] = input.consumeLook();
-  orbit.addLook(lx, ly);
+  // Inside a tower's head you look out through its eyes instead.
+  if (beacons.inside) beacons.look(lx, ly); else orbit.addLook(lx, ly);
+  if (beacons.inside && input.pressed('Escape')) beacons.escape();
   lookIdle = lx || ly ? 0 : lookIdle + dt;
   orbit.zoom(input.consumeWheel());
 
   ctx.input = input.state();
+  // Watching a tower's spirit (or being carried in and out): hands off.
+  if (beacons.busy) ctx.input = { ...ctx.input, x: 0, y: 0, run: false, jump: false, jumpPressed: false, up: false, down: false };
   ctx.camYaw = inputYaw ?? orbit.yaw;
   ctx.camPitch = orbit.pitch;
   ctx.dt = dt;
@@ -467,6 +535,11 @@ function frame(ts?: number) {
 
   const body = player.body;
   if (cycling && player.current.name !== 'bike') dismountBike(); // tumbled into deep water
+  beacons.update(dt, camera, player.current.name, body.grounded, input.held('KeyE') || input.held('Mouse0'));
+  if (sandboxPickT > 0) {
+    sandboxPickT -= dt;
+    rig.setTools({ axe: false, pick: sandboxPickT > 0 }, sandboxPickT > 0 ? 'pick' : null);
+  }
   const mode = player.current.name;
   if (cycling) {
     bikes.ride(cycling, body, bikeMode, dt);
@@ -551,7 +624,9 @@ function frame(ts?: number) {
   rig.hand(hand);
   mobs.updateRopes(mobCtx, hand);
   puffs.update(dt);
+  if (storyHost?.story) storyHost.story.external = beacons.action(mode);
   storyHost?.story?.update(dt, input, mode);
+  towerDebug.update(body.pos, body.heading, orbit.yaw);
   for (const ev of body.events) if (ev.type === 'land' && ev.impact > 6) orbit.bump(Math.min(2.2, (ev.impact - 6) * 0.14));
   const focus = body.pos.clone();
   focus.y += mode === 'swim' ? 1.1 : mode === 'glide' ? 2.0 : mode === 'ride' && riding ? riding.species.seat(riding).pos.y - body.pos.y + 1.1 : mode === 'bike' ? 1.55 : 1.4;
@@ -566,6 +641,24 @@ function frame(ts?: number) {
   const rideK = mode === 'ride' ? THREE.MathUtils.clamp((body.vel.length() - 8) / 30, 0, 1) : 0;
   // Keeps building with speed: a mountain descent should feel like one.
   const bikeK = mode === 'bike' ? THREE.MathUtils.clamp((hs - 8) / 50, 0, 1.4) : 0;
+  // A tower's spirit being freed: the camera watches it, not you.
+  const cine = beacons.cinematic();
+  if (cine) {
+    focus.copy(cine.focus);
+    let dy = cine.yaw - orbit.yaw;
+    dy = Math.atan2(Math.sin(dy), Math.cos(dy));
+    orbit.yaw += dy * (1 - Math.exp(-2.5 * dt));
+    orbit.pitch += (cine.pitch - orbit.pitch) * (1 - Math.exp(-3 * dt));
+    orbit.targetDistance += (cine.dist - orbit.targetDistance) * (1 - Math.exp(-2.2 * dt));
+    if (cine.cut) { orbit.yaw = cine.yaw; orbit.pitch = cine.pitch; orbit.targetDistance = cine.dist; orbit.snap(); }
+  } else if (hadCine) {
+    // And cut back to you when it's over.
+    orbit.yaw = body.heading + Math.PI;
+    orbit.pitch = 0.18;
+    orbit.targetDistance = 10;
+    orbit.snap();
+  }
+  hadCine = !!cine;
   orbit.update(focus, dt, (x, z) => Math.max(gen.height(x, z), SEA_LEVEL), {
     fovKick: 3.5 * sprint + 7 * fall + (3 + THREE.MathUtils.clamp((hs - 9) / 6, 0, 1) * 4) * glide + 8 * flyK + 6 * rideK + 9 * bikeK,
     distScale: 1 + 0.12 * sprint + 0.15 * fall + 0.4 * glide + (mode === 'ride' ? 0.25 + 0.2 * rideK : 0) + 0.3 * bikeK,
@@ -573,6 +666,26 @@ function frame(ts?: number) {
     velX: body.vel.x,
     velZ: body.vel.z,
   });
+  // Back in a tower's room: look in at yourself through the doorway.
+  if (beacons.lowered !== null) {
+    orbit.yaw = beacons.lowered;
+    orbit.pitch = 0.1;
+    orbit.targetDistance = 12;
+    orbit.snap();
+    beacons.lowered = null;
+  }
+  // In a tower's room, the camera stays inside it too.
+  beacons.clampCamera(camera.position, focus);
+  beacons.camNow.copy(camera.position);
+  // You are the tower's head: the camera looks out through its eyes.
+  const vc = beacons.viewCam();
+  if (vc) {
+    camera.position.copy(vc.pos);
+    camera.lookAt(vc.at);
+    camera.fov = 42;
+    camera.updateProjectionMatrix();
+    camera.updateMatrixWorld();
+  }
   U.uFocus.value.copy(focus);
   // Contact shadow sits on the ground under the explorer and shrinks with height.
   // Floor, not bare terrain: on a rock or roof the terrain-only shadow hides.
@@ -580,7 +693,7 @@ function frame(ts?: number) {
   const lift = body.pos.y - groundY;
   TERRAIN_U.uPlayerFeet.value.set(body.pos.x, groundY, body.pos.z);
   TERRAIN_U.uPlayerLift.value = lift;
-  if (mode === 'swim' || mode === 'ride' || lift > 40 || groundY < SEA_LEVEL) TERRAIN_U.uPlayerFeet.value.y = -1e4;
+  if (mode === 'swim' || mode === 'ride' || lift > 40 || groundY < SEA_LEVEL || !rig.root.visible) TERRAIN_U.uPlayerFeet.value.y = -1e4;
   updateAimHud();
 
   env.update(dt);
@@ -832,6 +945,10 @@ window.__ow = {
   /** Orbit the camera round a world point instead of the explorer (null = back to normal). */
   focusAt: (x: number | null, y = 0, z = 0) => { focusOverride = x === null ? null : new THREE.Vector3(x, y, z); orbit.snap(); },
   /** Frame the nearest bicycle from `dist` m, from `side` (rad around it, 0 = its left). */
+  goToTower: (i: number) => goToTower(i),
+  _world: world,
+  beacons,
+  _towerDebug: towerDebug,
   lookAtBike: (dist = 4, side = 0, pitch = 0.12, hide = true) => {
     let best: Bike | null = null, bd = Infinity;
     for (const k of bikes.bikes.values()) {

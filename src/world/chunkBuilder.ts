@@ -320,10 +320,21 @@ export function buildChunk(gen: WorldGen, req: ChunkRequest): ChunkResult {
         if (p.story === 'ruin') continue; // drawn by the story (it has states)
         cabins.push(p.x - x0, p.y, p.z - z0, 1, p.rot, 1, p.variant ?? 0, 0.5);
       } else if (p.boulders) {
-        for (const b of p.boulders) {
+        // Beacon towers are drawn by story/beacons.ts (their own colours, any
+        // distance); here they only collide and cast ground shadows: tone
+        // + 2 hides an instance in PROP_VERT.
+        const hide = p.kind === 'tower' ? 2 : 0;
+        p.boulders.forEach((b, bi) => {
           // lean = 9 tags POI boulders: never harvested (see world/harvest.ts).
-          rocks.push(b.x - x0, b.y, b.z - z0, b.sx, b.rot, b.sy / b.sx, 9, 0.3 + 0.4 * ((b.x * 13.7 + b.z) % 1 + 1) % 1);
-        }
+          // A tower's stack (8) is handled by story/beacons.ts: an exact floor
+          // over the buried base, a shell with a doorway for the door boulder.
+          // The prop colliders model every rock as a column from the ground,
+          // which made the floating boulders above invisible walls inside the
+          // room, so they leave the whole stack out. Loose rocks stay solid.
+          const inStack = p.kind === 'tower' && (bi < (p.stack ?? 0) || bi === p.boulders!.length - 1);
+          const lean = inStack ? 8 : 9;
+          rocks.push(b.x - x0, b.y, b.z - z0, b.sx, b.rot, b.sy / b.sx, lean, hide + 0.3 + 0.4 * ((b.x * 13.7 + b.z) % 1 + 1) % 1);
+        });
       }
     }
   }

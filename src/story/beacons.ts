@@ -1,0 +1,1319 @@
+import * as THREE from 'three';
+import { mergeVertices } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
+import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
+import { Simplex } from '../core/noise';
+import { buildBoulder } from '../gfx/geometry';
+import { KIND_COLORS, makePropMaterial, makeSolidMaterial, U } from '../gfx/materials';
+import { GHOST_FRAG, GHOST_VERT, HEAD_FRAG, HEAD_VERT } from '../gfx/shaders';
+import { Puffs } from '../gfx/puffs';
+import type { CharacterRig } from '../player/character';
+import type { Body } from '../player/movement';
+import type { Tower } from '../world/towers';
+import type { WorldGen } from '../world/worldgen';
+import type { Sfx } from './audio';
+import { propMesh } from './props';
+
+// Beacon towers at runtime: drawing them (bodies, the door boulder and the
+// hollow head, at any distance) and everything that happens at them.
+//
+// An unlit tower is sealed and empty: its head is dead stone, black inside,
+// and its door boulder is bound with an old iron band and padlock. Smash the
+// lock with the pick (hold to keep swinging) and the door stone gives way.
+// Out tumbles the tower's spirit, a little glowing body with long stretchy
+// arms. It has a happy moment with you, then flings its arms up to the
+// capstone and hauls itself up the outside into the head, which blazes on
+// from inside. That's lighting a tower. From then on, walk into its
+// doorway and the spirit slurps you up the inside of the tower: up top you
+// *are* the head, looking out through its eyes (the explorer isn't drawn),
+// until you take the way out (the down badge, E, a click or Esc) and it
+// slurps you back down and out of the door. Which towers are lit is saved
+// per seed.
+
+/** Draw towers this far away (m); nearer than NEAR_LOD gets the detailed meshes. */
+const DRAW = 5200;
+const NEAR_LOD = 650;
+/** Smashing the lock: one swing, when in it the blow lands, and blows to break it. */
+const SWING = 0.62, HIT_AT = 0.3, LOCK_HP = 3;
+/** How near the lock (m, horizontally) you can swing at it. */
+const LOCK_REACH = 5.5;
+/** Where you stand to strike it (m from the lock, horizontally): a swing steps you in. */
+const LOCK_STAND = 1.5;
+/** The spirit's sequence (s after the lock breaks): out, happy, the climb, into the head. */
+const T_OUT = 0.45, T_LOOK = 1.05, T_HAPPY = 1.9, T_TURN = 3.8, T_REACH = 4.7;
+/** The climb: arms stretching up to the capstone, a tug on the grip, hauling up (s). */
+const ARMS_UP = 1.0, ARMS_HOLD = 0.35, HAUL = 2.6;
+/** Being slurped in and out (s). */
+const IN_REACH = 0.3, IN_PULL = 0.45, IN_RISE = 0.85, OUT_DROP = 0.6, OUT_PUSH = 0.4;
+
+export interface BeaconDeps {
+  gen: WorldGen;
+  body: Body;
+  rig: CharacterRig;
+  sfx: Sfx;
+  /** Switch the explorer's movement mode ('carried' while held, 'walk' after). */
+  setMode(name: string): void;
+  /** localStorage key suffix (the seed text). */
+  saveKey: string;
+  /** Can you break locks yet (do you have the pick)? */
+  canSmash(): boolean;
+  /** Draw the pick into the mitten for a swing. */
+  showPick(): void;
+  /** Hide the explorer (while you're the head) or bring them back. */
+  hidePlayer(on: boolean): void;
+}
+
+/** A hollow-head boulder: smooth, gently lumpy, flattened a little underneath. */
+function buildHead(detail: number): THREE.BufferGeometry {
+  const n = new Simplex(91);
+  let g: THREE.BufferGeometry = new THREE.IcosahedronGeometry(1, detail);
+  g.deleteAttribute('uv');
+  g.deleteAttribute('normal');
+  g = mergeVertices(g);
+  const p = g.attributes.position as THREE.BufferAttribute;
+  const v = new THREE.Vector3();
+  for (let i = 0; i < p.count; i++) {
+    v.fromBufferAttribute(p, i);
+    // Low bumps only: the openings are traced against a unit ball.
+    const d = 1 + 0.045 * n.noise(v.x * 1.3 + v.y * 0.5, v.z * 1.3 - v.y * 0.4) + 0.02 * n.noise(v.x * 3.1, v.z * 3.1 + v.y * 2);
+    v.multiplyScalar(d);
+    if (v.y < -0.55) v.y = -0.55 + (v.y + 0.55) * 0.45;
+    p.setXYZ(i, v.x, v.y, v.z);
+  }
+  g.computeVertexNormals();
+  return g;
+}
+
+/** Instanced boulders for the tower bodies (prop shading, rock kind). */
+class BoulderBatch {
+  readonly mesh: THREE.Mesh;
+  private geo = new THREE.InstancedBufferGeometry();
+  private a0: THREE.InstancedBufferAttribute;
+  private a1: THREE.InstancedBufferAttribute;
+  count = 0;
+
+  constructor(src: THREE.BufferGeometry, mat: THREE.ShaderMaterial, private cap: number) {
+    this.geo.index = src.index;
+    this.geo.setAttribute('position', src.attributes.position);
+    this.geo.setAttribute('normal', src.attributes.normal);
+    this.geo.setAttribute('aKind', src.attributes.aKind);
+    this.a0 = new THREE.InstancedBufferAttribute(new Float32Array(cap * 4), 4).setUsage(THREE.DynamicDrawUsage);
+    this.a1 = new THREE.InstancedBufferAttribute(new Float32Array(cap * 4), 4).setUsage(THREE.DynamicDrawUsage);
+    this.geo.setAttribute('aI0', this.a0);
+    this.geo.setAttribute('aI1', this.a1);
+    this.geo.instanceCount = 0;
+    this.mesh = new THREE.Mesh(this.geo, mat);
+    this.mesh.frustumCulled = false;
+  }
+
+  begin() { this.count = 0; }
+
+  add(x: number, y: number, z: number, sc: number, rot: number, sy: number, tone: number) {
+    if (this.count >= this.cap) return;
+    const i = this.count++;
+    (this.a0.array as Float32Array).set([x, y, z, sc], i * 4);
+    (this.a1.array as Float32Array).set([rot, sy, 0, tone], i * 4);
+  }
+
+  end() {
+    this.geo.instanceCount = this.count;
+    this.a0.needsUpdate = true;
+    this.a1.needsUpdate = true;
+    this.mesh.visible = this.count > 0;
+  }
+}
+
+/** Instanced hollow heads (see HEAD_FRAG). */
+class HeadBatch {
+  readonly mesh: THREE.Mesh;
+  private geo = new THREE.InstancedBufferGeometry();
+  readonly h0: THREE.InstancedBufferAttribute;
+  readonly h1: THREE.InstancedBufferAttribute;
+  readonly h2: THREE.InstancedBufferAttribute;
+  count = 0;
+
+  constructor(src: THREE.BufferGeometry, mat: THREE.ShaderMaterial, private cap: number) {
+    this.geo.index = src.index;
+    this.geo.setAttribute('position', src.attributes.position);
+    this.geo.setAttribute('normal', src.attributes.normal);
+    const mk = () => new THREE.InstancedBufferAttribute(new Float32Array(cap * 4), 4).setUsage(THREE.DynamicDrawUsage);
+    this.h0 = mk(); this.h1 = mk(); this.h2 = mk();
+    this.geo.setAttribute('aH0', this.h0);
+    this.geo.setAttribute('aH1', this.h1);
+    this.geo.setAttribute('aH2', this.h2);
+    this.geo.instanceCount = 0;
+    this.mesh = new THREE.Mesh(this.geo, mat);
+    this.mesh.frustumCulled = false;
+  }
+
+  begin() { this.count = 0; }
+
+  /** One hollow boulder: `a` = lit (heads) or open (doors), `kind` 0 head / 1 door, `w` = highlight (heads) or the tower's glow (doors). */
+  add(h: TowerBoulder4, bob: number, a: number, home: number, tilt: number, look: number, kind: number, w: number) {
+    if (this.count >= this.cap) return;
+    const i = this.count++;
+    (this.h0.array as Float32Array).set([h.x, h.y + bob, h.z, h.rot], i * 4);
+    (this.h1.array as Float32Array).set([h.sx, h.sy, a, home], i * 4);
+    (this.h2.array as Float32Array).set([tilt, look, kind, w], i * 4);
+  }
+
+  end() {
+    this.geo.instanceCount = this.count;
+    this.h0.needsUpdate = this.h1.needsUpdate = this.h2.needsUpdate = true;
+    this.mesh.visible = this.count > 0;
+  }
+}
+
+type TowerBoulder4 = Tower['head'];
+
+interface HeadState { lit: number; home: number; tilt: number; look: number; hl: number; bob: number; litT: number }
+
+/**
+ * A stretchy glowing arm: a tapered tube along a cubic curve from the
+ * shoulder to a mitten, rebuilt in place per frame.
+ */
+class Arm {
+  readonly group = new THREE.Group();
+  private geo = new THREE.BufferGeometry();
+  private pos: Float32Array;
+  private nrm: Float32Array;
+  readonly hand: THREE.Mesh;
+  private thumb: THREE.Mesh;
+  private static SEG = 30;
+  private static RAD = 10;
+
+  constructor(mat: THREE.ShaderMaterial) {
+    const S = Arm.SEG, R = Arm.RAD;
+    this.pos = new Float32Array((S + 1) * R * 3);
+    this.nrm = new Float32Array((S + 1) * R * 3);
+    const idx: number[] = [];
+    for (let i = 0; i < S; i++) for (let j = 0; j < R; j++) {
+      const a = i * R + j, b = i * R + ((j + 1) % R), c = (i + 1) * R + j, d = (i + 1) * R + ((j + 1) % R);
+      idx.push(a, c, b, b, c, d);
+    }
+    this.geo.setIndex(idx);
+    this.geo.setAttribute('position', new THREE.BufferAttribute(this.pos, 3).setUsage(THREE.DynamicDrawUsage));
+    this.geo.setAttribute('normal', new THREE.BufferAttribute(this.nrm, 3).setUsage(THREE.DynamicDrawUsage));
+    const tube = new THREE.Mesh(this.geo, mat);
+    tube.frustumCulled = false;
+    this.hand = new THREE.Mesh(new THREE.SphereGeometry(1, 20, 14), mat);
+    this.thumb = new THREE.Mesh(new THREE.SphereGeometry(0.42, 12, 8), mat);
+    this.thumb.position.set(0.72, 0.1, 0.35);
+    this.hand.add(this.thumb);
+    this.hand.frustumCulled = this.thumb.frustumCulled = false;
+    this.group.add(tube, this.hand);
+    this.group.visible = false;
+  }
+
+  private p = new THREE.Vector3();
+  private t = new THREE.Vector3();
+  private n0 = new THREE.Vector3();
+  private b0 = new THREE.Vector3();
+
+  /** Shape the arm: a0 shoulder, a1/a2 controls, a3 wrist; `side` flips the thumb. */
+  set(a0: THREE.Vector3, a1: THREE.Vector3, a2: THREE.Vector3, a3: THREE.Vector3, r0: number, r1: number, handR: number, side: number, palm: THREE.Vector3) {
+    const S = Arm.SEG, R = Arm.RAD;
+    const bez = (u: number, out: THREE.Vector3) => {
+      const v = 1 - u;
+      return out.set(0, 0, 0).addScaledVector(a0, v * v * v).addScaledVector(a1, 3 * v * v * u).addScaledVector(a2, 3 * v * u * u).addScaledVector(a3, u * u * u);
+    };
+    const tan = (u: number, out: THREE.Vector3) => {
+      const v = 1 - u;
+      return out.set(0, 0, 0).addScaledVector(a1.clone().sub(a0), 3 * v * v).addScaledVector(a2.clone().sub(a1), 6 * v * u).addScaledVector(a3.clone().sub(a2), 3 * u * u).normalize();
+    };
+    // A rotation-minimising frame down the curve, so the tube never twists.
+    tan(0, this.t);
+    this.n0.set(0, 1, 0);
+    if (Math.abs(this.t.dot(this.n0)) > 0.9) this.n0.set(1, 0, 0);
+    this.n0.sub(this.t.clone().multiplyScalar(this.n0.dot(this.t))).normalize();
+    for (let i = 0; i <= S; i++) {
+      const u = i / S;
+      bez(u, this.p);
+      tan(u, this.t);
+      this.n0.sub(this.t.clone().multiplyScalar(this.n0.dot(this.t))).normalize();
+      this.b0.crossVectors(this.t, this.n0);
+      // Tapered, with a soft swell at the shoulder and the wrist.
+      const r = THREE.MathUtils.lerp(r0, r1, u) * (1 + 0.18 * Math.exp(-u * 14) + 0.1 * Math.exp(-(1 - u) * 18));
+      for (let j = 0; j < R; j++) {
+        const a = (j / R) * Math.PI * 2;
+        const cx = Math.cos(a), cy = Math.sin(a);
+        const k = (i * R + j) * 3;
+        const nx = this.n0.x * cx + this.b0.x * cy, ny = this.n0.y * cx + this.b0.y * cy, nz = this.n0.z * cx + this.b0.z * cy;
+        this.pos[k] = this.p.x + nx * r; this.pos[k + 1] = this.p.y + ny * r; this.pos[k + 2] = this.p.z + nz * r;
+        this.nrm[k] = nx; this.nrm[k + 1] = ny; this.nrm[k + 2] = nz;
+      }
+    }
+    this.geo.attributes.position.needsUpdate = true;
+    this.geo.attributes.normal.needsUpdate = true;
+    // The mitten: a flattened ball at the wrist, its palm toward `palm`.
+    tan(1, this.t);
+    this.hand.position.copy(a3).addScaledVector(this.t, handR * 0.7);
+    this.hand.scale.set(handR * 0.85, handR * 0.62, handR);
+    this.hand.lookAt(this.hand.position.clone().add(this.t));
+    const up = palm.clone().sub(this.hand.position).normalize();
+    this.hand.rotateZ(Math.atan2(up.x, up.y) * 0.3);
+    this.thumb.position.x = 0.72 * side;
+    this.group.visible = true;
+  }
+}
+
+
+/** The tower spirit's height scale (1 = a 1.1 m body). */
+const SPIRIT_SIZE = 1.8;
+const IRON = '#5a4b52';
+const RUST = '#9a5d3e';
+
+/**
+ * The old lock on a sealed tower's door boulder: two iron straps crossed
+ * over the door stone and a big padlock hanging where they cross. It jolts
+ * on each blow and, on the last, bursts off and the straps drop away.
+ */
+class Lock {
+  readonly group = new THREE.Group();
+  private padlock = new THREE.Group();
+  private straps: THREE.Mesh[] = [];
+  readonly pos = new THREE.Vector3();
+  hits = 0;
+  broken = false;
+  private joltX = 0;
+  private joltV = 0;
+  private flyT = -1;
+  private flyV = new THREE.Vector3();
+  private spin = new THREE.Vector3();
+  private strapV: number[] = [];
+
+  constructor(readonly tower: Tower) {
+    const b = tower.boulders[1];
+    const c = new THREE.Vector3(b.x, b.y, b.z);
+    const fwd = new THREE.Vector3(Math.sin(tower.yaw), 0, Math.cos(tower.yaw));
+    const right = new THREE.Vector3(fwd.z, 0, -fwd.x);
+    const iron = makeSolidMaterial(IRON, 0, { keep: 0.35 });
+    const rust = makeSolidMaterial(RUST, 0, { keep: 0.45 });
+    // A point on the door boulder's surface (a smooth ellipsoid, see
+    // buildHead), a hair proud of it: horizontal angle a off the front, up e.
+    const onRock = (a: number, e: number, out = 1.05) => {
+      const dir = fwd.clone().multiplyScalar(Math.cos(a) * Math.cos(e)).addScaledVector(right, Math.sin(a) * Math.cos(e));
+      return c.clone().addScaledVector(dir, b.sx * out).add(new THREE.Vector3(0, Math.sin(e) * b.sy * out, 0));
+    };
+    // The straps cross low on the door stone, so the padlock hangs at a
+    // child's reach: about 1.4 m over the ground at the doorway.
+    const want = tower.door.ground.y + 1.4 + 0.55 * tower.scale;
+    const e0 = Math.asin(THREE.MathUtils.clamp((want - b.y) / (b.sy * 1.05), -0.8, 0.2));
+    const strap = (pts: THREE.Vector3[]) => {
+      const m = new THREE.Mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts), 48, 0.26 * tower.scale, 8), iron);
+      m.frustumCulled = false;
+      this.straps.push(m);
+      this.strapV.push(0);
+      this.group.add(m);
+    };
+    strap(Array.from({ length: 13 }, (_, i) => onRock(-0.95 + (i / 12) * 1.9, e0)));
+    strap(Array.from({ length: 13 }, (_, i) => onRock(0, e0 - 0.1 + (i / 12) * 0.95)));
+    // The padlock: a squat rusty body, a keyhole, an iron shackle through the straps.
+    const at = onRock(0, e0, 1.07);
+    this.pos.copy(at);
+    const s = tower.scale;
+    const bodyG = new RoundedBoxGeometry(1.25 * s, 1.05 * s, 0.5 * s, 3, 0.18 * s);
+    const body = new THREE.Mesh(bodyG, rust);
+    body.position.y = -0.55 * s;
+    const shackle = new THREE.Mesh(new THREE.TorusGeometry(0.38 * s, 0.1 * s, 10, 24, Math.PI), iron);
+    shackle.position.y = -0.05 * s;
+    const key = new THREE.Mesh(new THREE.CircleGeometry(0.1 * s, 16), makeSolidMaterial('#1c1418', 0, { keep: 0.3 }));
+    key.position.set(0, -0.48 * s, 0.26 * s);
+    const slot = new THREE.Mesh(new THREE.PlaneGeometry(0.07 * s, 0.22 * s), key.material);
+    slot.position.set(0, -0.62 * s, 0.26 * s);
+    this.padlock.add(body, shackle, key, slot);
+    this.padlock.position.copy(at).addScaledVector(fwd, 0.25 * s);
+    this.padlock.rotation.y = tower.yaw;
+    for (const m of [body, shackle, key, slot]) m.frustumCulled = false;
+    this.group.add(this.padlock);
+    // Stand-in for the lock's front, where the pick lands.
+    this.pos.addScaledVector(fwd, 0.5 * s).setY(this.pos.y - 0.5 * s);
+  }
+
+  hit() {
+    this.hits++;
+    this.joltV += 5 + this.hits * 2;
+    if (this.hits >= LOCK_HP) this.break();
+  }
+
+  private break() {
+    this.broken = true;
+    this.flyT = 0;
+    const t = this.tower;
+    // Off to one side, clear of you.
+    const side = Math.random() < 0.5 ? -1 : 1;
+    this.flyV.set(Math.sin(t.yaw) * 2 + Math.cos(t.yaw) * side * 6, 8, Math.cos(t.yaw) * 2 - Math.sin(t.yaw) * side * 6);
+    this.spin.set(Math.random() * 8 - 4, Math.random() * 8 - 4, Math.random() * 8 - 4);
+  }
+
+  /** Returns false once it's gone. */
+  update(dt: number, ground: (x: number, z: number) => number): boolean {
+    // A heavy pendulum swing on each blow.
+    this.joltV += (-this.joltX * 60 - this.joltV * 6) * dt;
+    this.joltX += this.joltV * dt;
+    this.padlock.rotation.x = this.joltX * 0.25;
+    if (this.flyT < 0) return true;
+    this.flyT += dt;
+    // The padlock tumbles off; the straps slither down the rock and sink away.
+    if (this.padlock.visible) {
+      this.flyV.y -= 22 * dt;
+      this.padlock.position.addScaledVector(this.flyV, dt);
+      this.padlock.rotation.x += this.spin.x * dt;
+      this.padlock.rotation.z += this.spin.z * dt;
+      const g = ground(this.padlock.position.x, this.padlock.position.z) + 0.3;
+      if (this.padlock.position.y < g) {
+        this.padlock.position.y = g;
+        this.flyV.multiplyScalar(0.4);
+        this.flyV.y = Math.abs(this.flyV.y) * 0.35;
+        this.spin.multiplyScalar(0.5);
+      }
+    }
+    this.straps.forEach((m, i) => {
+      this.strapV[i] += 14 * dt;
+      m.position.y -= this.strapV[i] * dt * (i === 0 ? 1 : 0.7);
+      const k = Math.max(0, 1 - Math.max(0, this.flyT - 0.9) / 0.6);
+      m.scale.setScalar(Math.max(0.001, k));
+    });
+    if (this.flyT > 1.1) {
+      const k = Math.max(0.001, 1 - (this.flyT - 1.1) / 0.4);
+      this.padlock.scale.setScalar(k);
+    }
+    return this.flyT < 3.2;
+  }
+}
+
+/**
+ * A tower's spirit, out and about: a little glowing ghost (a round dome
+ * over a skirt with a wavy hem, no legs, floating), the towers' tall dark
+ * eyes, a smile, and two long stretchy arms that hang down to the ground.
+ * It only exists outside the head while it's being freed.
+ */
+class TowerSpirit {
+  readonly group = new THREE.Group();
+  readonly body = new THREE.Group();
+  readonly pos = new THREE.Vector3();
+  yaw = 0;
+  tilt = 0;
+  squash = 1;
+  size = 1;
+  blink = 1;
+  /** 0 = a small smile .. 1 = a big open grin. */
+  grin = 0;
+  /** The glowing body, with the face painted in (see GHOST_FRAG). */
+  readonly face = new THREE.ShaderMaterial({
+    glslVersion: THREE.GLSL3, vertexShader: GHOST_VERT, fragmentShader: GHOST_FRAG, side: THREE.DoubleSide,
+    uniforms: { ...U, uIsProp: { value: 1 }, uColor: { value: new THREE.Color('#ffbd72') }, uInk: { value: new THREE.Color('#150e13') }, uEmissive: { value: 0.34 }, uBlink: { value: 1 }, uGrin: { value: 0 } },
+  });
+  /** The arms: the same glow, no face. */
+  readonly mat = makeSolidMaterial('#ffbd72', 0.34, { doubleSide: true });
+
+  constructor() {
+    // Dome, sides, a slight flare at the hem (unit height ~1.2).
+    const prof = [[0.64, 0.02], [0.6, 0.18], [0.57, 0.42], [0.55, 0.68], [0.48, 0.9], [0.34, 1.07], [0.17, 1.16], [0.001, 1.19]].map(([r, y]) => new THREE.Vector2(r, y));
+    const g = new THREE.LatheGeometry(prof, 40);
+    // The hem waves: seven soft scallops.
+    const p = g.attributes.position as THREE.BufferAttribute;
+    for (let i = 0; i < p.count; i++) {
+      const y = p.getY(i);
+      if (y > 0.3) continue;
+      const a = Math.atan2(p.getZ(i), p.getX(i));
+      p.setY(i, y + (0.3 - y) / 0.28 * 0.09 * Math.sin(a * 7));
+    }
+    g.computeVertexNormals();
+    const shell = new THREE.Mesh(g, this.face);
+    this.body.add(shell);
+    this.body.traverse((o) => (o.frustumCulled = false));
+    this.group.add(this.body);
+    this.group.visible = false;
+  }
+
+  /** Where its shoulders are, in the world (side -1 left, 1 right). */
+  shoulder(side: number, out: THREE.Vector3) {
+    const s = this.size * SPIRIT_SIZE;
+    const c = Math.cos(this.yaw), sn = Math.sin(this.yaw);
+    return out.set(this.pos.x + c * side * 0.52 * s, this.pos.y + 0.6 * s * this.squash, this.pos.z - sn * side * 0.52 * s);
+  }
+
+  place() {
+    const s = this.size * SPIRIT_SIZE;
+    this.group.position.copy(this.pos);
+    this.body.rotation.set(this.tilt, this.yaw, 0, 'YXZ');
+    this.body.scale.set(s / Math.sqrt(this.squash), s * this.squash, s / Math.sqrt(this.squash));
+    this.face.uniforms.uBlink.value = this.blink;
+    this.face.uniforms.uGrin.value = this.grin;
+  }
+}
+
+interface Freeing { tower: Tower; lock: Lock; t: number; spot: THREE.Vector3; grab: THREE.Vector3; lit: boolean; camYaw: number; cut?: boolean }
+interface Slurp { tower: Tower; phase: 'reach' | 'pull' | 'rise' | 'view' | 'drop' | 'push'; t: number; from: THREE.Vector3; camFrom: THREE.Vector3 }
+interface Chunk { mesh: THREE.Mesh; vel: THREE.Vector3; spin: THREE.Vector3; rest: boolean; t: number }
+
+export class Beacons {
+  readonly group = new THREE.Group();
+  private towers: Tower[] = [];
+  private lit = new Set<number>();
+  private state = new Map<number, HeadState>();
+  private stoneMat = makePropMaterial({ toneVar: 0.2 });
+  private homeMat = makePropMaterial({ toneVar: 0.2 });
+  /** Tower bodies: [variant] near and far, granite and the home tower's sandstone. */
+  private bodyNear: BoulderBatch[];
+  private bodyFar: BoulderBatch[];
+  private homeNear: BoulderBatch[];
+  private homeFar: BoulderBatch[];
+  private headMat: THREE.ShaderMaterial;
+  private headNear: HeadBatch;
+  private headFar: HeadBatch;
+  /** Door boulders: the same shader, both sides (their inside is a room). */
+  private doorMat: THREE.ShaderMaterial;
+  private doorNear: HeadBatch;
+  private doorFar: HeadBatch;
+  private arms: [Arm, Arm];
+  private spirit = new TowerSpirit();
+  private sparks = new Puffs('#ffe7a0', 60, 0.8, 0.9);
+  private dust = new Puffs('#e6d6bd', 40, 0, 0.5);
+  private rubble: Chunk[] = [];
+  private chunkGeo = buildBoulder(41, 1);
+  private lock: Lock | null = null;
+  private free: Freeing | null = null;
+  private slurp: Slurp | null = null;
+  private swingT = -1;
+  private swingCd = 0;
+  /** The doorway you were just put out of: no slurp until you step away. */
+  private disarmed = -1;
+  private time = 0;
+  private refreshT = 0;
+  /** Looking out from a head: yaw / pitch of the view. */
+  private viewYaw = 0;
+  private viewPitch = 0;
+  private near: Tower | null = null;
+  private nearD = Infinity;
+  private camPos = new THREE.Vector3();
+  private camAt = new THREE.Vector3();
+
+  constructor(private d: BeaconDeps) {
+    const homeKinds = KIND_COLORS.map((c) => c.clone());
+    homeKinds[2] = new THREE.Color(HOME_STONE);
+    this.homeMat.uniforms.uKind = { value: homeKinds };
+    // Three boulder shapes, so no two towers are the same stack of pebbles.
+    const seeds = [7, 19, 33];
+    this.bodyNear = seeds.map((sd) => new BoulderBatch(buildBoulder(sd, 3), this.stoneMat, 200));
+    this.bodyFar = seeds.map((sd) => new BoulderBatch(buildBoulder(sd, 1), this.stoneMat, 700));
+    this.homeNear = seeds.map((sd) => new BoulderBatch(buildBoulder(sd, 3), this.homeMat, 12));
+    this.homeFar = seeds.map((sd) => new BoulderBatch(buildBoulder(sd, 1), this.homeMat, 12));
+    this.headMat = new THREE.ShaderMaterial({
+      glslVersion: THREE.GLSL3, vertexShader: HEAD_VERT, fragmentShader: HEAD_FRAG,
+      uniforms: {
+        ...U, uIsProp: { value: 1 },
+        uStone: { value: KIND_COLORS[2] }, uHomeStone: { value: new THREE.Color(HOME_STONE) },
+        uEmber: { value: new THREE.Color('#ff9a45') }, uCore: { value: new THREE.Color('#ffcf73') }, uHollow: { value: new THREE.Color('#150e13') },
+      },
+    });
+    this.headNear = new HeadBatch(buildHead(4), this.headMat, 60);
+    this.headFar = new HeadBatch(buildHead(2), this.headMat, 200);
+    this.doorMat = new THREE.ShaderMaterial({ glslVersion: THREE.GLSL3, vertexShader: HEAD_VERT, fragmentShader: HEAD_FRAG, uniforms: this.headMat.uniforms, side: THREE.DoubleSide });
+    this.doorNear = new HeadBatch(buildHead(4), this.doorMat, 60);
+    this.doorFar = new HeadBatch(buildHead(2), this.doorMat, 200);
+    this.arms = [new Arm(this.spirit.mat), new Arm(this.spirit.mat)];
+    this.group.add(...[...this.bodyNear, ...this.bodyFar, ...this.homeNear, ...this.homeFar].map((b) => b.mesh), this.headNear.mesh, this.headFar.mesh, this.doorNear.mesh, this.doorFar.mesh,
+      this.arms[0].group, this.arms[1].group, this.spirit.group, this.sparks.group, this.dust.group);
+    this.setGen(d.gen, d.saveKey);
+  }
+
+  /** A new world (seed). */
+  setGen(gen: WorldGen, saveKey: string) {
+    this.d.gen = gen;
+    this.d.saveKey = saveKey;
+    this.towers = gen.towers.towers;
+    this.state.clear();
+    for (const t of this.towers) this.state.set(t.id, { lit: 0, home: t.home ? 1 : 0, tilt: 0, look: 0, hl: 0, bob: 0, litT: 99 });
+    this.lit.clear();
+    this.dropLock();
+    this.free = null;
+    if (this.slurp) { this.d.hidePlayer(false); this.slurp = null; }
+    for (const c of this.rubble) this.group.remove(c.mesh);
+    this.rubble = [];
+    this.spirit.group.visible = false;
+    this.load();
+    for (const id of this.lit) this.state.get(id)!.lit = 1;
+    this.refreshT = 0;
+  }
+
+  /** Something's happening that the explorer should just watch (input off). */
+  get busy() { return !!this.free || !!this.slurp; }
+  /** You're the head of this tower (or on your way in or out). */
+  get inside(): Tower | null { return this.slurp?.tower ?? null; }
+  isLit(id: number) { return this.lit.has(id); }
+  tower(id: number) { return this.towers[id]; }
+
+  // ------------------------------------------------------------ actions
+
+  /** What the one action would do right now: smash a lock, or leave the head. */
+  action(mode: string): 'pick' | 'down' | null {
+    if (this.slurp) return this.slurp.phase === 'view' ? 'down' : null;
+    if (this.free || mode !== 'walk' || !this.lock || this.lock.broken) return null;
+    if (!this.d.canSmash()) return null;
+    const b = this.d.body, p = this.lock.pos;
+    return Math.hypot(b.pos.x - p.x, b.pos.z - p.z) < LOCK_REACH && Math.abs(b.pos.y + 1 - p.y) < 4 ? 'pick' : null;
+  }
+
+  /** The action press. Returns true if it was used. */
+  act(mode: string): boolean {
+    const a = this.action(mode);
+    if (a === 'down') { this.leave(); return true; }
+    if (a === 'pick') { this.swing(); return true; }
+    return false;
+  }
+
+  /** Esc while you're the head: out you go. */
+  escape(): boolean {
+    if (this.slurp?.phase !== 'view') return false;
+    this.leave();
+    return true;
+  }
+
+  /** Mouse / touch look while you're the head. */
+  look(dx: number, dy: number) {
+    this.viewYaw -= dx * 0.0022;
+    this.viewPitch = THREE.MathUtils.clamp(this.viewPitch - dy * 0.0022, -0.9, 0.7);
+  }
+
+  /** Debug: light towers instantly ('all', 'none' or an id), with no ceremony. */
+  debugSet(id: number | 'all' | 'none') {
+    if (id === 'none') { this.lit.clear(); for (const s of this.state.values()) { s.lit = 0; s.litT = 99; } }
+    else for (const t of id === 'all' ? this.towers : [this.towers[id]].filter(Boolean)) { this.lit.add(t.id); this.state.get(t.id)!.lit = 1; }
+    this.dropLock();
+    this.save();
+  }
+
+  /** Debug: open the nearest sealed tower's lock at once (the spirit sequence plays). */
+  debugBreak() {
+    if (!this.lock) return;
+    while (!this.lock.broken) this.lock.hit();
+    this.opened(this.lock);
+  }
+
+  // ------------------------------------------------------------ cameras
+
+  /** A shot the orbit camera should take instead of following the explorer, or null. */
+  cinematic(): { focus: THREE.Vector3; yaw: number; pitch: number; dist: number; cut: boolean } | null {
+    const f = this.free;
+    if (!f) return null;
+    const t = f.tower;
+    const b = this.d.body.pos;
+    // Side on, you and the spirit together with the doorway behind; then
+    // pull back in front of the tower and look up it as it climbs, and hold
+    // on the face as it lights.
+    const pair = this.spirit.pos.clone().add(b).multiplyScalar(0.5).setY(Math.max(this.spirit.pos.y, b.y) + 1.0);
+    if (f.t < T_REACH) return { focus: pair, yaw: f.camYaw, pitch: 0.12, dist: 11, cut: false };
+    // A cut (a glide back would pass through the rock) to the whole tower
+    // from the front, as its arms fling up.
+    const h = t.head;
+    const tall = h.y - t.door.ground.y;
+    const mid = new THREE.Vector3(h.x, h.y - tall * 0.42, h.z);
+    const cut = !f.cut;
+    f.cut = true;
+    return { focus: mid, yaw: t.yaw + (f.camYaw - t.yaw) * 0.45, pitch: 0.05, dist: tall * 1.25 + 12, cut };
+  }
+
+  /** While you're the head (or rising into it / dropping out), where the camera is and looks. */
+  viewCam(): { pos: THREE.Vector3; at: THREE.Vector3 } | null {
+    const s = this.slurp;
+    if (!s || (s.phase !== 'rise' && s.phase !== 'view' && s.phase !== 'drop')) return null;
+    const t = s.tower, h = t.head;
+    // You are the head: it turns all the way round with your look, and the
+    // eye rides round with it, just in front of the face.
+    const dir = new THREE.Vector3(Math.sin(this.viewYaw), 0, Math.cos(this.viewYaw));
+    const eye = new THREE.Vector3(h.x, h.y + h.sy * 0.14, h.z).addScaledVector(dir, h.sx * 1.12);
+    const look = new THREE.Vector3(Math.sin(this.viewYaw) * Math.cos(this.viewPitch), Math.sin(this.viewPitch), Math.cos(this.viewYaw) * Math.cos(this.viewPitch));
+    // In: from wherever the camera was, a fast rise up the front of the
+    // tower into the eyes. Out: back down to look in at the doorway.
+    const fwd = new THREE.Vector3(Math.sin(t.yaw), 0, Math.cos(t.yaw));
+    const doorView = new THREE.Vector3(t.door.ground.x, t.door.ground.y + 2.2, t.door.ground.z).addScaledVector(fwd, 9);
+    const from = s.phase === 'rise' ? s.camFrom : doorView;
+    let k = 1;
+    if (s.phase === 'rise') k = THREE.MathUtils.smootherstep(s.t / IN_RISE, 0, 1);
+    if (s.phase === 'drop') k = 1 - THREE.MathUtils.smootherstep(s.t / OUT_DROP, 0, 1);
+    this.camPos.lerpVectors(from, eye, k);
+    // Out in front of the tower on the way, never through it.
+    this.camPos.addScaledVector(fwd, Math.sin(k * Math.PI) * 14);
+    this.camPos.y = THREE.MathUtils.lerp(from.y, eye.y, Math.pow(k, 0.7));
+    const doorLook = new THREE.Vector3(t.door.x, t.door.y, t.door.z);
+    this.camAt.lerpVectors(doorLook, eye.clone().add(look.multiplyScalar(10)), k);
+    return { pos: this.camPos, at: this.camAt };
+  }
+
+  // ------------------------------------------------------------ frame
+
+  update(dt: number, cam: THREE.PerspectiveCamera, mode: string, grounded: boolean, held: boolean) {
+    this.time += dt;
+    const b = this.d.body;
+    let near: Tower | null = null, nearD = Infinity;
+    for (const t of this.towers) {
+      const dd = Math.hypot(b.pos.x - t.x, b.pos.z - t.z);
+      if (dd < nearD) { nearD = dd; near = t; }
+    }
+    this.near = near;
+    this.nearD = nearD;
+    // The lock props exist for the nearest sealed tower only.
+    if (near && !this.lit.has(near.id) && nearD < 160 && !this.free) {
+      if (this.lock?.tower !== near) { this.dropLock(); this.lock = new Lock(near); this.group.add(this.lock.group); }
+    } else if (this.lock && !this.free && (!near || this.lock.tower !== near || nearD > 180)) this.dropLock();
+
+    this.updateSwing(dt, mode, held);
+    if (this.lock && this.lock.broken && !this.free) this.dropLock();
+    if (this.free) this.updateFreeing(dt);
+    else if (this.lock && !this.lock.update(dt, (x, z) => this.d.gen.height(x, z))) this.dropLock();
+    this.updateSlurp(dt, mode, grounded);
+    this.updateRubble(dt);
+    this.updateHeads(dt);
+    this.draw(cam);
+    this.sparks.update(dt);
+    this.dust.update(dt);
+  }
+
+  private dropLock() {
+    if (!this.lock) return;
+    this.group.remove(this.lock.group);
+    this.lock = null;
+  }
+
+  // ------------------------------------------------------------ the lock
+
+  private swing() {
+    if (this.swingT >= 0 || this.swingCd > 0) return;
+    this.swingT = 0;
+    this.swingCd = SWING;
+    this.d.showPick();
+    this.d.rig.chop();
+  }
+
+  private updateSwing(dt: number, mode: string, held: boolean) {
+    this.swingCd -= dt;
+    const b = this.d.body;
+    if (this.action(mode) === 'pick' && held) this.swing();
+    if (this.swingT < 0 || !this.lock) { this.swingT = -1; return; }
+    this.swingT += dt;
+    this.d.showPick();
+    // Square up to the lock.
+    const p = this.lock.pos;
+    const want = Math.atan2(p.x - b.pos.x, p.z - b.pos.z);
+    let dh = want - b.heading;
+    dh = Math.atan2(Math.sin(dh), Math.cos(dh));
+    b.heading += dh * (1 - Math.exp(-14 * dt));
+    // Step in (through the walk mode, so it animates and collides) until
+    // the lock is in arm's length.
+    const gap = Math.hypot(p.x - b.pos.x, p.z - b.pos.z) - LOCK_STAND;
+    if (gap > 0.05 && this.swingT < HIT_AT) {
+      const dl = Math.hypot(p.x - b.pos.x, p.z - b.pos.z) || 1;
+      const sp = Math.min(6, gap * 10);
+      b.vel.x = ((p.x - b.pos.x) / dl) * sp;
+      b.vel.z = ((p.z - b.pos.z) / dl) * sp;
+    }
+    if (this.swingT >= HIT_AT && this.swingT - dt < HIT_AT && !this.lock.broken) {
+      this.lock.hit();
+      this.d.sfx.smash();
+      this.sparks.emit(p, 6, 0.08, 3, undefined, { life: 0.45, rise: -6, drag: 1.5, up: 2.5 });
+      if (this.lock.broken) this.opened(this.lock);
+    }
+    if (this.swingT > SWING - 0.05) this.swingT = -1;
+  }
+
+  /** The lock's off: the door stone gives way and the spirit comes out. */
+  private opened(lock: Lock) {
+    const t = lock.tower;
+    const b = this.d.body;
+    const fwd = new THREE.Vector3(Math.sin(t.yaw), 0, Math.cos(t.yaw));
+    // It'll pop out and land between the door and you.
+    // The camera watches from off to one side of the doorway; the spirit
+    // lands beside you, side by side in that shot.
+    const side = Math.sin(this.time * 7.3) > 0 ? 1 : -1;
+    const camYaw = t.yaw + side * 0.95;
+    const perp = new THREE.Vector3(Math.cos(camYaw), 0, -Math.sin(camYaw));
+    const spot = b.pos.clone().addScaledVector(perp, -side * 3.4).addScaledVector(fwd, 1.5);
+    spot.y = this.d.gen.height(spot.x, spot.z);
+    const s = t.slab;
+    const grab = new THREE.Vector3(s.x, s.y + s.sy * 0.55, s.z).addScaledVector(fwd, s.sx * 0.85);
+    this.free = { tower: t, lock, t: 0, spot, grab, lit: false, camYaw };
+    this.lit.add(t.id); // saved now: it's open and its spirit is out
+    this.save();
+    this.d.sfx.thud();
+    // The door stone crumbles out in a cloud of dust.
+    const door = new THREE.Vector3(t.door.x, t.door.y, t.door.z);
+    for (let i = 0; i < 6; i++) this.dust.emit(door.clone().add(new THREE.Vector3((Math.random() - 0.5) * 5, (Math.random() - 0.5) * 5, (Math.random() - 0.5) * 5)), 3, 0.9, 2.5);
+    const right = new THREE.Vector3(fwd.z, 0, -fwd.x);
+    for (let i = 0; i < 6; i++) {
+      const sc = (0.25 + Math.random() * 0.3) * t.scale;
+      const mesh = propMesh(this.chunkGeo, this.stoneMat, { sc, rot: Math.random() * 6, sy: 0.7, tone: 0.4 + Math.random() * 0.2 });
+      mesh.frustumCulled = false;
+      mesh.position.copy(door).add(new THREE.Vector3((Math.random() - 0.5) * 4, (Math.random() - 0.5) * 4, 0));
+      // Tumbling out and off to either side of the doorway, not onto the path in.
+      const v = fwd.clone().multiplyScalar(2 + Math.random() * 2).addScaledVector(right, (i % 2 ? 1 : -1) * (4 + Math.random() * 3)).add(new THREE.Vector3(0, 3 + Math.random() * 3, 0));
+      this.rubble.push({ mesh, vel: v, spin: new THREE.Vector3(Math.random() * 6 - 3, 0, Math.random() * 6 - 3), rest: false, t: 0 });
+      this.group.add(mesh);
+    }
+  }
+
+  private updateRubble(dt: number) {
+    this.rubble = this.rubble.filter((c) => { if (c.t > 9) { this.group.remove(c.mesh); return false; } return true; });
+    for (const c of this.rubble) {
+      c.t += dt;
+      // Settle, then sink away into the grass.
+      if (c.t > 6) c.mesh.position.y -= dt * 0.6;
+      if (c.rest) continue;
+      c.vel.y -= 20 * dt;
+      c.mesh.position.addScaledVector(c.vel, dt);
+      c.mesh.rotation.x += c.spin.x * dt;
+      c.mesh.rotation.z += c.spin.z * dt;
+      const g = this.d.gen.height(c.mesh.position.x, c.mesh.position.z) - 0.2;
+      if (c.mesh.position.y < g) {
+        c.mesh.position.y = g;
+        c.vel.multiplyScalar(0.35);
+        c.vel.y = Math.abs(c.vel.y) * 0.4;
+        c.spin.multiplyScalar(0.4);
+        if (c.vel.length() < 0.8) c.rest = true;
+      }
+    }
+  }
+
+  // ------------------------------------------------------------ freeing the spirit
+
+  /**
+   * How far the stack reaches out along the face direction at height y,
+   * measured from the tower's centre: the widest boulder at that height.
+   * The spirit climbs just outside this line, so it never passes through rock.
+   */
+  private frontAt(t: Tower, y: number): number {
+    const fx = Math.sin(t.yaw), fz = Math.cos(t.yaw);
+    let out = 0;
+    const all = [...t.boulders.slice(0, t.boulders.indexOf(t.slab) + 1), t.head];
+    for (const b of all) {
+      const k = (y - b.y) / b.sy;
+      if (k < -0.55 || k > 1) continue;
+      const w = b.sx * Math.sqrt(Math.max(0, 1 - k * k)) * 1.04;
+      out = Math.max(out, (b.x - t.x) * fx + (b.z - t.z) * fz + w);
+    }
+    return out;
+  }
+
+  /** The ledges it climbs: the upper shoulder of each boulder up the front, then the capstone's lip. */
+  private ledges(t: Tower): number[] {
+    const top = t.boulders.indexOf(t.slab);
+    const ys: number[] = [];
+    for (let k = 1; k < top; k++) ys.push(t.boulders[k].y + t.boulders[k].sy * 0.72);
+    ys.push(t.slab.y + t.slab.sy * 0.55);
+    return ys;
+  }
+
+  private updateFreeing(dt: number) {
+    const f = this.free!;
+    f.t += dt;
+    const t = f.tower, sp = this.spirit, b = this.d.body;
+    f.lock.update(dt, (x, z) => this.d.gen.height(x, z));
+    const fwd = new THREE.Vector3(Math.sin(t.yaw), 0, Math.cos(t.yaw));
+    const right = new THREE.Vector3(fwd.z, 0, -fwd.x);
+    const door = new THREE.Vector3(t.door.x, t.door.y, t.door.z);
+    const u = f.t;
+    // Watch it: the explorer turns to follow.
+    const want = Math.atan2(sp.pos.x - b.pos.x, sp.pos.z - b.pos.z);
+    let dh = want - b.heading;
+    dh = Math.atan2(Math.sin(dh), Math.cos(dh));
+    if (u > 0.3) b.heading += dh * (1 - Math.exp(-5 * dt));
+    b.vel.set(0, b.vel.y, 0);
+
+    const S = SPIRIT_SIZE;
+    const ledges = this.ledges(t);
+    const lipY = ledges[ledges.length - 1];
+    const reachEnd = T_REACH + ARMS_UP, holdEnd = reachEnd + ARMS_HOLD, climbEnd = holdEnd + HAUL;
+    const overEnd = climbEnd + 0.7, peekEnd = overEnd + 0.5, inEnd = peekEnd + 0.65, end = inEnd + 1.8;
+    let climbing = false;
+    // Along the front meridian, just clear of the rock at height y.
+    const outside = (y: number, gap: number) => new THREE.Vector3(t.x, y, t.z).addScaledVector(fwd, this.frontAt(t, y) + gap);
+    const hover = (p: THREE.Vector3) => { p.y = this.d.gen.height(p.x, p.z) + 0.35 + Math.sin(this.time * 2.6) * 0.12; return p; };
+
+    let armUp = 0; // 0 = hanging to the ground .. 1 = flung up (happy)
+    let hands: [THREE.Vector3, THREE.Vector3] | null = null; // hands on something
+    let handsK = 1;
+    sp.group.visible = u > 0.25 && u < inEnd;
+    sp.blink = 1;
+    sp.tilt = 0;
+    sp.squash = 1;
+    sp.size = 1;
+    sp.grin = 0;
+    const toMe = Math.atan2(b.pos.x - sp.pos.x, b.pos.z - sp.pos.z);
+    const toTower = t.yaw + Math.PI;
+    if (u < T_OUT) {
+      // Swoops out of the doorway.
+      const k = THREE.MathUtils.clamp((u - 0.25) / (T_OUT - 0.25), 0, 1);
+      const land = hover(f.spot.clone());
+      sp.pos.lerpVectors(door.clone().addScaledVector(fwd, -1), land, k);
+      sp.pos.y += Math.sin(k * Math.PI) * 2.2;
+      sp.size = 0.4 + 0.6 * k;
+      sp.yaw = t.yaw;
+      sp.tilt = (1 - k) * 1.2;
+    } else if (u < T_LOOK) {
+      // Settles, blinks.
+      const k = (u - T_OUT) / (T_LOOK - T_OUT);
+      hover(sp.pos.copy(f.spot));
+      sp.squash = 1 - 0.3 * Math.sin(Math.min(1, k * 2) * Math.PI) * (1 - k);
+      sp.yaw = t.yaw;
+      if (u - dt < T_OUT) { this.dust.emit(f.spot, 6, 0.35, 1.5); this.d.sfx.thud(); }
+    } else if (u < T_HAPPY) {
+      // Looks about, finds you. A slow blink.
+      const k = (u - T_LOOK) / (T_HAPPY - T_LOOK);
+      hover(sp.pos.copy(f.spot));
+      sp.yaw = THREE.MathUtils.lerp(t.yaw + Math.sin(k * 7) * 0.7 * (1 - k), toMe, THREE.MathUtils.smoothstep(k, 0.4, 1));
+      sp.blink = Math.abs(k - 0.45) < 0.05 ? 0 : 1;
+      sp.grin = THREE.MathUtils.smoothstep(k, 0.6, 1);
+    } else if (u < T_TURN) {
+      // Happy: two bouncy floats with its arms flung up, a little wiggle.
+      const k = (u - T_HAPPY) / (T_TURN - T_HAPPY);
+      const hop = Math.abs(Math.sin(k * Math.PI * 2.5));
+      hover(sp.pos.copy(f.spot));
+      sp.pos.y += hop * 0.9;
+      sp.squash = 1 + (hop - 0.5) * 0.18;
+      // Toward you and the camera both, so its face shows.
+      let dc = f.camYaw - toMe;
+      dc = Math.atan2(Math.sin(dc), Math.cos(dc));
+      sp.yaw = toMe + dc * 0.6 + Math.sin(u * 9) * 0.15;
+      sp.grin = 1;
+      armUp = THREE.MathUtils.smoothstep(k, 0, 0.12) * (1 - THREE.MathUtils.smoothstep(k, 0.85, 1));
+      if (u - dt < T_HAPPY) this.d.sfx.chirp(true);
+      if (u - dt < T_HAPPY + 0.75 && u >= T_HAPPY + 0.75) this.d.sfx.chirp(true);
+      if (Math.random() < dt * 10) this.sparks.emit(sp.pos.clone().setY(sp.pos.y + 1.5 * S), 1, 0.06, 1.2);
+    } else if (u < T_REACH) {
+      // Floats to the foot of the tower's face and looks all the way up.
+      const k = (u - T_TURN) / (T_REACH - T_TURN);
+      const foot = hover(outside(t.door.ground.y + 1, 1.2));
+      sp.pos.lerpVectors(f.spot, foot, THREE.MathUtils.smoothstep(k, 0, 0.7));
+      hover(sp.pos);
+      let dy = toTower - toMe;
+      dy = Math.atan2(Math.sin(dy), Math.cos(dy));
+      sp.yaw = toMe + dy * THREE.MathUtils.smoothstep(k, 0, 0.5);
+      sp.tilt = -0.5 * THREE.MathUtils.smoothstep(k, 0.4, 0.9);
+      sp.squash = 1 - 0.25 * THREE.MathUtils.smoothstep(k, 0.6, 1);
+      sp.grin = 1 - k;
+    } else if (u < climbEnd) {
+      // Both very long arms stretch all the way up the face of the tower to
+      // the capstone's lip and grab it; then it hauls itself up, slowly, in
+      // heaves, hanging just outside the rock the whole way.
+      climbing = true;
+      const y0 = t.door.ground.y + 1.2;
+      const y1 = lipY - 1.5 * S;
+      const gap = 1.1 * S * 0.6 + 0.4;
+      sp.yaw = toTower;
+      sp.tilt = -0.3;
+      let reachK = 1, haul = 0;
+      if (u < reachEnd) {
+        const k = (u - T_REACH) / ARMS_UP;
+        reachK = 1 - Math.pow(1 - k, 2.2);
+        sp.squash = 1 - 0.2 * Math.sin(k * Math.PI);
+        if (u - dt < T_REACH) this.d.sfx.whoosh();
+      } else if (u < holdEnd) {
+        // A tug to test the grip.
+        const k = (u - reachEnd) / ARMS_HOLD;
+        sp.squash = 1 - 0.15 * Math.sin(k * Math.PI);
+        if (u - dt < reachEnd) { this.d.sfx.thud(); this.sparks.emit(outside(lipY, 0.2), 5, 0.08, 1.4); }
+      } else {
+        // Three heaves: quick pulls with a pause between.
+        const k = (u - holdEnd) / HAUL;
+        const n = 3;
+        const i = Math.min(n - 1, Math.floor(k * n));
+        const kk = k * n - i;
+        haul = (i + THREE.MathUtils.smootherstep(kk, 0.05, 0.75)) / n;
+        sp.squash = 1 + 0.3 * Math.sin(THREE.MathUtils.smoothstep(kk, 0.05, 0.75) * Math.PI);
+        if (kk - (dt * n) / HAUL < 0.05 && kk >= 0.05) this.d.sfx.whoosh();
+        if (Math.random() < dt * 14) this.sparks.emit(sp.pos.clone().setY(sp.pos.y + 0.6 * S), 1, 0.06, 0.5);
+      }
+      sp.pos.copy(outside(THREE.MathUtils.lerp(y0, y1, haul), gap));
+      // The hands climb the face ahead of it (never through it) up to the lip.
+      const hy = THREE.MathUtils.lerp(sp.pos.y + 0.6 * S, lipY, reachK);
+      const hp = outside(hy, 0.2);
+      hands = [hp.clone().addScaledVector(right, -0.8 * S), hp.clone().addScaledVector(right, 0.8 * S)];
+      handsK = 1;
+    } else if (u < overEnd) {
+      // Over the lip and up onto the capstone, in front of the head.
+      const k = THREE.MathUtils.smootherstep(u, climbEnd, overEnd);
+      const from = outside(lipY - 1.5 * S, 1.1 * S * 0.6 + 0.4);
+      const s0 = t.slab;
+      const onTop = new THREE.Vector3(s0.x, s0.y + s0.sy * 0.95, s0.z).addScaledVector(fwd, s0.sx * 0.45);
+      sp.pos.lerpVectors(from, onTop, k);
+      sp.pos.y += Math.sin(k * Math.PI) * 1.5;
+      sp.yaw = toTower;
+      sp.tilt = -0.3 * (1 - k);
+      const lp = outside(lipY, 0.2);
+      hands = [lp.clone().addScaledVector(right, -0.8 * S), lp.clone().addScaledVector(right, 0.8 * S)];
+      handsK = 1 - THREE.MathUtils.smoothstep(k, 0.5, 1);
+    } else if (u < peekEnd) {
+      // A look up at its new home.
+      const s0 = t.slab;
+      sp.pos.set(s0.x, s0.y + s0.sy * 0.95, s0.z).addScaledVector(fwd, s0.sx * 0.45);
+      sp.pos.y += Math.sin(((u - overEnd) / (peekEnd - overEnd)) * Math.PI) * 0.4;
+      sp.yaw = toTower;
+      sp.tilt = -0.45;
+      sp.grin = 1;
+    } else if (u < inEnd) {
+      // Squeezes in through an eyehole.
+      const k = (u - peekEnd) / (inEnd - peekEnd);
+      const h = t.head, s0 = t.slab;
+      const from = new THREE.Vector3(s0.x, s0.y + s0.sy * 0.95, s0.z).addScaledVector(fwd, s0.sx * 0.45);
+      const eye = new THREE.Vector3(h.x, h.y + h.sy * 0.12, h.z).addScaledVector(fwd, h.sx * 0.92).addScaledVector(right, -0.27 * h.sx);
+      sp.pos.lerpVectors(from, eye, k);
+      sp.pos.y += Math.sin(k * Math.PI) * 1.2 - k * 0.6 * S;
+      sp.size = 1 - 0.85 * k;
+      sp.squash = 1 + 0.6 * k;
+      sp.yaw = toTower;
+    } else if (!f.lit) {
+      // The head blazes on.
+      f.lit = true;
+      const s = this.state.get(t.id)!;
+      s.litT = 0;
+      const h = t.head;
+      this.sparks.emit(new THREE.Vector3(h.x, h.y, h.z).addScaledVector(fwd, h.sx), 24, 0.25, 7);
+      this.d.sfx.whoosh();
+      this.d.sfx.chirp(true);
+    }
+    sp.place();
+    // Arms: long enough to hang to the ground, flung up for joy, or up the tower.
+    if (sp.group.visible) {
+      const s = sp.size * S;
+      for (let k = 0; k < 2; k++) {
+        const side = k === 0 ? -1 : 1;
+        const sh = sp.shoulder(side, new THREE.Vector3());
+        const c = Math.cos(sp.yaw), sn = Math.sin(sp.yaw);
+        const outward = new THREE.Vector3(c * side, 0, -sn * side);
+        const ahead = new THREE.Vector3(Math.sin(sp.yaw), 0, Math.cos(sp.yaw));
+        // Hanging: down to just off the ground, swaying.
+        const g = this.d.gen.height(sh.x, sh.z);
+        const sway = Math.sin(this.time * 2.2 + k * 1.7) * 0.15 * s;
+        const down = sh.clone().addScaledVector(outward, 0.3 * s).addScaledVector(ahead, 0.1 * s + sway);
+        down.y = Math.min(sh.y - 0.2 * s, g + 0.12 * sp.size);
+        const up = sh.clone().addScaledVector(outward, (1.2 + 0.2 * Math.sin(this.time * 11 + k * 2)) * s).add(new THREE.Vector3(0, (1.4 + 0.25 * Math.sin(this.time * 14 + k * 2)) * s, 0));
+        let hand = down.lerp(up, armUp);
+        if (hands) hand = hand.lerp(hands[k], handsK);
+        const len = sh.distanceTo(hand);
+        let a1 = sh.clone().addScaledVector(outward, Math.min(len * 0.2, 0.8 * s));
+        let a2 = hand.clone().addScaledVector(hand.y < sh.y ? outward : ahead, Math.min(len * 0.12, 0.6 * s)).add(new THREE.Vector3(0, hand.y < sh.y ? Math.min(len * 0.15, 0.5 * s) : -Math.min(len * 0.15, 3), 0));
+        if (climbing) {
+          // Up the tower's face: the curve's controls sit well out from the
+          // rock at their heights, so the long arm bows round the bulges.
+          a1 = outside(THREE.MathUtils.lerp(sh.y, hand.y, 0.33), 1.8).addScaledVector(right, side * 1.0 * S);
+          a2 = outside(THREE.MathUtils.lerp(sh.y, hand.y, 0.72), 1.4).addScaledVector(right, side * 0.9 * S);
+        }
+        const thin = THREE.MathUtils.clamp(1.2 - len / 90, 0.7, 1);
+        this.arms[k].set(sh, a1, a2, hand, 0.1 * s * thin, 0.075 * s * thin, 0.15 * s, -side, hand.clone().add(new THREE.Vector3(0, 1, 0)));
+      }
+    } else if (!this.slurp) this.arms[0].group.visible = this.arms[1].group.visible = false;
+    if (u >= end) {
+      this.free = null;
+      // You're standing at its door: step away before it'll take you in.
+      this.disarmed = t.id;
+      sp.group.visible = false;
+      this.arms[0].group.visible = this.arms[1].group.visible = false;
+      this.dropLock();
+    }
+  }
+
+  // ------------------------------------------------------------ in and out of the head
+
+  /**
+   * A point in a door boulder's own frame, normalised so its shell is the
+   * unit sphere: x right, y up, z out of the doorway.
+   */
+  private shellQ(t: Tower, x: number, y: number, z: number, out = new THREE.Vector3()) {
+    const b = t.boulders[1];
+    const c = Math.cos(t.yaw), sn = Math.sin(t.yaw);
+    const lx = x - b.x, lz = z - b.z;
+    return out.set((lx * c - lz * sn) / b.sx, (y - b.y) / b.sy, (lx * sn + lz * c) / b.sx);
+  }
+
+  /** Is this direction (in the shell's frame, unit) inside the doorway, with `margin` to spare? */
+  private inDoorway(d: THREE.Vector3, margin: number) {
+    if (d.z < 0.4) return false;
+    const cz = 0.98 / Math.hypot(0.2, 0.98), cy = -0.2 / Math.hypot(0.2, 0.98);
+    // The doorway's own frame (see doorR in HEAD_FRAG): right = x, up = cross(c, right).
+    const ux = d.x, uy = d.y * cz - d.z * cy;
+    const r = Math.pow(Math.pow(Math.abs(ux) / 0.3, 3) + Math.pow(Math.abs(uy) / 0.44, 3), 1 / 3);
+    return r < 1 - margin;
+  }
+
+  /** Is the explorer inside this tower's hollow door boulder? */
+  private inRoom(t: Tower, x: number, y: number, z: number, deep = 0.95) {
+    // Horizontally, as a fraction of the shell's radius (its centre is high above your head).
+    const q = this.shellQ(t, x, y + 1.3, z);
+    return Math.hypot(q.x, q.z) < deep && q.y > -0.8 && q.y < 0.6;
+  }
+
+  /**
+   * The door boulder is a hollow shell: solid while it's sealed, a room with
+   * a doorway once it's open. Pushes the body out of the shell's wall.
+   */
+  collide(pos: THREE.Vector3, vel: THREE.Vector3, r: number) {
+    const t = this.near;
+    if (!t || this.nearD > 60 || this.slurp) return;
+    const b = t.boulders[1];
+    const q = this.shellQ(t, pos.x, pos.y + 1.3, pos.z);
+    const d = q.length();
+    // Below the flattened bottom there's no wall (it's all floor and ground).
+    if (q.y < -0.56) return;
+    const open = this.lit.has(t.id);
+    const rn = r / b.sx;
+    const dir = q.clone().divideScalar(d || 1);
+    if (open && this.inDoorway(dir, 0.12)) return;
+    const inner = 0.86;
+    let target: number;
+    if (!open) { if (d >= 1 + rn) return; target = 1 + rn; }
+    else if (d > 1 + rn || d < inner - rn) return;
+    else target = d > (1 + inner) / 2 ? 1 + rn : inner - rn;
+    // Push along the horizontal only (no popping up or down).
+    const qh = Math.hypot(q.x, q.z) || 1e-4;
+    const want = Math.sqrt(Math.max(0, target * target - q.y * q.y));
+    const k = want / qh;
+    const c = Math.cos(t.yaw), sn = Math.sin(t.yaw);
+    const nx = q.x * k * b.sx, nz = q.z * k * b.sx;
+    const wx = b.x + nx * c + nz * sn, wz = b.z - nx * sn + nz * c;
+    const px = wx - pos.x, pz = wz - pos.z;
+    const pl = Math.hypot(px, pz);
+    if (pl < 1e-5) return;
+    pos.x = wx; pos.z = wz;
+    const ux = px / pl, uz = pz / pl;
+    const into = vel.x * ux + vel.z * uz;
+    if (into < 0) { vel.x -= into * ux; vel.z -= into * uz; }
+  }
+
+  /**
+   * Floors: the buried base boulder is a low mound you walk over (exactly
+   * its rendered dome), and the door boulder's top is floor if you come down
+   * on it from above.
+   */
+  surface(x: number, z: number, feetY: number): number {
+    const t = this.near;
+    if (!t || this.nearD > 60) return -Infinity;
+    let best = -Infinity;
+    const base = t.boulders[0];
+    const bd = Math.hypot(x - base.x, z - base.z) / (base.sx * 0.97);
+    if (bd < 1) {
+      const top = base.y + base.sy * Math.sqrt(1 - bd * bd);
+      if (feetY >= top - 0.9) best = top;
+    }
+    const b = t.boulders[1];
+    const q = this.shellQ(t, x, b.y, z);
+    const qh = Math.hypot(q.x, q.z);
+    if (qh >= 0.98) return best;
+    const top = b.y + b.sy * Math.sqrt(1 - qh * qh);
+    return feetY >= top - 0.6 ? Math.max(best, top) : best;
+  }
+
+  /** Inside the room, keep the camera inside too (unless it's looking in through the doorway). */
+  clampCamera(cam: THREE.Vector3, focus: THREE.Vector3) {
+    const t = this.near;
+    if (!t || this.nearD > 60 || !this.lit.has(t.id) || this.inside || this.free) return;
+    // Only when you're the one in the room (not a cinematic's focus).
+    const b = this.d.body.pos;
+    if (!this.inRoom(t, b.x, b.y, b.z, 0.9)) return;
+    const qf = this.shellQ(t, focus.x, focus.y, focus.z);
+    if (qf.length() > 0.9) return;
+    const qc = this.shellQ(t, cam.x, cam.y, cam.z);
+    if (qc.length() < 0.8) return;
+    // Where the focus -> camera line leaves the hollow.
+    let lo = 0, hi = 1;
+    const tmp = new THREE.Vector3();
+    for (let i = 0; i < 18; i++) {
+      const m = (lo + hi) / 2;
+      tmp.lerpVectors(qf, qc, m);
+      if (tmp.length() < 0.8) lo = m; else hi = m;
+    }
+    tmp.lerpVectors(qf, qc, lo).normalize();
+    if (this.inDoorway(tmp, 0.05)) return;
+    cam.lerpVectors(focus, cam, Math.max(0, lo - 0.04));
+  }
+
+  private updateSlurp(dt: number, mode: string, grounded: boolean) {
+    const b = this.d.body;
+    const near = this.near;
+    if (this.disarmed >= 0) {
+      const t = this.towers[this.disarmed];
+      if (!this.inRoom(t, b.pos.x, b.pos.y, b.pos.z, 0.6) && Math.hypot(b.pos.x - t.door.ground.x, b.pos.z - t.door.ground.z) > 3) this.disarmed = -1;
+    }
+    // Walk into the room of a lit tower, well in, and it takes you up.
+    if (!this.slurp && !this.free && near && this.lit.has(near.id) && mode === 'walk' && grounded && near.id !== this.disarmed && this.inRoom(near, b.pos.x, b.pos.y, b.pos.z, 0.55)) {
+      this.slurp = { tower: near, phase: 'reach', t: 0, from: b.pos.clone(), camFrom: new THREE.Vector3() };
+      this.d.sfx.whoosh();
+    }
+    const s = this.slurp;
+    if (!s) return;
+    s.t += dt;
+    const t = s.tower;
+    const db = t.boulders[1];
+    const fwd = new THREE.Vector3(Math.sin(t.yaw), 0, Math.cos(t.yaw));
+    const right = new THREE.Vector3(fwd.z, 0, -fwd.x);
+    // The spirit's hands come down the shaft from high in the dome.
+    const high = new THREE.Vector3(db.x, db.y + db.sy * 0.72, db.z);
+    const floorAt = new THREE.Vector3(db.x, 0, db.z).addScaledVector(fwd, db.sx * 0.1);
+    floorAt.y = this.d.gen.height(floorAt.x, floorAt.z);
+    const chest = b.pos.clone().setY(b.pos.y + 1.0);
+    let hands = 0; // how far the arms reach down (0..1)
+    if (s.phase === 'reach') {
+      hands = 1 - Math.pow(1 - Math.min(1, s.t / IN_REACH), 3);
+      if (s.t >= IN_REACH) { s.phase = 'pull'; s.t = 0; s.from.copy(b.pos); this.d.setMode('carried'); }
+    } else if (s.phase === 'pull') {
+      const k = Math.min(1, s.t / IN_PULL);
+      b.pos.lerpVectors(s.from, high, k * k);
+      hands = 1;
+      if (s.t >= IN_PULL) {
+        s.phase = 'rise'; s.t = 0;
+        s.camFrom.copy(this.camNow);
+        this.d.hidePlayer(true);
+        this.viewYaw = t.yaw;
+        this.viewPitch = -0.08;
+        this.d.sfx.whoosh();
+      }
+    } else if (s.phase === 'rise') {
+      if (s.t >= IN_RISE) { s.phase = 'view'; s.t = 0; this.d.sfx.chirp(false); }
+    } else if (s.phase === 'drop') {
+      if (s.t >= OUT_DROP) {
+        s.phase = 'push'; s.t = 0;
+        b.pos.copy(high);
+        b.heading = t.yaw;
+        this.d.hidePlayer(false);
+        this.lowered = t.yaw;
+      }
+    } else if (s.phase === 'push') {
+      // Lowered back down onto the floor of the room, facing the doorway.
+      const k = Math.min(1, s.t / OUT_PUSH);
+      b.pos.lerpVectors(high, floorAt, 1 - (1 - k) * (1 - k));
+      b.heading = t.yaw;
+      hands = 1 - THREE.MathUtils.smoothstep(k, 0.7, 1);
+      if (s.t >= OUT_PUSH) {
+        b.pos.y = floorAt.y;
+        this.d.setMode('walk');
+        b.vel.set(0, 0, 0);
+        this.disarmed = t.id;
+        this.slurp = null;
+      }
+    }
+    if (hands > 0.01 && !this.free) {
+      for (let k = 0; k < 2; k++) {
+        const side = k === 0 ? -1 : 1;
+        const sh = high.clone().addScaledVector(right, side * 1.2).add(new THREE.Vector3(0, 1.5, 0));
+        const grip = chest.clone().addScaledVector(right, side * 0.45);
+        const hand = sh.clone().lerp(grip, hands);
+        const len = sh.distanceTo(hand);
+        const a1 = sh.clone().addScaledVector(right, side * Math.min(len * 0.2, 1.5));
+        const a2 = hand.clone().add(new THREE.Vector3(0, Math.min(len * 0.25, 3), 0));
+        this.arms[k].set(sh, a1, a2, hand, 0.18 * SPIRIT_SIZE, 0.13 * SPIRIT_SIZE, 0.28, -side, chest);
+      }
+    } else if (!this.free) this.arms[0].group.visible = this.arms[1].group.visible = false;
+  }
+
+  /** The camera's last position (for the rise into the head to start from). */
+  camNow = new THREE.Vector3();
+  /** Set (to the doorway's direction) when you've just been put back in a room: the camera cuts to look in through the doorway. */
+  lowered: number | null = null;
+
+  private leave() {
+    const s = this.slurp;
+    if (!s || s.phase !== 'view') return;
+    s.phase = 'drop';
+    s.t = 0;
+    this.d.sfx.whoosh();
+  }
+
+  // ------------------------------------------------------------ the heads
+
+  private updateHeads(dt: number) {
+    const b = this.d.body;
+    const e = (r: number) => 1 - Math.exp(-r * dt);
+    const inside = this.inside;
+    for (const t of this.towers) {
+      const s = this.state.get(t.id)!;
+      // Lit once its spirit is in the head (a tower being freed isn't yet).
+      const lit = this.lit.has(t.id) && !(this.free?.tower === t && !this.free.lit);
+      s.litT += dt;
+      s.lit += ((lit ? 1 : 0) - s.lit) * e(lit ? 4 : 8);
+      s.bob = 0;
+      // Dead stone until it's lit: no watching, no stirring. The one you're
+      // inside keeps still too (you're looking out of it).
+      if (inside === t && this.slurp && this.slurp.phase !== 'reach' && this.slurp.phase !== 'pull') {
+        // You are this head: it turns with your look.
+        let dy = this.viewYaw - t.yaw;
+        dy = Math.atan2(Math.sin(dy), Math.cos(dy));
+        let cur = s.look;
+        cur += Math.atan2(Math.sin(dy - cur), Math.cos(dy - cur));
+        s.look = cur;
+        s.tilt = -this.viewPitch * 0.5;
+      } else if (t !== this.near || this.nearD > 90 || !lit || inside === t) {
+        s.look += (0 - s.look) * e(2);
+        s.tilt += (0 - s.tilt) * e(2);
+      } else {
+        const h = t.head;
+        const dx = b.pos.x - h.x, dz = b.pos.z - h.z;
+        let rel = Math.atan2(dx, dz) - t.yaw;
+        rel = Math.atan2(Math.sin(rel), Math.cos(rel));
+        const want = THREE.MathUtils.clamp(rel, -0.45, 0.45) * THREE.MathUtils.smoothstep(Math.hypot(dx, dz), 2, 12);
+        s.look += (want - s.look) * e(3);
+        const down = Math.atan2(h.y - (b.pos.y + 1.2), Math.max(4, Math.hypot(dx, dz)));
+        s.tilt += (THREE.MathUtils.clamp(down * 0.45, -0.1, 0.32) - s.tilt) * e(3);
+      }
+      // A happy hop as it comes alive.
+      if (s.litT < 1.4) s.bob = Math.sin(s.litT * 9) * Math.exp(-s.litT * 2.5) * 0.9 * t.scale;
+    }
+  }
+
+  // ------------------------------------------------------------ drawing
+
+  private draw(cam: THREE.PerspectiveCamera) {
+    const cx = cam.position.x, cz = cam.position.z;
+    this.refreshT -= 1;
+    // Bodies only change with distance; refresh them every few frames.
+    const bodies = this.refreshT <= 0;
+    const all = [...this.bodyNear, ...this.bodyFar, ...this.homeNear, ...this.homeFar];
+    if (bodies) {
+      this.refreshT = 10;
+      for (const bb of all) bb.begin();
+    }
+    this.headNear.begin(); this.headFar.begin(); this.doorNear.begin(); this.doorFar.begin();
+    for (const t of this.towers) {
+      const d = Math.hypot(t.x - cx, t.z - cz);
+      if (d > DRAW) continue;
+      const s = this.state.get(t.id)!;
+      if (bodies) {
+        const [bn, bf] = t.home ? [this.homeNear, this.homeFar] : [this.bodyNear, this.bodyFar];
+        const set = d < NEAR_LOD ? bn : bf;
+        t.boulders.forEach((bo, i) => {
+          if (i === 1) return; // the door boulder is drawn hollow, below
+          const h = (i * 7 + t.id * 3) % 3;
+          set[h].add(bo.x, bo.y, bo.z, bo.sx, bo.rot, bo.sy / bo.sx, 0.3 + 0.4 * (((i * 0.37 + t.id * 0.61) % 1)));
+        });
+      }
+      (d < NEAR_LOD ? this.headNear : this.headFar).add(t.head, s.bob, s.lit, s.home, s.tilt, s.look, 0, s.hl);
+      const open = this.lit.has(t.id) ? 1 : 0;
+      (d < NEAR_LOD ? this.doorNear : this.doorFar).add(t.boulders[1], 0, open, s.home, 0, 0, 1, s.lit);
+    }
+    if (bodies) for (const bb of all) bb.end();
+    this.headNear.end(); this.headFar.end(); this.doorNear.end(); this.doorFar.end();
+  }
+
+  // ------------------------------------------------------------ save
+
+  private key() { return `fjellheim.towers.${this.d.saveKey}`; }
+
+  private save() {
+    try { localStorage.setItem(this.key(), JSON.stringify([...this.lit])); } catch { /* private mode */ }
+  }
+
+  private load() {
+    try {
+      const raw = localStorage.getItem(this.key());
+      if (raw) for (const id of JSON.parse(raw) as number[]) if (this.towers[id]) this.lit.add(id);
+    } catch { /* ignore */ }
+  }
+
+  /** Forget this seed's lit towers (?fresh=1). */
+  reset() {
+    try { localStorage.removeItem(this.key()); } catch { /* ignore */ }
+    this.lit.clear();
+    for (const s of this.state.values()) s.lit = 0;
+  }
+}
+
+/** The home tower's stone: pale golden sandstone, the colour of the hearth, against the grey-rose granite of the others. */
+const HOME_STONE = '#d9bc8a';

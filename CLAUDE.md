@@ -4,6 +4,9 @@ A procedurally generated, browser-playable Nordic sandbox in the flat-shaded
 storybook style of *Hilda*. **Visual quality is the top priority, above feature
 count.** Keep this file lean. Depth lives in:
 
+- `DESIGN.md`: the owner's design doc (pillars, decisions, player sequence).
+  It is theirs, not a log. Never build anything from its Parking Lot unless
+  asked.
 - `docs/BRIEF.md`: the original request, verbatim, plus how to read `/inspo`.
   Read it before any visual change.
 - `NOTES.md`: stack reasoning, architecture, every major decision, known
@@ -37,7 +40,9 @@ npm run shots    # build + headless GPU screenshots -> shots/   (look at them!)
 ## Where things are
 - `src/world/`: `worldgen.ts` (height, biomes, POIs, paths),
   `chunkBuilder.ts` (worker: grid, normals, scatter), `terrain.ts`
-  (quadtree streaming, LOD, instancing).
+  (quadtree streaming, LOD, instancing), `towers.ts` (the beacon-tower
+  network, grown from the home tower so it always connects), `storySite.ts`
+  (the guaranteed start area).
 - `src/gfx/`: `shaders.ts` (all scene GLSL), `materials.ts` (shared
   uniforms), `palette.ts` (time-of-day keyframes and biome colours),
   `environment.ts` (day/night), `groundShadow.ts` (prop shadows on the ground), `post.ts` (G-buffer → bloom → layer fog →
@@ -49,7 +54,11 @@ npm run shots    # build + headless GPU screenshots -> shots/   (look at them!)
 - `src/vehicles/`: bicycles. `bicycle.ts` (geometry, instanced parts,
   skeleton), `bikes.ts` (seeded placement, parking, riding presentation,
   rider IK targets). Movement is `BikeMode`.
-- `src/ui/debug.ts`: the panel and HUD.
+- `src/story/beacons.ts`: beacon towers at runtime (drawing, the lock,
+  freeing the tower spirit = lighting, being slurped in via `CarriedMode`,
+  the head view, save).
+- `src/ui/debug.ts`: the panel and HUD. `towerDebug.ts`: tower sight lines
+  (L) and network map (M), only while the panel shows (H).
 
 ## Critical gotchas (details in docs/WORKFLOW.md)
 - `import './core/colorSetup'` must stay the **first** import in `main.ts`.

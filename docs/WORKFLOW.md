@@ -45,11 +45,21 @@ change goes through this loop:
 - `lookAtBike(dist, side, pitch)`, `mountBike()`, `dismountBike()`,
   `lockInput(yaw|null)` for bicycles.
 - `facePeak()` turns toward the tallest nearby ground.
+- `goToTower(i)` stands you on the most open side of beacon tower `i` (0 =
+  home), looking up at it. `gen().towers` is the whole network;
+  `_towerDebug.settings.{links,map}` toggle the dev views (`?towers=1` turns
+  both on).
+- `beacons.debugSet('all'|'none'|id)` lights towers; `beacons.busy`,
+  `beacons.onTop`, `beacons.isLit(id)`. `scripts/beacon.mjs` shoots tower
+  faces, lit/unlit, night, the home tower, and `shots=unlock` (smash the
+  lock, the spirit's sequence, walk in, the head view, exit).
+  `beacons.debugBreak()` breaks the nearest lock; `beacons.inside` is the
+  tower you're the head of.
 - `_r` / `_p` / `_scene` / `_terrain` / `_cam` expose internals for probes.
   For example, read G-buffer pixels with `_r.readRenderTargetPixels(_p.gbuf, ...)`.
 
 ### URL params
-`seed t x z yaw pitch dist mode=fly y paused=1 palette=<rose|golden|olive|coral|twilight|night> ui=0 capture=1 shadows=0`
+`seed t x z yaw pitch dist mode=fly y paused=1 palette=<rose|golden|olive|coral|twilight|night> ui=0 capture=1 shadows=0 towers=1 lit=all beacons=0`
 (`capture` disables adaptive resolution and the loading veil so shots are
 deterministic).
 

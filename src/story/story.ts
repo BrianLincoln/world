@@ -149,6 +149,8 @@ export class Story {
   /** Walking in to a tree / rock picked from out of arm's length (s), -1 when not. */
   private stepIn = -1;
   private stepPressed = false;
+  /** The press that took a tool is still down: don't let it hold-swing (the pick lies on a boulder). */
+  private heldFromTake = false;
   private swingCd = 0;
   private swingOn: { tree?: ChopTree; rock?: SmashRock } = {};
   /** How far above the body's feet the pack is (riding: up on the mount). */
@@ -720,17 +722,20 @@ export class Story {
     const a = this.action;
     if (!a) return false;
     if (!input.pressed('KeyE') && !input.pressed('Mouse0')) return false;
+    if (a.verb === 'other') return false;
     if (a.verb === 'repair') this.depositing = true;
     else if (a.target) this.act(a.target, true);
     return true;
   }
 
   /** What the action would do right now (the badge), from the last frame. */
-  private action: { verb: 'take' | 'chop' | 'smash' | 'repair' | 'light'; icon: IconName; target?: Target } | null = null;
+  private action: { verb: 'take' | 'chop' | 'smash' | 'repair' | 'light' | 'other'; icon: IconName; target?: Target } | null = null;
+  /** An action offered by something outside the story (a beacon tower to light): shown on the badge, handled by its owner. */
+  external: IconName | null = null;
   private depositing = false;
 
   private findAction(walking: boolean): typeof this.action {
-    if (!walking) return null;
+    if (!walking) return this.external ? { verb: 'other', icon: this.external } : null;
     const t = this.inReach();
     if (t) {
       if (t.tag === 'tree') return { verb: 'chop', icon: 'axe', target: t };
@@ -740,7 +745,7 @@ export class Story {
     }
     const st = this.step;
     if (st.kind === 'build' && !this.depositing && this.inBuildZone() && this.inv[st.resource] > 0 && this.remainingFor(st.parts) > 0) return { verb: 'repair', icon: 'hammer' };
-    return null;
+    return this.external ? { verb: 'other', icon: this.external } : null;
   }
 
   private inBuildZone(): boolean {
@@ -794,6 +799,7 @@ export class Story {
       const prop = t.tag === 'axe' ? this.axe : this.pick;
       prop.take();
       if (t.tag === 'axe') this.hasAxe = true; else this.hasPick = true;
+      this.heldFromTake = true;
       this.useTool(t.tag);
       d.sfx.pickup();
       this.sparkles.emit(t.pos.clone().setY(t.pos.y + 0.6), 6, 0.07, 1.6, undefined, { life: 0.6, rise: 0.4, up: 1.4 });
@@ -807,6 +813,9 @@ export class Story {
   }
 
   /** Draw a tool into the right mitten (it's stowed again after TOOL_HOLD s unused). */
+  /** Draw a tool into the explorer's mitten for a moment (a swing at something outside the story). */
+  showTool(k: 'axe' | 'pick' | 'hammer') { this.useTool(k); }
+
   private useTool(k: 'axe' | 'pick' | 'hammer') {
     this.toolHand = k;
     this.toolT = 0;
@@ -910,7 +919,7 @@ export class Story {
     if (!d.active) {
       // The sandbox has no story, but wood knocked down still counts.
       this.hud.set(this.inv, this.inv.logs + this.inv.stones > 0, this.opened());
-      this.hud.action(this.ramReady ? 'antlers' : null, input.held('Mouse0'), input, 'tap');
+      this.hud.action(this.ramReady ? 'antlers' : this.external, input.held('Mouse0') || input.held('KeyE'), input, 'tap');
       return;
     }
 
@@ -921,7 +930,8 @@ export class Story {
     this.updateProxies(walking);
     this.action = this.findAction(walking);
     const holding = input.held('KeyE') || input.held('Mouse0');
-    if ((this.action?.verb === 'chop' || this.action?.verb === 'smash') && holding) this.act(this.action.target!, false);
+    if (!holding) this.heldFromTake = false;
+    if ((this.action?.verb === 'chop' || this.action?.verb === 'smash') && holding && !this.heldFromTake) this.act(this.action.target!, false);
     const hold = this.action?.verb === 'chop' || this.action?.verb === 'smash';
     this.hud.action(this.action?.icon ?? (this.ramReady ? 'antlers' : null), holding, input, hold ? 'hold' : 'tap');
     this.swingCd -= dt;

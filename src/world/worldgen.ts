@@ -1,6 +1,7 @@
 import { Simplex } from '../core/noise';
 import { clamp, hash01, hashInt, lerp, mulberry32, smoothstep } from '../core/rng';
 import { brookQuery, findStorySite, RUIN_D, RUIN_W, siteToLocal, type StorySite } from './storySite';
+import { buildTowerNet, HOME_VIEW, type TowerNet } from './towers';
 
 // The world is a pure function of (seed, x, z). Nothing here touches three.js
 // so it runs identically inside chunk workers and on the main thread.
@@ -18,7 +19,7 @@ export interface Boulder {
 }
 
 export interface Poi {
-  kind: 'cabin' | 'tor' | 'circle' | 'erratic';
+  kind: 'cabin' | 'tor' | 'circle' | 'erratic' | 'tower';
   x: number; z: number; y: number;
   rot: number;
   /** Clearing radius: trees and bushes keep out of this. */
@@ -27,6 +28,10 @@ export interface Poi {
   variant?: number;
   /** Story POIs: the broken start cabin (drawn by the story, not the chunks) and the next cabin. */
   story?: 'ruin' | 'far';
+  /** Beacon towers: the tower's id in `WorldGen.towers`. */
+  tower?: number;
+  /** Beacon towers: how many of `boulders` form the stack itself (the head is last). */
+  stack?: number;
 }
 
 export interface PathSeg { ax: number; az: number; bx: number; bz: number }
@@ -50,6 +55,8 @@ export class WorldGen {
   private poiCache = new Map<number, Poi[]>();
   private pathCache = new Map<number, PathSeg[]>();
   private _story: StorySite | null = null;
+  private _towers: TowerNet | null = null;
+  private towerCells: Map<number, number[]> | null = null;
   private bq = { d: 0, bed: 0, t: 0, i: 0 };
 
   constructor(seed: number) {
@@ -72,6 +79,35 @@ export class WorldGen {
   /** The guaranteed start area (see storySite.ts). Lazily built from the base height field. */
   get story(): StorySite {
     return (this._story ??= findStorySite(this.seed, { base: (x, z) => this.baseHeight(x, z), forest: (x, z, h) => this.forestDensity(x, z, h) }));
+  }
+
+  /** The beacon tower network (see towers.ts). Lazily built from the base height field. */
+  get towers(): TowerNet {
+    if (!this._towers) {
+      this._towers = buildTowerNet(this.seed, { base: (x, z) => this.baseHeight(x, z), forest: (x, z, h) => this.forestDensity(x, z, h) }, this.story);
+      this.towerCells = new Map();
+      for (const t of this._towers.towers) {
+        const key = Math.floor(t.x / POI_CELL) * 73856093 + Math.floor(t.z / POI_CELL) * 19349663;
+        const l = this.towerCells.get(key);
+        if (l) l.push(t.id); else this.towerCells.set(key, [t.id]);
+      }
+    }
+    return this._towers;
+  }
+
+  /** Distance to the nearest beacon tower's centre (towers near (x, z) only; Infinity if none within `max`). */
+  towerDist(x: number, z: number, max = 400): number {
+    const net = this.towers;
+    let d = Infinity;
+    const cx = Math.floor(x / POI_CELL), cz = Math.floor(z / POI_CELL);
+    const n = Math.ceil(max / POI_CELL);
+    for (let dz = -n; dz <= n; dz++) for (let dx = -n; dx <= n; dx++) {
+      for (const id of this.towerCells!.get((cx + dx) * 73856093 + (cz + dz) * 19349663) ?? []) {
+        const t = net.towers[id];
+        d = Math.min(d, Math.hypot(t.x - x, t.z - z));
+      }
+    }
+    return d;
   }
 
   // ---------------------------------------------------------------- terrain
@@ -219,6 +255,13 @@ export class WorldGen {
    */
   storyBlock(x: number, z: number, r: number, kind: 'tree' | 'bush' | 'rock' | 'tuft'): boolean {
     const st = this.story;
+    // A view corridor from the yard to the home tower (see towers.ts).
+    if (kind === 'tree' || kind === 'bush') {
+      const net = this.towers, y = net.yard, h = net.home;
+      const dx = h.x - y.x, dz = h.z - y.z, dl = Math.hypot(dx, dz);
+      const t = ((x - y.x) * dx + (z - y.z) * dz) / dl;
+      if (t > -2 && t < HOME_VIEW && Math.abs((x - y.x) * dz - (z - y.z) * dx) / dl < 4 + r + t * 0.05) return true;
+    }
     if (x < st.box[0] || x > st.box[2] || z < st.box[1] || z > st.box[3]) return false;
     const l = siteToLocal(st, x, z);
     const pad = kind === 'tuft' ? 0.4 : kind === 'rock' ? 3 : 1.5;
@@ -387,7 +430,13 @@ export class WorldGen {
     const keep = out.filter((p) => Math.hypot(p.x - st.x, p.z - st.z) > 110 && Math.hypot(p.x - st.far.x, p.z - st.far.z) > 45 &&
       !(p.x > st.box[0] - 20 && p.x < st.box[2] + 20 && p.z > st.box[1] - 20 && p.z < st.box[3] + 20));
     out.length = 0;
-    out.push(...keep);
+    // Nothing else crowds a beacon tower's hilltop.
+    out.push(...keep.filter((p) => this.towerDist(p.x, p.z, 120) > 90));
+    void this.towers;
+    for (const id of this.towerCells!.get(key) ?? []) {
+      const t = this.towers.towers[id];
+      out.push({ kind: 'tower', tower: id, x: t.x, z: t.z, y: t.y, rot: t.yaw, clear: t.foot * 1.5 + 16, boulders: [...t.boulders, t.head], stack: t.boulders.indexOf(t.slab) + 1 });
+    }
     const inThis = (x: number, z: number) => Math.floor(x / POI_CELL) === cx && Math.floor(z / POI_CELL) === cz;
     if (inThis(st.x, st.z)) out.push({ kind: 'cabin', story: 'ruin', x: st.x, z: st.z, y: st.y, rot: st.rot, clear: 13, variant: 0 });
     if (inThis(st.far.x, st.far.z)) out.push({ kind: 'cabin', story: 'far', x: st.far.x, z: st.far.z, y: st.far.y, rot: st.far.rot, clear: 40, variant: 0 });
@@ -436,7 +485,7 @@ export class WorldGen {
       const cands: Poi[] = [];
       for (let dz = -2; dz <= 2; dz++) for (let dx = -2; dx <= 2; dx++) {
         for (const p of this.poisInCell(cx + dx, cz + dz)) {
-          if (p !== a && p.story !== 'ruin' && (p.kind === 'cabin' || p.kind === 'circle' || p.kind === 'tor')) cands.push(p);
+          if (p !== a && p.story !== 'ruin' && (p.kind === 'cabin' || p.kind === 'circle' || p.kind === 'tor' || p.kind === 'tower')) cands.push(p);
         }
       }
       cands.sort((p, q) => Math.hypot(p.x - a.x, p.z - a.z) - Math.hypot(q.x - a.x, q.z - a.z));

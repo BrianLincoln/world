@@ -262,7 +262,8 @@ out vec3 vWorld;
 void main() {
   vec3 base = (modelMatrix * vec4(aI0.xyz, 1.0)).xyz;
   gGrow = harvestScale(base);
-  if (gGrow <= 0.0) { gl_Position = vec4(0.0, 0.0, 2.0, 1.0); return; }
+  // Tone > 1.5: drawn elsewhere (beacon towers), here only for shadows.
+  if (gGrow <= 0.0 || aI1.w > 1.5) { gl_Position = vec4(0.0, 0.0, 2.0, 1.0); return; }
   float sc = aI0.w * gGrow;
   float sy = aI1.y;
   vLocal = position;
@@ -984,5 +985,338 @@ void main() {
   if (!gl_FrontFacing) n = -n;
   // Whites skip the grade entirely: the contrast is the point.
   writeG(col, mix(-0.7, -0.95, white), n, vView);
+}
+`;
+
+// ------------------------------------------------------------------ beacon heads
+// The top boulder of a beacon tower: a hollow stone head with two oval
+// eyeholes and a hole in its crown the flame rises from. The holes are not
+// geometry. Inside an opening, the fragment traces the view ray into the
+// head (object space, where the head is a unit ball with a hollow of radius
+// HEAD_RIN) and shades what it meets: the shell's cut wall, the far side of
+// the hollow, or nothing at all when the ray leaves by another hole. It
+// writes that point's real depth, so the outline pass inks the hole rims
+// like any silhouette.
+// Per instance: aH0 = (x, y, z, yaw), aH1 = (radius, height, lit / open, home),
+// aH2 = (tilt, look yaw, kind, highlight / tower lit).
+// Kind 0 = a head (two eyeholes); kind 1 = a tower's door boulder (one big
+// doorway, only cut once its lock is off; before that a carved seam).
+
+export const HEAD_VERT = /* glsl */ `
+in vec4 aH0;
+in vec4 aH1;
+in vec4 aH2;
+out vec3 vObj;
+flat out vec3 vCamObj;
+flat out vec4 vH0;
+flat out vec4 vH1;
+flat out vec4 vH2;
+out vec3 vView;
+mat3 headRot(float yaw, float tilt) {
+  float cy = cos(yaw), sy = sin(yaw), cp = cos(tilt), sp = sin(tilt);
+  mat3 ry = mat3(cy, 0.0, -sy, 0.0, 1.0, 0.0, sy, 0.0, cy);
+  mat3 rx = mat3(1.0, 0.0, 0.0, 0.0, cp, sp, 0.0, -sp, cp);
+  return ry * rx;
+}
+void main() {
+  mat3 R = headRot(aH0.w + aH2.y, aH2.x);
+  vec3 sc = vec3(aH1.x, aH1.y, aH1.x);
+  vec3 wp = aH0.xyz + R * (position * sc);
+  vObj = position;
+  vCamObj = (transpose(R) * (cameraPosition - aH0.xyz)) / sc;
+  vH0 = aH0; vH1 = aH1; vH2 = aH2;
+  vec4 vp = viewMatrix * vec4(wp, 1.0);
+  vView = vp.xyz;
+  gl_Position = projectionMatrix * vp;
+}
+`;
+
+export const HEAD_FRAG = /* glsl */ `
+${COMMON}
+${GBUF_OUT}
+in vec3 vObj;
+flat in vec3 vCamObj;
+flat in vec4 vH0;
+flat in vec4 vH1;
+flat in vec4 vH2;
+in vec3 vView;
+uniform vec3 uStone;
+uniform vec3 uHomeStone;
+uniform vec3 uEmber;
+uniform vec3 uCore;
+uniform vec3 uHollow;
+const float HEAD_RIN = 0.88;
+// Tall, near-rectangular eyes with rounded corners (a superellipse), set
+// straight and level: dark and a little uncanny, not cartoon ovals.
+const vec3 EYE_L = vec3(-0.27, 0.12, 0.955);
+const vec3 EYE_R = vec3(0.27, 0.12, 0.955);
+const vec2 EYE_SIZE = vec2(0.125, 0.3);
+const float EYE_SQUARE = 5.0;
+mat3 headRot(float yaw, float tilt) {
+  float cy = cos(yaw), sy = sin(yaw), cp = cos(tilt), sp = sin(tilt);
+  mat3 ry = mat3(cy, 0.0, -sy, 0.0, 1.0, 0.0, sy, 0.0, cy);
+  mat3 rx = mat3(1.0, 0.0, 0.0, 0.0, cp, sp, 0.0, -sp, cp);
+  return ry * rx;
+}
+// Where direction d lands in an opening's own 2D frame (unit oval = the rim).
+vec2 eyeUV(vec3 d, vec3 c, float tilt) {
+  vec3 r = normalize(cross(vec3(0.0, 1.0, 0.0), c));
+  vec3 u = cross(c, r);
+  vec2 q = vec2(dot(d, r), dot(d, u));
+  float cs = cos(tilt), sn = sin(tilt);
+  q = vec2(cs * q.x - sn * q.y, sn * q.x + cs * q.y);
+  return q / EYE_SIZE;
+}
+// Superellipse "radius": 1 on the rim of a rounded rectangle.
+float eyeR(vec2 q) {
+  vec2 a = abs(q);
+  return pow(pow(a.x, EYE_SQUARE) + pow(a.y, EYE_SQUARE), 1.0 / EYE_SQUARE);
+}
+const vec3 DOOR_C = vec3(0.0, -0.2, 0.98);
+const vec2 DOOR_SIZE = vec2(0.3, 0.44);
+float gKind = 0.0;
+float gOpen = 0.0;
+float doorR(vec3 d) {
+  vec3 c = normalize(DOOR_C);
+  vec3 r = normalize(cross(vec3(0.0, 1.0, 0.0), c));
+  vec3 u = cross(c, r);
+  vec2 q = abs(vec2(dot(d, r), dot(d, u)) / DOOR_SIZE);
+  return pow(pow(q.x, 3.0) + pow(q.y, 3.0), 1.0 / 3.0);
+}
+// 0 = solid shell, 1 / 2 = the eyes (or 1 = the doorway).
+int holeId(vec3 d) {
+  // Doors are a real opening (cut in main, the shell drawn double sided).
+  if (gKind > 0.5) return 0;
+  if (d.z < 0.6) return 0;
+  if (eyeR(eyeUV(d, normalize(EYE_L), 0.0)) < 1.0) return 1;
+  if (eyeR(eyeUV(d, normalize(EYE_R), 0.0)) < 1.0) return 2;
+  return 0;
+}
+vec3 holeAxis(int h) {
+  if (gKind > 0.5) return normalize(DOOR_C);
+  return h == 1 ? normalize(EYE_L) : normalize(EYE_R);
+}
+// A little house carved over the home tower's brow: distance to its outline.
+float houseMark(vec3 d) {
+  vec3 c = normalize(vec3(0.0, 0.74, 0.67));
+  vec3 r = normalize(cross(vec3(0.0, 1.0, 0.0), c));
+  vec3 u = cross(c, r);
+  if (dot(d, c) < 0.8) return 1.0;
+  vec2 q = vec2(dot(d, r), dot(d, u)) / 0.12;
+  // Walls (a box) and a pitched roof over them.
+  vec2 b = abs(q - vec2(0.0, -0.35)) - vec2(0.62, 0.55);
+  float box = length(max(b, 0.0)) + min(max(b.x, b.y), 0.0);
+  vec2 p = vec2(abs(q.x), q.y - 0.2);
+  float roof = max(dot(p, normalize(vec2(0.62, 0.78))) - 0.62, -p.y);
+  float door = max(abs(q.x) - 0.17, abs(q.y + 0.62) - 0.28);
+  return min(min(abs(min(box, roof)), abs(door)), 1.0);
+}
+void main() {
+  float lit = vH1.z;
+  float home = vH1.w;
+  float hl = vH2.w;
+  gKind = vH2.z;
+  gOpen = vH1.z;
+  bool isDoor = gKind > 0.5;
+  // A doorway is dark inside, with the tower's glow far up the shaft once lit.
+  float shaftGlow = isDoor ? vH2.w : 0.0;
+  if (isDoor) { lit = 0.0; hl = 0.0; }
+  vec3 o = vObj;
+  vec3 rd = normalize(vObj - vCamObj);
+  vec3 d = normalize(o);
+  if (isDoor) {
+    // A walk-in doorway: the opening is cut for real, and the inside of the
+    // shell is the cave you stand in (dark stone, lit from far above once
+    // the tower is).
+    if (gl_FrontFacing && gOpen > 0.5 && d.z > 0.4 && doorR(d) < 1.0) discard;
+    if (!gl_FrontFacing) {
+      mat3 Ri = headRot(vH0.w, 0.0);
+      vec3 ni = normalize(Ri * (-d / vec3(vH1.x, vH1.y, vH1.x)));
+      vec3 st = mix(uStone, uHomeStone, home);
+      float up = smoothstep(-0.2, 0.95, d.y);
+      float fl = 0.9 + 0.1 * sin(uTime * 5.3 + vH0.x) * sin(uTime * 3.1 + vH0.z);
+      vec3 cave = st * uShadeCol * mix(0.42, 0.3, up);
+      vec3 c = mix(cave, mix(uEmber, uCore, 0.35) * fl, shaftGlow * up * up * 0.85);
+      float e = shaftGlow * up * up * 0.7;
+      writeG(c, e > 0.0 ? e : -0.2, ni, vView);
+      return;
+    }
+  }
+  int h = holeId(d);
+  vec3 hit = o;
+  vec3 nObj = d;
+  int surf = 0;
+  if (h > 0) {
+    float b = dot(o, rd);
+    float disc = b * b - (dot(o, o) - HEAD_RIN * HEAD_RIN);
+    bool inside = false;
+    float t1 = 0.6;
+    if (disc > 0.0) {
+      float sq = sqrt(disc);
+      t1 = -b - sq;
+      if (t1 > 0.0 && holeId(normalize(o + rd * t1)) == h) {
+        vec3 f = o + rd * (-b + sq);
+        int h2 = holeId(normalize(f));
+        // Straight through one hole and out of another: the sky beyond.
+        if (h2 > 0 && h2 != h) discard;
+        hit = f;
+        nObj = -normalize(f);
+        surf = 2;
+        inside = true;
+      }
+      if (t1 <= 0.0) t1 = 0.6;
+    }
+    if (!inside) {
+      // The cut wall of the shell: where the ray leaves the opening's cone.
+      float lo = 0.0, hi = t1;
+      for (int i = 0; i < 7; i++) {
+        float m = 0.5 * (lo + hi);
+        if (holeId(normalize(o + rd * m)) == h) lo = m; else hi = m;
+      }
+      hit = o + rd * hi;
+      vec3 hd = normalize(hit);
+      vec3 ax = holeAxis(h);
+      nObj = normalize(ax * dot(hd, ax) - hd);
+      surf = 1;
+    }
+  }
+  mat3 R = headRot(vH0.w + vH2.y, vH2.x);
+  vec3 sc = vec3(vH1.x, vH1.y, vH1.x);
+  vec3 world = vH0.xyz + R * (hit * sc);
+  vec3 view = (viewMatrix * vec4(world, 1.0)).xyz;
+  vec3 n = normalize(R * (nObj / sc));
+  // The same stone as the rest of its tower (the body's mid tone).
+  vec3 stone = mix(uStone, uHomeStone, home);
+  float flick = 0.9 + 0.1 * sin(uTime * 5.3 + vH0.x) * sin(uTime * 3.1 + vH0.z);
+  vec3 core = mix(uCore, vec3(1.0, 0.96, 0.84), home * 0.5 + hl * 0.5);
+  vec3 col;
+  float em = 0.0;
+  if (surf == 2) {
+    // The hollow: near black until the tower is lit, then a glow that fills
+    // the rock, brightest low down and at the back.
+    float low = smoothstep(0.6, -0.8, hit.y);
+    vec3 glow = mix(uEmber, core, 0.25 + 0.6 * low) * flick;
+    col = mix(uHollow, glow, lit);
+    em = lit;
+    if (isDoor) {
+      float up = smoothstep(0.1, 0.85, hit.y);
+      col = mix(uHollow, mix(uEmber, uCore, 0.3) * flick, shaftGlow * up * 0.8);
+      em = shaftGlow * up * 0.7;
+    }
+  } else if (surf == 1) {
+    // The cut wall of the eyehole: a dark bevel, warm and lit from within once lit.
+    vec3 wall = stone * uShadeCol * 0.55;
+    float up = clamp(dot(nObj, vec3(0.0, -1.0, 0.0)) * 0.5 + 0.5, 0.0, 1.0);
+    wall *= 0.8 + 0.35 * up;
+    col = mix(wall, mix(uEmber, core, 0.25) * 0.9 * flick, lit * 0.85);
+    em = lit * 0.6;
+  } else {
+    col = stone * toonLight(n);
+    if (isDoor && gOpen < 0.5) {
+      // Sealed: a door stone set into the boulder, a carved seam round it.
+      float dr = doorR(d);
+      float seam = step(0.97, dr) * step(dr, 1.035) * step(0.4, d.z);
+      col = mix(col, stone * uShadeCol * 0.55, seam);
+      col *= dr < 0.97 && d.z > 0.4 ? 0.94 : 1.0;
+    } else if (isDoor && d.z > 0.4) {
+      // Open: a worn bevel round the doorway gives the shell its thickness.
+      float dr = doorR(d);
+      float rim = step(1.0, dr) * step(dr, 1.07);
+      col = mix(col, stone * uShadeCol * 0.7, rim);
+    }
+    // Once lit, warm light spills round the rims of the eyes.
+    float nearEye = max(1.0 - eyeR(eyeUV(d, normalize(EYE_L), 0.0)), 1.0 - eyeR(eyeUV(d, normalize(EYE_R), 0.0)));
+    float lip = step(-0.2, nearEye) * step(0.0, d.z);
+    col = mix(col, stone * mix(uLightCol, uEmber, 0.6), lit * lip * 0.5);
+    if (home > 0.5 && !isDoor) {
+      float m = houseMark(d);
+      float line = 1.0 - smoothstep(0.1, 0.16, m);
+      col = mix(col, mix(stone * uShadeCol * 0.75, core, lit), line);
+      em = max(em, line * lit);
+    }
+    // Targeted from another tower (the tower camera): a warm rim.
+    if (hl > 0.0) {
+      float fres = 1.0 - abs(dot(n, normalize(-view)));
+      col = mix(col, core, step(0.72, fres) * hl);
+      em = max(em, step(0.72, fres) * hl);
+    }
+  }
+  writeG(col, em, n, view);
+}
+`;
+
+// ------------------------------------------------------------------ tower spirit
+// The little glowing ghost that lives in a beacon tower's head. Its face is
+// painted, not stuck on: two tall, rounded-rectangle eye sockets that sink
+// into the glow (a darkened rim, near-black inside with an inner shadow
+// under the brow), and a small, subtle, lopsided smile like the explorer's.
+// Object space: the face looks down +z, the body is ~1.2 tall.
+
+export const GHOST_VERT = /* glsl */ `
+out vec3 vObj;
+out vec3 vN;
+out vec3 vView;
+void main() {
+  vObj = position;
+  vN = normalize(mat3(modelMatrix) * normal);
+  vec4 vp = modelViewMatrix * vec4(position, 1.0);
+  vView = vp.xyz;
+  gl_Position = projectionMatrix * vp;
+}
+`;
+
+export const GHOST_FRAG = /* glsl */ `
+${COMMON}
+${GBUF_OUT}
+in vec3 vObj;
+in vec3 vN;
+in vec3 vView;
+uniform vec3 uColor;
+uniform vec3 uInk;
+uniform float uEmissive;
+uniform float uBlink;
+uniform float uGrin;
+float sq(vec2 q) {
+  vec2 a = abs(q);
+  return pow(pow(a.x, 4.0) + pow(a.y, 4.0), 0.25);
+}
+void main() {
+  vec3 n = normalize(vN);
+  if (!gl_FrontFacing) n = -n;
+  vec3 col = uColor;
+  float em = uEmissive;
+  if (vObj.z > 0.25) {
+    // Eyes: tall rounded rectangles (the towers' eyes), level, well apart.
+    vec2 size = vec2(0.068, 0.13 * max(uBlink, 0.06));
+    for (int i = 0; i < 2; i++) {
+      float ex = i == 0 ? -0.165 : 0.165;
+      vec2 q = (vObj.xy - vec2(ex, 0.8)) / size;
+      float r = sq(q);
+      // A soft darkened rim round the socket: the glow sinks in.
+      float rim = 1.0 - smoothstep(1.0, 1.55, r);
+      col = mix(col, col * 0.62, rim * 0.8);
+      em = mix(em, em * 0.45, rim);
+      if (r < 1.0) {
+        // Inside: near black, a touch of warmth low down, deepest under the brow.
+        float depth = smoothstep(-1.0, 0.7, q.y);
+        col = mix(uInk * 1.9 + uColor * 0.08, uInk, depth);
+        em = 0.0;
+      }
+    }
+    // A small, quiet smile, a little off centre with one end lifted.
+    float x = vObj.x - 0.02;
+    float w = 0.085 + 0.02 * uGrin;
+    if (abs(x) < w) {
+      float t = x / w;
+      float yc = 0.605 + (0.028 + 0.02 * uGrin) * t * t + 0.012 * t;
+      float thick = 0.011 * (1.0 - 0.55 * t * t);
+      float d = abs(vObj.y - yc);
+      float line = 1.0 - smoothstep(thick * 0.6, thick, d);
+      col = mix(col, uInk * 1.3, line);
+      em = mix(em, 0.0, line);
+    }
+  }
+  if (em <= 0.0) em = -0.3;
+  writeG(col, em, n, vView);
 }
 `;

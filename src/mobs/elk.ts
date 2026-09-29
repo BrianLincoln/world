@@ -29,6 +29,8 @@ const SNOW = new THREE.Color('#f3ede3');
 const MAX = 24;
 /** Herds keep clear of the story cabin's yard. */
 const BASE_CLEAR = 80;
+/** Keep off a beacon tower's hilltop: its stack, doorway and room are within ~35 m. */
+const TOWER_CLEAR = 55;
 
 /** Body frame: barrel centre at the origin, +z forward, y up. Root is the feet. */
 const BODY_Y = 1.5;
@@ -413,7 +415,8 @@ export class Elk implements Species {
 
   private nearBase(gen: WorldGen, x: number, z: number) {
     const s = gen.story;
-    return Math.hypot(x - s.x, z - s.z) < BASE_CLEAR;
+    // Nor round a beacon tower's foot (or inside its doorway's room).
+    return Math.hypot(x - s.x, z - s.z) < BASE_CLEAR || gen.towerDist(x, z, 120) < TOWER_CLEAR;
   }
 
   /** Lower = better grazing. Infinity = unusable (water, cliffs, deep forest). */

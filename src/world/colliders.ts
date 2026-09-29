@@ -99,6 +99,8 @@ export class Colliders {
       for (let i = 0; i < data.length; i += S) {
         const x = x0 + data[i], z = z0 + data[i + 2];
         if (this.skip?.(kind, x, z) && !(kind === 'rock' && data[i + 6] > 5)) continue;
+        // Hollow tower door boulders collide as shells (story/beacons.ts).
+        if (kind === 'rock' && data[i + 6] > 7.5 && data[i + 6] < 8.5) continue;
         rows.push(x, data[i + 1], z, ...data.subarray(i + 3, i + 8));
       }
       return new Float32Array(rows);

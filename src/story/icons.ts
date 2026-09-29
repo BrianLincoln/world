@@ -5,7 +5,7 @@ import * as THREE from 'three';
 // canvases feed the HUD (as data URLs) and the in-world billboards (as
 // textures), so an icon always looks the same wherever it appears.
 
-export type IconName = 'axe' | 'log' | 'stone' | 'flame' | 'heart' | 'home' | 'check' | 'hand' | 'hammer' | 'pick' | 'smash' | 'antlers' | 'finger' | 'mouse' | 'mouseDown' | 'fingerDown';
+export type IconName = 'axe' | 'log' | 'stone' | 'flame' | 'heart' | 'home' | 'check' | 'hand' | 'hammer' | 'pick' | 'smash' | 'antlers' | 'up' | 'down' | 'finger' | 'mouse' | 'mouseDown' | 'fingerDown';
 
 const INK = '#4a2e36';
 const SIZE = 128;
@@ -413,7 +413,45 @@ function drawAntlers(g: CanvasRenderingContext2D) {
   ink(g, 5);
 }
 
+/** Up you go: a fat rounded arrow in the warm amber of the spirits' arms. */
+function drawUp(g: CanvasRenderingContext2D) {
+  g.beginPath();
+  g.moveTo(64, 14);
+  g.lineTo(106, 60);
+  g.quadraticCurveTo(110, 66, 102, 67);
+  g.lineTo(80, 67);
+  g.lineTo(80, 106);
+  g.quadraticCurveTo(80, 114, 72, 114);
+  g.lineTo(56, 114);
+  g.quadraticCurveTo(48, 114, 48, 106);
+  g.lineTo(48, 67);
+  g.lineTo(26, 67);
+  g.quadraticCurveTo(18, 66, 22, 60);
+  g.closePath();
+  g.fillStyle = '#ffb35c';
+  g.fill();
+  ink(g);
+  g.beginPath();
+  g.moveTo(64, 30);
+  g.lineTo(88, 56);
+  g.strokeStyle = '#ffe2a8';
+  g.lineWidth = 7;
+  g.lineCap = 'round';
+  g.stroke();
+}
+
+/** Back down and out: the same arrow, pointing down. */
+function drawDown(g: CanvasRenderingContext2D) {
+  g.save();
+  g.translate(64, 64);
+  g.rotate(Math.PI);
+  g.translate(-64, -64);
+  drawUp(g);
+  g.restore();
+}
+
 const DRAW: Record<IconName, (g: CanvasRenderingContext2D) => void> = {
+  up: drawUp, down: drawDown,
   antlers: drawAntlers,
   axe: drawAxe, log: drawLog, stone: drawStone, flame: drawFlame, heart: drawHeart, home: drawHome, check: drawCheck, hand: drawHand, hammer: drawHammer, pick: drawPick, smash: drawSmash,
   finger: (g) => drawFinger(g, false), fingerDown: (g) => drawFinger(g, true), mouse: (g) => drawMouse(g, false), mouseDown: (g) => drawMouse(g, true),

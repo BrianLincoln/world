@@ -26,6 +26,7 @@ export interface DebugHooks {
   spawnFlock(species: string): void;
   /** Crow shape, 0 sleek .. 1 round. */
   crowPlump: { get(): number; set(v: number): void };
+  towers: { settings: { links: boolean; map: boolean; index: number }; count(): number; go(i: number): void; overview(): void; light(which: 'all' | 'none' | 'break' | number): void };
 }
 
 export class DebugUI {
@@ -122,6 +123,17 @@ export class DebugUI {
     fc.add(h.bikes.settings, 'enabled').name('bicycles');
     fc.close();
 
+    const fw2 = this.gui.addFolder('Beacon towers');
+    fw2.add(h.towers.settings, 'links').name('sight lines (L)').listen();
+    fw2.add(h.towers.settings, 'map').name('network map (M)').listen();
+    fw2.add(h.towers.settings, 'index', 0, 200, 1).name('tower #').onChange((v: number) => (h.towers.settings.index = Math.min(v, h.towers.count() - 1))).listen();
+    fw2.add({ go: () => h.towers.go(h.towers.settings.index) }, 'go').name('go to tower # (0 = home)');
+    fw2.add({ o: () => h.towers.overview() }, 'o').name('view from above');
+    fw2.add({ l: () => h.towers.light(h.towers.settings.index) }, 'l').name('light tower #');
+    fw2.add({ l: () => h.towers.light('break') }, 'l').name('break the nearest lock');
+    fw2.add({ l: () => h.towers.light('all') }, 'l').name('light all towers');
+    fw2.add({ l: () => h.towers.light('none') }, 'l').name('unlight all towers');
+
     const fm = this.gui.addFolder('Player');
     const mode = { mode: h.modeName() };
     fm.add(mode, 'mode', ['walk', 'glide', 'fly', 'swim', 'ride', 'bike']).name('mode (F = fly)').onChange((v: string) => h.setMode(v)).listen();
@@ -178,6 +190,8 @@ export class DebugUI {
     const help = document.getElementById('help');
     if (help) help.style.display = hidden ? '' : 'none';
   }
+
+  get shown() { return !this.gui._hidden; }
 
   hide() {
     this.gui.hide();

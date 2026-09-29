@@ -1,6 +1,6 @@
 # Fjellheim — notes
 
-> Decision log. The original brief is in `docs/BRIEF.md`; the working loop and gotchas are in `docs/WORKFLOW.md`; agent entry point is `CLAUDE.md`.
+> Decision log. The original brief is in `docs/BRIEF.md`; the working loop and gotchas are in `docs/WORKFLOW.md`; agent entry point is `CLAUDE.md`. The owner's design (pillars, decided features, player sequence, open questions, parking lot) is `DESIGN.md`.
 
 A browser-playable, procedurally generated Nordic sandbox in the flat-shaded
 storybook style of the `/inspo` references (Hilda backgrounds). No goals; the
@@ -898,3 +898,297 @@ Supersedes the hammer notes in the feel pass above.
   there within ~4.5 s of the step starting, and in about a second if you're
   already within 2.5 m of the hearth. In the playthrough, the hearth step
   went from 17.5 s to 7 s including the walk.
+
+## Phase 2, stage 1: beacon tower placement and the sight network (2026-09-29)
+The design is in `DESIGN.md` (the owner's doc); this is the how and why.
+- **Phase 1 no longer ends at night.** The hearth step has no `easeTo` and
+  `readyAt: 0`: you light it whenever the chimney is done (the clock drifts
+  to ~16:00 by then). The rest step has no `easeTo` and `doneAt: 0`, so the
+  story lets go of the clock at once and the day carries on naturally. The
+  owner found the sudden time-lapse into night weird. `scripts/story.mjs`
+  shoots `10-hearth-outside` instead of the old dusk and night shots.
+- **No starter bike in the story.** That was already true (`bikes.reset(...,
+  starter = !story)`). The bike becomes the spirit's gift in stage 5.
+- **`world/towers.ts`, pure like the story site.** `WorldGen.towers` builds
+  the whole network lazily from `baseHeight`, `forestDensity` and the story
+  site, in each worker and on the main thread (~160 ms each, once per seed;
+  measured on 8 seeds). A per-POI-cell index feeds `poisInCell`, so a tower
+  is just a `kind: 'tower'` POI with boulders. Chunks draw it as landmark
+  rocks (lean 9, never harvested), the colliders get it for free (walls, you
+  can't climb it: the spirit lifts you in stage 2), and trees keep off its
+  clearing (30 m, home 34 m). Other POIs within 90 m of a tower are dropped.
+  World footpaths may now lead to towers as well as cabins, tors and circles.
+- **Network growth guarantees connectivity.** Candidate summits: one per
+  400 m cell (the best of 9 jittered samples, then a hill climb). A candidate
+  needs to be over 14 m, have a standable top (±5.5 m within 10 m), stand
+  proud of its surroundings (3 m over the 140 m ring), and not be a cliff top
+  (±24 m within 32 m). It scores on height and prominence, minus forest. The
+  home tower is placed first. Then each round takes the best-scoring
+  candidate that some accepted tower can see and that is at least
+  `TOWER_SPACING` (560 m) from every tower. So every tower sees at least one
+  other and the network is connected by construction. Unseen candidates are
+  dropped. Links are then every pair within range that can see each other.
+  Typical result: ~95–115 towers over a 5.2 km radius (birch, a watery seed,
+  gets 51), each with a mean of about 6 links.
+- **"Can see"** (`sees`): flame to flame within `TOWER_RANGE` (1500 m), with
+  terrain at least 2 m under the straight line, sampled every 18 m. The last
+  16 m at each end are skipped (the tower's own hilltop). Trees don't block.
+  Uses `baseHeight` (cabin pads are too small to matter).
+- **The home tower** (`homeSpot`): hill-climbed summits 200–420 m from the
+  cabin, or out to 600 m at a penalty. They must be clear of the story set's
+  box, have no cliffs within 40 m, and have a dry, gentle straight line from
+  the cabin (the worst 20 m stretch climbs under 0.42), because stage 5 has a
+  kid biking there. The score favours being seen from the yard: the top
+  14 m of the stack over terrain and trees (trees count as a 14 m wall,
+  except in the first `HOME_VIEW` = 90 m and the tower's own clearing). The
+  story then keeps that 90 m corridor free of trees and bushes
+  (`storyBlock`). It must also see at least one candidate, so the network
+  has somewhere to grow. On 8 seeds it's 203–519 m out. It's clearly visible
+  from the yard on 7 and just peeks over the forest on `troll` (519 m).
+- **The stack**: base, two middle boulders, then a flat shoulder slab and a
+  head boulder, set back toward the slab's rear so a ledge in front of the
+  face stays free for standing (`ledge`). The flame is at `head.y + 1.25 *
+  head.sy`. About 37 m tall (×1.12 for home), with 3–5 loose boulders
+  round the foot. The face looks back toward the tower it was first seen
+  from (the home tower looks at the cabin), so faces across the network turn
+  loosely toward home. The head is still a plain chunk rock; stage 2 gives
+  it the face.
+- **Tall towers on mountain summits** (up to ~540 m, above the snow line)
+  are allowed. They're dramatic landmarks, and the ember network makes them
+  reachable once lit. If they prove too hard to walk up to for young kids,
+  cap `siteScore` by height.
+- **Dev views** (`ui/towerDebug.ts`, keys only while the panel shows, or
+  `?towers=1`): L draws sight lines flame to flame in the world as overlay
+  lines, dimmed through terrain (home links red), plus a tall marker over
+  every flame. M shows a 560 px top-down map: relief (height bands, hill
+  shade, forest), every tower numbered (home ringed), links, the home cabin,
+  and you with a view cone. The panel's "Beacon towers" folder has both
+  toggles, "go to tower #" (`goToTower`) and "view from above". `OverlayLines`
+  in `story/overlay.ts` is the reusable line primitive.
+- **Perf:** unchanged (A/B against the previous commit on the same machine:
+  avg 4.5 ms and p99 8.4 ms both sides, uncapped, `mobs=0`).
+
+## Phase 2, stage 2: tower spirits, the lift, lighting (2026-09-29)
+- **Bigger towers** (owner's request): `TOWER_SCALE` 1.45, so about 50 m to
+  the flame (the home tower ×1.12 on top of that). The stack is now base,
+  two middles and a **wide flat capstone** (radius ~11 m) that overhangs
+  like a brim, with the head set back on it. The ledge in front of the face
+  is 0.6 of the capstone's radius out, where the dome is ~14° (standable).
+  `layout()` is the one source for heights, so the nominal flame used while
+  growing the network matches the built stack.
+- **Towers are drawn by `story/beacons.ts`, not the chunks.** Chunks still
+  emit their boulders (with tone + 2, which `PROP_VERT` hides) so colliders
+  and ground shadows keep working unchanged. Beacons draws bodies as two
+  instanced LODs (detailed within 650 m, 80-tri beyond) out to 5.2 km, so
+  towers stay on the skyline past the chunk POI cut-off. The home tower gets
+  its own material copy with a different rock colour. That's ~8 draw calls
+  for every tower in the world.
+- **The hollow head is a shader, not geometry** (`HEAD_VERT/HEAD_FRAG`). The
+  mesh is a plain lumpy ball (detail 4 near, 2 far). Inside the two tall
+  oval eyeholes and the crown hole, the fragment traces the view ray in
+  object space against the hollow (radius 0.8). It shows either the cut wall
+  of the shell (binary search for where the ray leaves the opening's cone),
+  the far inside of the hollow, or nothing (`discard`) when the ray goes
+  straight out through another hole. It writes that point's real depth, so
+  the outline pass inks every rim, and holes cost nothing at any LOD.
+  Unlit, the hollow is a dim plum that gets a faint ember low down as you
+  approach (`wake`). Lit, it's a flickering fire, hottest low down, with
+  firelight on the cut walls and round the lips.
+- **The home tower**: golden sandstone (`HOME_STONE` #d9bc8a) against the
+  grey-rose granite of the others, 12% bigger, a brighter, whiter core, and a
+  little house carved over the brow that glows when lit. A pale grey stone
+  was tried first and read as a skull (pale ball, two dark holes).
+- **Flames**: five rounder lathe tongues (the hearth's sharp cones read as a
+  paper crown at this size) rising out of the crown, flaring as they catch.
+  Only the 12 nearest lit towers within 2.6 km get one. Far visibility is
+  stage 3's job.
+- **The spirit is the head.** The nearest one watches you (yaw ±0.45 and a
+  tilt down toward you), stirs as you come, hops when lit, and bobs while it
+  carries you.
+- **The lift** (all timings are constants at the top of beacons.ts): step
+  within the foot radius + 5.5 m on foot, grounded, for 0.18 s. Two arms
+  shoot down from under the cheeks with an overshoot (0.34 s), grab (0.12 s,
+  into `CarriedMode`, a new `MovementMode` that doesn't move the body; the rig
+  maps it to the air pose), swing you up a Bezier arc out and over onto the
+  ledge (1.05 s, fast in the middle), set you down facing the spirit, and
+  retract. The camera swings to the face side, so you land looking at it.
+  Arms are a tapered tube along a cubic curve with a rotation-minimising
+  frame, rebuilt in place each frame, plus a mitten, all in a warm amber
+  emissive. Versions tried: pale white at 0.92 emissive bloomed into white
+  bars, fat mittens hid the explorer, and control points proportional to
+  arm length looped up like a moustache at the top. A low look-up camera for
+  the reach ended up inside trees at the foot, so it's level now.
+- **Down**: on the capstone, walk outward past 80% of its radius and it
+  catches you and sets you down at the foot on that side, facing out (0.95
+  s). Jumping off doesn't get caught, so the parachute still works. After
+  being set down, the lift is disarmed until you step 10 m away.
+- **Lighting**: on the capstone, the action badge shows the flame. The
+  press plays the give gesture, a spark arcs into the crown, and the tower
+  catches. Lit towers are saved per seed (`fjellheim.towers.<seed>`,
+  cleared by `?fresh=1`).
+- **Bug found by the Phase 1 replay:** `Input.pressed()` consumes the press,
+  and the tower check read E before the story did, so the chimney step never
+  saw it. The tower now only reads the press when it has an action on offer.
+- **Perf**: no measurable cost (towers hidden vs shown vs every tower lit,
+  same session). This session's absolute numbers were ~14 ms for everything
+  including the previous commit, because something else was loading the
+  GPU, so re-measure on a quiet machine.
+- Shots: `node scripts/beacon.mjs <dir> seed=.. tower=.. shots=face,lit,far,night,home,lift`.
+
+### Stage 2 feedback pass (2026-09-29)
+Owner feedback: the head was a different colour from its tower, the eyes
+were derpy, it wasn't dark enough inside, no flame, dead until lit, towers
+floated, they needed a place to stand, and they were all the same shape.
+- **Eyes**: tall superellipse holes (exponent 5, i.e. rounded rectangles),
+  0.125 × 0.3 in the head's angular frame, level and parallel, with no tilt
+  or wandering gaze. That's the spooky, tall-eyed vibe of the owner's
+  reference. The hollow is now #150e13, nearly black until lit. The shell
+  is thinner (hollow radius 0.88) so the cut bevel reads as a thin inner
+  wall, not a frame.
+- **No flame, no crown hole.** Lit = the hollow glows (deep amber, warmer
+  toward the bottom) with light spilling on the bevels and round the rims.
+  `Tower.flame` is now the glow point, just above the head's centre; sight
+  lines use it.
+- **Same stone as its tower**: the head writes emissive 0 like the body's
+  props (the old −0.2 grade opt-out shifted its hue), and the home head uses
+  the home sandstone.
+- **Dead until lit**: unlit heads never turn, tilt or stir. The arms still
+  lift you at an unlit tower (you have to get up to light it). That's an
+  open question in DESIGN.md.
+- **Grounded**: the base boulder's centre is only 0.1 of its height above the
+  lowest ground under 70% of its radius, so its bottom is buried and the
+  uphill side goes into the slope.
+- **Varied stacks** (`layout`/`stack`): 1–3 middles with their own shrink
+  and height, a capstone from a wide thin brim to a chunky block, 45% lean
+  one way all the way up, 30% have a twin base boulder, half have 1–2
+  boulders leaning on the base, 40% have a small stone perched beside the
+  head, plus head size ±8% and three boulder meshes. The per-tower rolls are
+  independent (checked); two towers can still roll alike.
+- **The standing stone** (`Tower.pad`): a two-step flagstone plinth in pale
+  stone (#d6cbbb) in front of the face, ringed by four small upright stones
+  on the diagonals (a tiny stone circle reads as "stand here"; a lone flat
+  disc didn't read at all). It glints when you're near. Stand on it and the
+  action badge shows a new amber up-arrow icon. The lift is on the action
+  press now, not on walking up, so passing by never grabs you. Setting you
+  down lands you back on it, facing out. It's walkable through
+  `Beacons.surface`, part of `floorHeight`.
+
+### Stage 2 redesign: the lock, the tower spirit, being the head (2026-09-29)
+The owner's new flow (DESIGN.md has it): lighting a tower = freeing its
+spirit, and up top you *are* the head. This replaces the outside lift, the
+ledge, the standing stone and lighting on top.
+- **Stack** (`towers.ts layout`): a wide base, half buried; the big **door
+  boulder** set forward on it, rotated to face the head's way, so its doorway
+  comes down to the ground (`Tower.door` = the opening's centre on its
+  surface + `door.ground`, 2.5 m out, where walking in triggers); 0–2 middles;
+  a capstone; the head. Tower clearing is now `foot * 1.5 + 16`, since trees
+  crowded the doorway.
+- **The door boulder is drawn by the head shader** (kind 1 in `aH2.z`): one
+  big superellipse doorway traced into its hollow exactly like the eyeholes,
+  cut only once open. Sealed, it shows a carved seam round a slightly darker
+  door stone. Open, it's dark inside with the tower's glow high up the shaft
+  once lit (`aH2.w`). So the door costs nothing extra and holds up at any LOD.
+  Chunk colliders still treat it as solid rock; you never walk inside.
+- **The lock** (`Lock`, only for the nearest sealed tower): two rusted iron
+  straps (tubes along the boulder's ellipsoid, 5% proud) crossed low on the
+  door stone, and a squat rusty padlock with a keyhole where they cross, at
+  about 1.4 m over the doorway ground, a child's reach. The first version hung
+  it 6 m up at the door's centre. The pick badge shows within 5.5 m. Hold
+  the action to swing (the story's pick drawn into the mitten via
+  `Story.showTool`; the sandbox lends one); each swing steps you in to 1.5 m
+  (walk mode, so it collides) and faces you to it. Three blows; it jolts
+  like a pendulum, sparks, then bursts off to one side while the straps
+  slither down and shrink away.
+- **Freeing** (`updateFreeing`, timeline constants `T_*`): dust and small
+  rubble tumbling out to the sides of the doorway (never onto the path in;
+  it sinks away after 6 s); the spirit tumbles out and lands beside you; looks
+  about and blinks; two happy hops with its long arms flung up, waving,
+  facing between you and the camera; turns and looks all the way up;
+  flings both arms up to the capstone rim; yanks itself up the outside,
+  stretched long; goes over the top into the back of the head; the head blazes
+  on with a burst of sparks and a happy hop. That's ~8 s, input off. It's
+  saved as lit the moment the lock breaks.
+- **The spirit** (`TowerSpirit`): a glowing orange lathe body about 2 m
+  tall (`SPIRIT_SIZE`), two tall dark capsule eyes (the towers' eye
+  language), and the stretchy `Arm`s. At emissive 0.6 it bloomed to white;
+  it's 0.32 now.
+- **Camera**: `Beacons.cinematic()` gives the orbit camera a shot. First side
+  on to you and the spirit with the doorway behind (the side is random),
+  then a **hard cut** as the arms fling up, to the whole tower from the
+  front, so the climb and the eyes lighting are seen face on. Gliding there
+  passed the camera through the door boulder, and a camera behind the tower
+  saw only the back of the head. It cuts back to you at the end. After
+  freeing you're disarmed at that doorway until you step 5 m away,
+  otherwise it slurped you straight in.
+- **In and out** (`updateSlurp`): walk to the doorway of a lit tower and two
+  arms reach out of the dark and pull you in (`CarriedMode`). The explorer is
+  hidden (`hidePlayer`: `rig.root.visible` and the contact shadow), and the
+  camera rises from the doorway to the head's eyes (`viewCam()`, a smoothed
+  lerp, 0.85 s). Then you look out through the eyes: free mouse look
+  (`Beacons.look`), FOV 42, and the action badge shows a down arrow (new
+  icon). E, a click or Esc drops the camera back down and the arms push you
+  out onto the doorway ground. `Story.findAction` now shows the external
+  badge even when not walking, for this.
+- Unlit heads are dead stone (no look/tilt/hop); the head you're inside
+  holds still too.
+- Tests: `node scripts/beacon.mjs <dir> seed=.. tower=.. shots=unlock` plays
+  it all (lock → hold E → sequence frames → walk in → head view → look →
+  exit) and logs the badge each step. Checked on fjord and hilda. The panel
+  has "break the nearest lock" (`beacons.debugBreak()`), which plays the
+  sequence from wherever you stand.
+
+### Tower feedback pass: ghost spirit, ledge climb, 360 head, walk-in room (2026-09-29)
+- **Ghost spirit** (`TowerSpirit`): a lathe dome over a flared skirt whose hem
+  waves in seven scallops, double sided, floating 0.35 m with a bob. Tall
+  dark capsule eyes, a torus-arc smile (`grin` widens it when happy). The arms
+  (same glowing material) hang down to just off the ground and sway; they
+  fling up for joy.
+- **Ledge climb** (`frontAt`, `ledges`): the climb never enters rock. For
+  any height, `frontAt` is how far the stack reaches out along the face
+  (the widest boulder's ellipsoid there, plus its offset), and the spirit
+  hangs just outside that line. Ledges are each boulder's upper shoulder
+  (0.72 of its height) and the capstone lip. For each ledge (`CLIMB_STEP`
+  0.62 s) both hands stretch up and grab (a thud and sparks), then it hauls
+  itself up to hang under it. Then it goes over the lip onto the capstone,
+  takes a look up, and squeezes into the left eyehole, shrinking.
+- **360 head view**: the head you're in turns with your look (`look` follows
+  `viewYaw`, the tilt follows pitch), and the camera rides round just in
+  front of its face, so the rock never blocks the view. On the way in, the
+  camera rises from wherever it was, swinging out in front of the tower.
+- **Walk-in room**: the door boulder is drawn double sided (its own
+  `HeadBatch`/material sharing the head uniforms). Its doorway is a real
+  `discard` cut with a bevel ring for thickness; back faces are the cave (dark
+  stone, glowing from above once lit). Collision is done by `Beacons`: the
+  door boulder is a shell (normalised ellipsoid, walls between radius 0.86
+  and 1, horizontal push only, open through the doorway with a margin; solid
+  while sealed). The buried base is an exact dome floor (`surface`). The
+  prop colliders now leave the **whole stack** out (lean 8, via the POI's
+  `stack` count): they model every rock as a column from the ground, so the
+  floating boulders overhead became invisible walls inside the room.
+  Loose rocks round the foot stay solid. The base now sits deeper (centre at
+  -0.75 of its height) and the door boulder stands on the ground, so the
+  room's floor is walkable. Walk in over halfway (`inRoom` 0.55,
+  horizontal) and the arms come down from high in the dome to take you up.
+  Coming out, you're lowered to the room's floor, facing the doorway, and
+  the camera cuts to look in at you through it. `clampCamera` keeps the
+  camera inside the room while you're in it (unless the line of sight goes
+  out through the doorway), and never during a cinematic.
+
+### Spirit face, long-arm climb, no crows at towers (2026-09-29)
+- **Face painted in** (`GHOST_VERT/FRAG`): the capsule eyes and torus smile
+  stood proud of the body and read as clip art ("MS Clippy"). Now the body
+  shader paints two tall rounded-rectangle sockets (superellipse, exponent 4)
+  that sink into the glow: a darkened rim, near-black inside, a touch warmer
+  low down, deepest under the brow. The smile is a small, thin, lopsided
+  line like the explorer's grin (`uGrin` widens it a little). Blinks squash
+  the sockets.
+- **Climb**: no more ledge-by-ledge. Both very long arms stretch up the face
+  of the tower to the capstone lip (1.0 s, the hands tracking up just
+  outside the rock, the arm curves bowing out round the bulges via controls
+  set out from `frontAt`), a tug on the grip (0.35 s), then a slow haul in
+  three heaves (2.6 s) hanging just outside the rock, over the lip (0.7 s),
+  a look up (0.5 s), and it slips into an eyehole (0.65 s). The whole
+  freeing takes about 12 s.
+- **Crows and elk keep off towers**: `nearBase` in `crow.ts`/`elk.ts` also
+  rejects anywhere within `TOWER_CLEAR` (55 m) of a tower. All their landing
+  and spawn spots go through it. Crows had settled in a doorway's room.

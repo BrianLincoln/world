@@ -79,7 +79,7 @@ export const PHASE1: PhaseDef = {
     { id: 'pick', kind: 'pickup', targets: 'pick', item: 'pick', anchor: 'pickSpot', face: 'pick', icon: 'pick', warmth: 0.36, hour: 12.2, hint: 'tug', onDone: 'celebrate' },
     { id: 'stones', kind: 'gather', targets: 'rock', resource: 'stones', for: ['chimney'], anchor: 'pickSpot', face: 'rocks', icon: 'stone', warmth: 0.46, hour: 13.4, hint: 'tug', onDone: 'celebrate' },
     { id: 'chimney', kind: 'build', parts: ['chimney'], resource: 'stones', gather: 'stones', zone: 'chimneySpot', zoneRadius: 5.5, anchor: 'chimneySpot', face: 'chimney', icon: 'stone', warmth: 0.58, hour: 15.0, hint: 'tug', onDone: 'celebrate' },
-    { id: 'hearth', kind: 'light', targets: 'hearth', readyAt: 18.35, anchor: 'hearthSpot', face: 'hearth', pose: 'warm', icon: 'flame', warmth: 0.68, easeTo: 18.75, hint: 'tug', onDone: 'celebrate' },
-    { id: 'home', kind: 'rest', doneAt: 21.2, anchor: 'hearthSeat', face: 'hearth', pose: 'sit', icon: null, warmth: 1, easeTo: 21.3, hint: 'none' },
+    { id: 'hearth', kind: 'light', targets: 'hearth', readyAt: 0, anchor: 'hearthSpot', face: 'hearth', pose: 'warm', icon: 'flame', warmth: 0.68, hour: 16.2, hint: 'tug', onDone: 'celebrate' },
+    { id: 'home', kind: 'rest', doneAt: 0, anchor: 'hearthSeat', face: 'hearth', pose: 'sit', icon: null, warmth: 1, hint: 'none' },
   ],
 };

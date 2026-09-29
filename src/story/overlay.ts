@@ -226,3 +226,34 @@ export class Billboard {
   set scale(s: number) { this.mat.uniforms.uScale.value = s; }
   get scale() { return this.mat.uniforms.uScale.value; }
 }
+
+/**
+ * Plain screen-width lines between world points (debug views): solid, one
+ * colour, dimmed (not hidden) where terrain stands in front.
+ */
+export class OverlayLines {
+  readonly mesh: THREE.Mesh;
+  private geo = new THREE.InstancedBufferGeometry();
+
+  constructor(color: string, width = 2.5, through = 0.35) {
+    this.geo.index = QUAD.index;
+    this.geo.setAttribute('position', QUAD.attributes.position);
+    this.set([]);
+    const mat = overlayMat(LINE_VERT, LINE_FRAG, {
+      uColor: { value: new THREE.Color(color) }, uAlpha: { value: 0.95 }, uWidth: { value: width }, uDash: { value: 1e9 },
+    });
+    mat.uniforms.uThrough.value = through;
+    this.mesh = new THREE.Mesh(this.geo, mat);
+    this.mesh.frustumCulled = false;
+    this.mesh.renderOrder = 3;
+  }
+
+  /** Segments as [ax, ay, az, bx, by, bz] each. */
+  set(segs: number[][]) {
+    const a = new Float32Array(Math.max(1, segs.length) * 3), b = new Float32Array(Math.max(1, segs.length) * 3);
+    segs.forEach((s, i) => { a.set(s.slice(0, 3), i * 3); b.set(s.slice(3, 6), i * 3); });
+    this.geo.setAttribute('aA', new THREE.InstancedBufferAttribute(a, 3));
+    this.geo.setAttribute('aB', new THREE.InstancedBufferAttribute(b, 3));
+    this.geo.instanceCount = segs.length;
+  }
+}

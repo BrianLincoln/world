@@ -22,6 +22,8 @@ const TINTS = ['#ffffff', '#f4eef6', '#eef0f8', '#fbf2ec'].map((h) => new THREE.
 const MAX = 64;
 /** Crows won't touch down within this many metres of the story cabin (they still fly over). */
 const BASE_CLEAR = 80;
+/** Keep off a beacon tower's hilltop: its stack, doorway and room are within ~35 m. */
+const TOWER_CLEAR = 55;
 
 /** Body frame: body centre at the origin, +z forward, y up. */
 const BODY_Y = 0.78;
@@ -271,10 +273,11 @@ export class Crow implements Species {
     this.saddleB.setGeometry(reinsGeometry(p));
   }
 
-  /** Inside the explorer's home patch (the story cabin and its yard). */
+  /** Inside the explorer's home patch (the story cabin and its yard) or at a beacon tower. */
   private nearBase(gen: WorldGen, x: number, z: number) {
     const st = gen.story;
-    return Math.hypot(x - st.x, z - st.z) < BASE_CLEAR;
+    // Nor round a beacon tower's foot (or inside its doorway's room).
+    return Math.hypot(x - st.x, z - st.z) < BASE_CLEAR || gen.towerDist(x, z, 120) < TOWER_CLEAR;
   }
 
   /** Lower = better landing ground. Infinity = unusable. */
