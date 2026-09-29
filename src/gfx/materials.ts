@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { BIOME } from './palette';
 import {
-  CLOUD_FRAG, CLOUD_VERT, FS_VERT, PROP_FRAG, PROP_VERT, SKY_FRAG, SOLID_FRAG, SOLID_VERT,
+  CLOUD_FRAG, CLOUD_VERT, CREATURE_FRAG, CREATURE_VERT, FACE_FRAG, FACE_PARAMS, FACE_VERT, FS_VERT, PROP_FRAG, PROP_VERT, SKY_FRAG, SOLID_FRAG, SOLID_VERT,
   TERRAIN_FRAG, TERRAIN_VERT, WATER_FRAG, WATER_VERT,
 } from './shaders';
 
@@ -86,6 +86,8 @@ export const TERRAIN_U = {
   uSnowLine: { value: 235 },
   uStrokes: { value: 1 },
   uPlayerFeet: { value: new THREE.Vector3(0, -1e4, 0) },
+  uPlayerLift: { value: 0 },
+  uMobShadow: { value: Array.from({ length: 12 }, () => new THREE.Vector4()) },
 };
 
 export const WATER_U = {
@@ -142,14 +144,15 @@ export const KIND_COLORS: THREE.Color[] = [
   col(BIOME.foliage), col(BIOME.trunk), col(BIOME.rock), col(BIOME.bush),
   col(BIOME.tuft), col(BIOME.flower), col(BIOME.flowerCore), col(BIOME.cabinWall),
   col(BIOME.cabinRoof), col(BIOME.cabinTrim), col(BIOME.cabinWindow), col(BIOME.cabinDoor),
-  col(BIOME.stone), col(BIOME.cabinWall2), col(BIOME.snow), col('#ffffff'),
+  col(BIOME.stone), col(BIOME.cabinWall2), col(BIOME.snow), col(BIOME.harebell),
+  col(BIOME.buttercup),
 ];
 export const PROP_U = {
   uKind: { value: KIND_COLORS },
   uGlow: { value: col(BIOME.windowGlow) },
 };
 
-export function makePropMaterial(opts: { bend?: number; wind?: number; heightRef?: number; toneVar?: number; doubleSide?: boolean; flipBack?: boolean; cutaway?: boolean }) {
+export function makePropMaterial(opts: { bend?: number; wind?: number; heightRef?: number; toneVar?: number; doubleSide?: boolean; flipBack?: boolean; cutaway?: 'near' | 'occluders' }) {
   return mat(PROP_VERT, PROP_FRAG, {
     ...U,
     ...PROP_U,
@@ -159,7 +162,8 @@ export function makePropMaterial(opts: { bend?: number; wind?: number; heightRef
     uHeightRef: { value: opts.heightRef ?? 1 },
     uToneVar: { value: opts.toneVar ?? 0.15 },
     uFlip: { value: opts.flipBack ? 1 : 0 },
-    uCutaway: { value: opts.cutaway ? 1 : 0 },
+    // 1 = discard near the camera; 2 = also hide whole instances blocking the player.
+    uCutaway: { value: opts.cutaway === 'occluders' ? 2 : opts.cutaway === 'near' ? 1 : 0 },
   }, { side: opts.doubleSide ? THREE.DoubleSide : THREE.FrontSide });
 }
 
@@ -171,6 +175,58 @@ export function makeCloudMaterial() {
   return mat(CLOUD_VERT, CLOUD_FRAG, { ...U, ...SKY_U }, { depthTest: false, depthWrite: false, side: THREE.DoubleSide });
 }
 
-export function makeSolidMaterial(hex: string, emissive = 0) {
-  return mat(SOLID_VERT, SOLID_FRAG, { ...U, uIsProp: { value: 1 }, uColor: { value: col(hex) }, uEmissive: { value: emissive } });
+/** `keep` = how much of its own colour survives the monochrome grade (0..1). */
+export function makeSolidMaterial(hex: string, emissive = 0, opts: { keep?: number; doubleSide?: boolean; flat?: number } = {}) {
+  return mat(SOLID_VERT, SOLID_FRAG, {
+    ...U, uIsProp: { value: 1 }, uColor: { value: col(hex) }, uEmissive: { value: emissive }, uKeep: { value: opts.keep ?? 0.7 }, uFlat: { value: opts.flat ?? 0 },
+  }, { side: opts.doubleSide ? THREE.DoubleSide : THREE.FrontSide });
+}
+
+export interface CreatureLook {
+  keep?: number;
+  eyeOrigin?: THREE.Vector3;
+  eyePos?: [number, number];
+  eyeSize?: [number, number];
+  pupil?: [number, number];
+  lookRange?: [number, number];
+  eyeTilt?: number;
+  mouthOrigin?: THREE.Vector3;
+  mouth?: [number, number, number];
+  mouthW?: [number, number, number];
+  blush?: [number, number, number, number];
+  blushCol?: string;
+  doubleSide?: boolean;
+}
+
+/** Instanced creature parts: vertex colours plus painted eyes/mouth (see CREATURE_FRAG). */
+export function makeCreatureMaterial(o: CreatureLook = {}) {
+  return mat(CREATURE_VERT, CREATURE_FRAG, {
+    ...U,
+    uIsProp: { value: 2 },
+    uKeep: { value: o.keep ?? 0.55 },
+    uInk: { value: col('#2e1f28') },
+    uWhite: { value: col('#fffdf8') },
+    uEyeOrigin: { value: o.eyeOrigin ?? new THREE.Vector3() },
+    uEyePos: { value: new THREE.Vector2(...(o.eyePos ?? [0.4, 0.2])) },
+    uEyeSize: { value: new THREE.Vector2(...(o.eyeSize ?? [0.2, 0.25])) },
+    uPupil: { value: new THREE.Vector2(...(o.pupil ?? [0.06, 0.09])) },
+    uLookRange: { value: new THREE.Vector2(...(o.lookRange ?? [0.12, 0.1])) },
+    uEyeTilt: { value: o.eyeTilt ?? 0 },
+    uMouthOrigin: { value: o.mouthOrigin ?? new THREE.Vector3() },
+    uMouth: { value: new THREE.Vector3(...(o.mouth ?? [-0.2, 0.2, 1])) },
+    uMouthW: { value: new THREE.Vector3(...(o.mouthW ?? [0, 0, 0])) },
+    uBlush: { value: new THREE.Vector4(...(o.blush ?? [0, 0, 0, 0])) },
+    uBlushCol: { value: col(o.blushCol ?? '#ef9c93') },
+    uGlow: PROP_U.uGlow,
+  }, { side: o.doubleSide ? THREE.DoubleSide : THREE.FrontSide });
+}
+
+/** The explorer's head: skin with painted eyes/brows/nose/mouth (see FACE_FRAG). */
+export function makeFaceMaterial(skin: string, ink: string, white: string, brow: string) {
+  return mat(FACE_VERT, FACE_FRAG, {
+    ...U, uIsProp: { value: 1 }, uColor: { value: col(skin) }, uInk: { value: col(ink) }, uWhite: { value: col(white) },
+    uBrow: { value: col(brow) }, uEyeType: { value: 0 }, uBlink: { value: 1 },
+    uFace: { value: FACE_PARAMS.map((p) => p.value as number) },
+    uLook: { value: new THREE.Vector2() },
+  });
 }

@@ -43,6 +43,12 @@ npm run shots    # build + headless GPU screenshots -> shots/   (look at them!)
   `environment.ts` (day/night), `post.ts` (G-buffer → bloom → layer fog →
   outlines/grade → FXAA), `geometry.ts` (trees, rocks, cabins), `sky.ts`.
 - `src/player/`: input → movement modes → character rig; `orbitCamera.ts`.
+- `src/mobs/`: creatures. `manager.ts` (spawning, lasso, leads, shadows),
+  `floof.ts`, `crow.ts` (geometry + brain + animation per species),
+  `parts.ts` (instanced part batches, fur), `rope.ts`.
+- `src/vehicles/`: bicycles. `bicycle.ts` (geometry, instanced parts,
+  skeleton), `bikes.ts` (seeded placement, parking, riding presentation,
+  rider IK targets). Movement is `BikeMode`.
 - `src/ui/debug.ts`: the panel and HUD.
 
 ## Critical gotchas (details in docs/WORKFLOW.md)

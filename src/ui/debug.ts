@@ -2,6 +2,7 @@ import GUI from 'lil-gui';
 import { postSettings } from '../gfx/post';
 import { SKY_PRESETS } from '../gfx/palette';
 import { KIND_COLORS, TERRAIN_U, U } from '../gfx/materials';
+import { FACE_PARAMS } from '../gfx/shaders';
 import type { Environment } from '../gfx/environment';
 import type { Terrain } from '../world/terrain';
 
@@ -14,6 +15,16 @@ export interface DebugHooks {
   modeName(): string;
   setMode(m: string): void;
   position(): { x: number; y: number; z: number };
+  character: { eyeType: 'dot' | 'round'; faceValues: number[] };
+  colliders: { enabled: boolean };
+  /** Camera close-up on the face, and the explorer holds still. */
+  faceCam(on: boolean): void;
+  mobs: { settings: { enabled: boolean; density: number; freeze: boolean } };
+  bikes: { settings: { enabled: boolean } };
+  /** Drop a flock of `species` in front of the explorer. */
+  spawnFlock(species: string): void;
+  /** Crow shape, 0 sleek .. 1 round. */
+  crowPlump: { get(): number; set(v: number): void };
 }
 
 export class DebugUI {
@@ -88,14 +99,65 @@ export class DebugUI {
     fr.add(h.terrain.settings, 'splitFactor', 1.2, 4, 0.05).name('terrain detail');
     fr.add(h.terrain.settings, 'showProps').name('props');
     fr.add(h.terrain.settings, 'showGround').name('ground');
+    fr.add(h.colliders, 'enabled').name('prop collision');
     const strokes = { on: TERRAIN_U.uStrokes.value > 0.5 };
     fr.add(strokes, 'on').name('ground strokes').onChange((v: boolean) => (TERRAIN_U.uStrokes.value = v ? 1 : 0));
     fr.close();
 
+    const fc = this.gui.addFolder('Creatures');
+    fc.add(h.mobs.settings, 'enabled').name('creatures');
+    fc.add(h.mobs.settings, 'density', 0, 4, 0.05).name('wild density');
+    fc.add(h.mobs.settings, 'freeze').name('freeze brains');
+    fc.add({ w: () => h.spawnFlock('floof') }, 'w').name('spawn floofs here');
+    fc.add({ c: () => h.spawnFlock('crow') }, 'c').name('spawn crows here');
+    const plump = { plump: h.crowPlump.get() };
+    fc.add(plump, 'plump', 0, 1, 0.01).name('crow roundness').onFinishChange((v: number) => h.crowPlump.set(v));
+    fc.add(h.bikes.settings, 'enabled').name('bicycles');
+    fc.close();
+
     const fm = this.gui.addFolder('Player');
     const mode = { mode: h.modeName() };
-    fm.add(mode, 'mode', ['walk', 'fly', 'swim']).name('mode (F = fly)').onChange((v: string) => h.setMode(v)).listen();
+    fm.add(mode, 'mode', ['walk', 'glide', 'fly', 'swim', 'ride', 'bike']).name('mode (F = fly)').onChange((v: string) => h.setMode(v)).listen();
     setInterval(() => (mode.mode = h.modeName()), 250);
+    fm.add(h.character, 'eyeType', ['dot', 'round']).name('eyes').listen();
+
+    // Round-eye face tuning. Values persist in this browser (localStorage);
+    // "copy values" puts them on the clipboard to paste back into
+    // FACE_PARAMS as the new defaults.
+    const faceF = fm.addFolder('Face (round eyes)');
+    const fv = h.character.faceValues;
+    const face: Record<string, number> = {};
+    let saved: Record<string, number> = {};
+    try { saved = JSON.parse(localStorage.getItem('ow.face.v2') ?? '{}'); } catch { /* storage unavailable */ }
+    const save = () => { try { localStorage.setItem('ow.face.v2', JSON.stringify(face)); } catch { /* storage unavailable */ } };
+    const cam = { 'face cam': false };
+    faceF.add(cam, 'face cam').onChange((v: boolean) => {
+      if (v) h.character.eyeType = 'round';
+      h.faceCam(v);
+    });
+    FACE_PARAMS.forEach((p, i) => {
+      face[p.key] = typeof saved[p.key] === 'number' ? saved[p.key] : p.value;
+      fv[i] = face[p.key];
+      faceF.add(face, p.key, p.min, p.max, p.step).onChange((v: number) => { fv[i] = v; save(); });
+    });
+    faceF.add({ copy: () => {
+      const txt = JSON.stringify(face, null, 2);
+      console.log(txt);
+      navigator.clipboard?.writeText(txt).catch(() => undefined);
+    } }, 'copy').name('copy values');
+    faceF.add({ reset: () => {
+      FACE_PARAMS.forEach((p, i) => { face[p.key] = p.value; fv[i] = p.value; });
+      save();
+      faceF.controllersRecursive().forEach((c) => c.updateDisplay());
+    } }, 'reset').name('reset face');
+    faceF.close();
+
+    // Back to the values each control had at startup. Seed, clock and movement
+    // mode are world/game state, not settings, so they're left alone.
+    const keep = new Set(['seed', 'hour', 'mode']);
+    this.gui.add({ reset: () => this.gui.controllersRecursive()
+      .filter((c) => !keep.has(c.property) && typeof c.initialValue !== 'function')
+      .forEach((c) => c.reset()) }, 'reset').name('reset to defaults');
 
     this.fpsEl = document.createElement('div');
     this.fpsEl.id = 'fps';

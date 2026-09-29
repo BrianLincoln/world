@@ -1,4 +1,4 @@
 node_modules
 dist
-shots/*.png
+shots/**/*.png
 .DS_Store

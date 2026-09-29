@@ -171,6 +171,8 @@ export const BIOME = {
   tuft: '#7a6a3a',
   flower: '#fbf6ec',
   flowerCore: '#e8c860',
+  buttercup: '#f0d25a',
+  harebell: '#9ea6e0',
   waterShallow: '#a4b6b4',
   foam: '#f2efe6',
   cabinWall: '#a9543f',  // falu red, like the cabin in inspo/3

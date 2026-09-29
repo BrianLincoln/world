@@ -6,8 +6,14 @@ export interface InputState {
   x: number;
   /** -1..1 forward (+) */
   y: number;
+  /** Sprint (Shift). */
   run: boolean;
+  /** Slow walk (Alt). The default gait is a jog. */
+  walk: boolean;
+  /** Jump held (for variable jump height). */
   jump: boolean;
+  /** Jump pressed this frame (buffered jumps, parachute toggle). */
+  jumpPressed: boolean;
   up: boolean;
   down: boolean;
 }
@@ -29,7 +35,7 @@ export class Input {
       if (typing(e)) return;
       if (!this.keys.has(e.code)) this.edges.add(e.code);
       this.keys.add(e.code);
-      if (e.code === 'Space' || e.code.startsWith('Arrow')) e.preventDefault();
+      if (e.code === 'Space' || e.code.startsWith('Arrow') || e.code.startsWith('Alt')) e.preventDefault();
     });
     window.addEventListener('keyup', (e) => this.keys.delete(e.code));
     window.addEventListener('blur', () => this.keys.clear());
@@ -37,8 +43,11 @@ export class Input {
       if (e.button === 0 && !document.pointerLockElement) {
         el.requestPointerLock?.();
       }
-      this.dragging = true;
+      // Right button is an action (lasso), reported like a key: 'Mouse2'.
+      if (e.button === 2) this.edges.add('Mouse2');
+      else this.dragging = true;
     });
+    el.addEventListener('contextmenu', (e) => e.preventDefault());
     window.addEventListener('pointerup', () => (this.dragging = false));
     window.addEventListener('mousemove', (e) => {
       if (document.pointerLockElement === this.el || this.dragging) {
@@ -58,8 +67,10 @@ export class Input {
       x: (k('KeyD') || k('ArrowRight') ? 1 : 0) - (k('KeyA') || k('ArrowLeft') ? 1 : 0),
       y: (k('KeyW') || k('ArrowUp') ? 1 : 0) - (k('KeyS') || k('ArrowDown') ? 1 : 0),
       run: k('ShiftLeft') || k('ShiftRight'),
+      walk: k('AltLeft') || k('AltRight'),
       jump: k('Space'),
-      up: k('Space') || k('KeyE'),
+      jumpPressed: this.edges.has('Space'),
+      up: k('Space'),
       down: k('KeyC') || k('KeyQ') || k('ControlLeft'),
     };
   }

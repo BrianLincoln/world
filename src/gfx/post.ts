@@ -108,8 +108,18 @@ void main() {
       float nearer = step(-0.002, de);
       float normalEdge = smoothstep(uNormalThr, uNormalThr + 0.15, ne) * nearer * (1.0 - smoothstep(30.0, 160.0, d));
       float edge = max(depthEdge, normalEdge) * (1.0 - smoothstep(uFade0, uFade1, d));
+      // Creatures (normal length 0.62) are small and fuzzy: past a few tens of
+      // metres their line eases off into a darker shade of their own colour,
+      // or a distant flock reads as a cluster of ink rings.
+      vec3 lineCol = uOutlineCol;
+      float nl2 = dot(nd.xyz, nd.xyz);
+      if (nl2 > 0.32 && nl2 < 0.46) {
+        float far = smoothstep(14.0, 90.0, d);
+        edge *= 1.0 - 0.75 * far;
+        lineCol = mix(uOutlineCol, col * 0.78, far);
+      }
       // Lines on distant layers become a darker shade of that layer, not ink.
-      col = mix(col, uOutlineCol, edge);
+      col = mix(col, lineCol, edge);
     }
 
     // Reconstruct world position from linear depth.

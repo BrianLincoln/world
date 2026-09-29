@@ -25,11 +25,13 @@ vec3 toonLight(vec3 n) {
 export const GBUF_OUT = /* glsl */ `
 layout(location = 0) out vec4 gColor;
 layout(location = 1) out vec4 gND;
-// Props store half-length normals so post passes can tell them from ground.
+// Props store half-length normals so post passes can tell them from ground;
+// creatures (uIsProp = 2) store 0.62 so outlines can treat them gently.
 uniform float uIsProp;
 void writeG(vec3 col, float emissive, vec3 nWorld, vec3 viewPos) {
   gColor = vec4(col, emissive);
-  gND = vec4(normalize((viewMatrix * vec4(nWorld, 0.0)).xyz) * (uIsProp > 0.5 ? 0.5 : 1.0), -viewPos.z);
+  float tag = uIsProp > 1.5 ? 0.62 : uIsProp > 0.5 ? 0.5 : 1.0;
+  gND = vec4(normalize((viewMatrix * vec4(nWorld, 0.0)).xyz) * tag, -viewPos.z);
 }
 `;
 
@@ -82,6 +84,9 @@ uniform vec3 cStroke;
 uniform float uSnowLine;
 uniform float uStrokes;
 uniform vec3 uPlayerFeet;
+uniform float uPlayerLift;
+// Creature contact shadows: xyz = ground point under it, w = radius (0 = off).
+uniform vec4 uMobShadow[12];
 
 // Storybook ground marks: short curved dashes scattered in world space,
 // only near the camera (they'd shimmer further out).
@@ -145,8 +150,16 @@ void main() {
   lightBand = mix(lightBand, mix(uMidCol, uLightCol, 0.6), smoothstep(350.0, 1300.0, dist));
   vec3 col = c * lightBand;
   // Contact shadow under the explorer: a flat ellipse in the shade tone.
-  vec2 pd = (vWorld.xz - uPlayerFeet.xz) * vec2(1.0, 1.0);
-  if (dot(pd, pd) < 0.2 && abs(vH - uPlayerFeet.y) < 0.6) col = c * uShadeCol * 0.92;
+  // uPlayerFeet.y is the ground under them; it shrinks as they rise.
+  vec2 pd = vWorld.xz - uPlayerFeet.xz;
+  float shR = 0.52 / (1.0 + uPlayerLift * 0.12);
+  if (dot(pd, pd) < shR * shR && abs(vH - uPlayerFeet.y) < 0.6) col = c * uShadeCol * 0.92;
+  for (int i = 0; i < 12; i++) {
+    vec4 ms = uMobShadow[i];
+    if (ms.w <= 0.0) continue;
+    vec2 md = vWorld.xz - ms.xz;
+    if (dot(md, md) < ms.w * ms.w && abs(vH - ms.y) < 0.8) col = c * uShadeCol * 0.92;
+  }
   if (grass) {
     float s = strokes(vWorld.xz, dist);
     col = mix(col, cStroke * toonLight(n), s * 0.8);
@@ -185,19 +198,37 @@ void main() {
   p.xz *= sc;
   p.y *= sc * sy;
   vec3 base = (modelMatrix * vec4(aI0.xyz, 1.0)).xyz;
-  if (uCutaway > 0.5) {
-    // Hide whole trees standing between the camera and the player (2D test
-    // against the camera->focus segment), instead of slicing them open.
+  if (uCutaway > 1.5) {
+    // Hide whole trees whose canopy actually blocks the camera->player
+    // sightline, instead of slicing them open. The canopy is a cone from
+    // ~17% of the height (under the drooping lowest tier) to the tip. A tree
+    // right beside the player isn't hidden: the sightline there runs at
+    // chest height, under its branches.
     vec2 a = cameraPosition.xz;
     vec2 ab = uFocus.xz - a;
-    float t = clamp(dot(base.xz - a, ab) / max(dot(ab, ab), 1e-3), 0.0, 1.0);
-    float r = length(base.xz - (a + ab * t));
-    float reach = 2.8 * sc + 0.8;
-    float top = base.y + uHeightRef * sc * sy;
-    float segY = mix(cameraPosition.y, uFocus.y, t);
-    if (t < 0.97 && r < reach && segY < top) {
-      gl_Position = vec4(0.0, 0.0, 2.0, 1.0);
-      return;
+    float L2 = max(dot(ab, ab), 1e-3);
+    float L = sqrt(L2);
+    float t0 = dot(base.xz - a, ab) / L2;
+    float rMax = 2.8 * sc + 0.3;
+    float perp = length(base.xz - (a + ab * clamp(t0, 0.0, 1.0)));
+    if (perp < rMax) {
+      float hTree = uHeightRef * sc * sy;
+      float yLow = 0.17 * hTree;
+      // Where the sightline crosses the canopy footprint; stop short of the player.
+      float span = sqrt(max(rMax * rMax - perp * perp, 0.0)) / L;
+      float tEnd = 1.0 - 0.6 / L;
+      bool hide = false;
+      for (int i = 0; i < 5; i++) {
+        float t = clamp(t0 + span * (float(i) * 0.5 - 1.0), 0.0, tEnd);
+        vec3 q = mix(cameraPosition, uFocus, t);
+        float y = q.y - base.y;
+        float cr = y < yLow ? 0.0 : rMax * clamp((hTree - y) / (hTree - yLow), 0.0, 1.0);
+        if (length(q.xz - base.xz) < cr) hide = true;
+      }
+      if (hide) {
+        gl_Position = vec4(0.0, 0.0, 2.0, 1.0);
+        return;
+      }
     }
   }
   float sway = sin(uTime * 1.1 + base.x * 0.045 + base.z * 0.06) * uWind
@@ -231,14 +262,15 @@ in vec3 vLocal;
 in float vKind;
 in float vTone;
 in vec3 vWorld;
-uniform vec3 uKind[16];
+uniform vec3 uKind[17];
 uniform vec3 uGlow;
 uniform float uToneVar;
 uniform float uFlip;
 uniform float uCutaway;
 uniform vec3 uFocus;
 // Kinds: 0 foliage, 1 trunk, 2 rock, 3 bush, 4 tuft, 5 flower petal, 6 flower core,
-// 7 wall, 8 roof, 9 trim, 10 window, 11 door, 12 stone, 13 wall alt, 14 snowcap(rock)
+// 7 wall, 8 roof, 9 trim, 10 window, 11 door, 12 stone, 13 wall alt, 14 snowcap(rock),
+// 15 harebell, 16 buttercup (petals of kind 5 with instance tone > 0.6)
 void main() {
   int k = int(vKind + 0.5);
   if (uCutaway > 0.5) {
@@ -249,6 +281,8 @@ void main() {
   vec3 n = normalize(vN);
   if (uFlip > 0.5 && !gl_FrontFacing) n = -n;
   vec3 base = uKind[k];
+  bool petal = k == 5 || k == 15;
+  if (k == 5 && vTone > 0.6) base = uKind[16];
   base *= 1.0 - uToneVar * 0.5 + uToneVar * vTone;
   float emissive = 0.0;
   if (k == 7 || k == 13) {
@@ -265,6 +299,7 @@ void main() {
   vec3 col = k == 10 ? base : base * toonLight(n);
   // Negative alpha = partial opt-out of the monochrome grade (accent colours).
   if (emissive == 0.0 && (k == 7 || k == 8)) emissive = -0.45;
+  if (petal) emissive = -0.35;
   writeG(col, emissive, n, vView);
 }
 `;
@@ -485,10 +520,316 @@ in vec3 vN;
 in vec3 vView;
 uniform vec3 uColor;
 uniform float uEmissive;
+uniform float uKeep;
+uniform float uFlat;
 void main() {
   vec3 n = normalize(vN);
-  vec3 col = uEmissive > 0.0 ? uColor : uColor * toonLight(n);
+  if (!gl_FrontFacing) n = -n;
+  vec3 col = uEmissive > 0.0 ? uColor : uColor * mix(toonLight(n), uLightCol, uFlat);
   // The explorer keeps most of their colour so they read against the land.
-  writeG(col, uEmissive > 0.0 ? uEmissive : -0.7, n, vView);
+  writeG(col, uEmissive > 0.0 ? uEmissive : -uKeep, n, vView);
+}
+`;
+
+// ------------------------------------------------------------------ creatures
+// Instanced creature parts (woffs, crows). Per-vertex colour (aCol.rgb) so a
+// whole creature body is one merged mesh; aCol.a tags where features are
+// painted: 1 = eyes (around uEyeOrigin), 2 = mouth (around uMouthOrigin),
+// 3 = a lamp that glows at night.
+// Per instance: instanceColor = tint, aEye = (lookX, lookY, lids, unused)
+// where lids 1 = open, 0 = shut, -1 = happy arcs.
+
+export const CREATURE_VERT = /* glsl */ `
+in vec4 aCol;
+in float aTint;
+in vec4 aEye;
+out vec3 vN;
+out vec3 vView;
+out vec3 vObj;
+out vec4 vCol;
+out vec4 vEye;
+void main() {
+  mat4 m = modelMatrix * instanceMatrix;
+  vObj = position;
+  // Parts squash and stretch, so normals need the inverse transpose.
+  vN = normalize(inverse(transpose(mat3(m))) * normal);
+  vCol = aCol;
+#ifdef USE_INSTANCING_COLOR
+  vCol.rgb *= mix(vec3(1.0), instanceColor, aTint);
+#endif
+  vEye = aEye;
+  vec4 vp = viewMatrix * (m * vec4(position, 1.0));
+  vView = vp.xyz;
+  gl_Position = projectionMatrix * vp;
+}
+`;
+
+export const CREATURE_FRAG = /* glsl */ `
+${COMMON}
+${GBUF_OUT}
+in vec3 vN;
+in vec3 vView;
+in vec3 vObj;
+in vec4 vCol;
+in vec4 vEye;
+uniform float uKeep;
+uniform vec3 uInk;
+uniform vec3 uWhite;
+uniform vec3 uEyeOrigin;
+/** Eye centre (yaw, pitch) in radians from the face centre, mirrored in x. */
+uniform vec2 uEyePos;
+uniform vec2 uEyeSize;
+uniform vec2 uPupil;
+/** How far pupils can travel for a look of 1. */
+uniform vec2 uLookRange;
+/** Eye rotation: + lifts the outer corners. */
+uniform float uEyeTilt;
+uniform vec3 uMouthOrigin;
+/** Mouth: (y centre, half width, curve), in radians around uMouthOrigin. */
+uniform vec3 uMouth;
+/** A little "w" mouth painted with the eyes: (y, half-spacing, curve); y = 0 = none. */
+uniform vec3 uMouthW;
+/** Cheek blush: (yaw, pitch, radius x, radius y), mirrored; radius 0 = none. */
+uniform vec4 uBlush;
+uniform vec3 uBlushCol;
+uniform vec3 uGlow;
+
+float fillE(float d, float aa) { return 1.0 - smoothstep(-0.5 * aa, 0.5 * aa, d); }
+vec2 sphereUV(vec3 d) { return vec2(atan(d.x, d.z), asin(clamp(d.y, -1.0, 1.0))); }
+
+void main() {
+  vec3 n = normalize(vN);
+  if (!gl_FrontFacing) n = -n;
+  // Far away (and usually seen from below) a creature would be mostly its
+  // shaded belly and read as a dark blot: flatten it toward the lit tones,
+  // as distant terrain does.
+  float far = smoothstep(20.0, 110.0, length(vView));
+  vec3 col = vCol.rgb * mix(toonLight(n), mix(uMidCol, uLightCol, 0.65), far * 0.9);
+  // A touch of aerial haze: dark coats soften toward the sky tone with
+  // distance instead of reading as holes in it.
+  col = mix(col, uLightCol * 0.92, smoothstep(35.0, 220.0, length(vView)) * 0.4);
+  float keep = uKeep;
+  float tag = vCol.a;
+  if (tag > 0.5 && tag < 1.5) {
+    vec3 dir = normalize(vObj - uEyeOrigin);
+    vec2 p = sphereUV(dir);
+    vec2 m = vec2(abs(p.x), p.y);
+    // Pixel size in radians, from the direction (atan wraps at the back).
+    float aa = max(length(fwidth(dir)), 1e-4);
+    float lw = max(0.012, aa * 1.1);
+    float lids = vEye.z;
+    if (uBlush.z > 0.0) {
+      vec2 bq = (m - uBlush.xy) / uBlush.zw;
+      col = mix(col, uBlushCol * toonLight(n), fillE((length(bq) - 1.0) * uBlush.w, aa) * 0.8);
+    }
+    if (uMouthW.x != 0.0) {
+      // Two little arcs meeting in the middle, like a cat's mouth.
+      float u = abs(p.x) - uMouthW.y;
+      float y = uMouthW.x + uMouthW.z * u * u;
+      float w = max(abs(p.y - y) - lw * 0.8, abs(p.x) - uMouthW.y * 2.0);
+      col = mix(col, uInk, fillE(w, aa));
+    }
+    float ct = cos(uEyeTilt), st = sin(uEyeTilt);
+    vec2 me = uEyePos + mat2(ct, st, -st, ct) * (m - uEyePos);
+    vec2 q = (me - uEyePos) / uEyeSize;
+    float d = (length(q) - 1.0) * min(uEyeSize.x, uEyeSize.y);
+    if (lids > 0.02) {
+      // Whites squash shut from the top and bottom.
+      vec2 r = vec2(uEyeSize.x, uEyeSize.y * lids);
+      vec2 qq = (me - uEyePos) / r;
+      d = (length(qq) - 1.0) * min(r.x, r.y);
+      float white = fillE(d, aa);
+      col = mix(col, uWhite * mix(uLightCol, vec3(1.0), 0.55 - 0.25 * uNight), white);
+      // Pupils share one look direction so they never cross.
+      vec2 room = max(r - uPupil * vec2(1.0, lids) * 1.15, 0.0);
+      vec2 lk = clamp(vEye.xy * uLookRange, -room, room);
+      vec2 pc = vec2(sign(p.x) * uEyePos.x, uEyePos.y) + lk;
+      vec2 pq = (p - pc) / (uPupil * vec2(1.0, max(lids, 0.2)));
+      float pd = (length(pq) - 1.0) * min(uPupil.x, uPupil.y);
+      col = mix(col, uInk, fillE(max(pd, d), aa));
+      col = mix(col, uInk, fillE(abs(d) - lw * 0.6, aa));
+      keep = mix(keep, 0.95, white);
+    } else if (lids < -0.02) {
+      // Happy: upward arcs.
+      vec2 c = uEyePos - vec2(0.0, uEyeSize.y * 0.35);
+      float arc = abs(length((m - c) / vec2(1.0, 1.25)) - uEyeSize.x * 0.75) - lw;
+      arc = max(arc, c.y - m.y);
+      col = mix(col, uInk, fillE(arc, aa));
+    } else {
+      float line = max(abs(m.y - uEyePos.y) - lw * 0.8, abs(m.x - uEyePos.x) - uEyeSize.x * 0.85);
+      col = mix(col, uInk, fillE(line, aa));
+    }
+  } else if (tag > 1.5 && tag < 2.5) {
+    // A small frown: a curve that droops at both ends (inspo woff).
+    vec3 dir = normalize(vObj - uMouthOrigin);
+    vec2 p = sphereUV(dir);
+    float aa = max(length(fwidth(dir)), 1e-4);
+    float lw = max(0.02, aa * 1.1);
+    float y = uMouth.x - uMouth.z * p.x * p.x;
+    float mouth = max(abs(p.y - y) - lw, abs(p.x) - uMouth.y);
+    col = mix(col, uInk, fillE(mouth, aa));
+  }
+  float glow = 0.0;
+  if (tag > 2.5) {
+    // A lamp (bicycles): lit warm at night, like the cabin windows.
+    col = mix(col, uGlow, uNight);
+    glow = uNight;
+  }
+  writeG(col, glow > 0.02 ? glow : -keep, n, vView);
+}
+`;
+
+// ------------------------------------------------------------------ explorer face
+// Features are painted on the head sphere (object space = unit sphere) with
+// their own thin ink, not the scene outline pass, whose lines are too heavy
+// at face scale. Coordinates are (yaw, pitch) radians from the face centre.
+
+/**
+ * Tunable round-eye face, live in the debug panel (Player → Face). Angles
+ * are radians on the head: x = yaw from the face centre (+ = the
+ * character's left), y = pitch (+ = up).
+ */
+export const FACE_PARAMS = [
+  { key: 'eyeSpacing', value: 0.395, min: 0.1, max: 0.6, step: 0.005 },
+  { key: 'eyeHeight', value: 0.39, min: -0.3, max: 0.4, step: 0.005 },
+  { key: 'eyeWidth', value: 0.25, min: 0.03, max: 0.35, step: 0.005 },
+  { key: 'eyeTall', value: 0.45, min: 0.03, max: 0.45, step: 0.005 },
+  { key: 'eyeSquareness', value: 3.05, min: 1.5, max: 5, step: 0.05 },
+  { key: 'eyeTilt', value: 0.06, min: -0.6, max: 0.6, step: 0.01 },
+  { key: 'outline', value: 0.001, min: 0, max: 0.03, step: 0.0005 },
+  { key: 'pupilWidth', value: 0.043, min: 0.005, max: 0.15, step: 0.002 },
+  { key: 'pupilTall', value: 0.137, min: 0.005, max: 0.25, step: 0.002 },
+  { key: 'lookX', value: 0, min: -0.15, max: 0.15, step: 0.002 },
+  { key: 'lookY', value: -0.02, min: -0.2, max: 0.2, step: 0.002 },
+  { key: 'noseX', value: -0.03, min: -0.3, max: 0.3, step: 0.005 },
+  { key: 'noseHeight', value: -0.13, min: -0.5, max: 0.2, step: 0.005 },
+  { key: 'noseSize', value: 0.05, min: 0, max: 0.15, step: 0.002 },
+  { key: 'mouthHeight', value: -0.42, min: -0.8, max: -0.05, step: 0.005 },
+  { key: 'mouthX', value: 0.055, min: -0.3, max: 0.3, step: 0.005 },
+  { key: 'mouthWidth', value: 0.205, min: 0.02, max: 0.5, step: 0.005 },
+  { key: 'mouthCurve', value: 0.9, min: -3, max: 5, step: 0.05 },
+  { key: 'mouthCurl', value: 4, min: 0, max: 20, step: 0.25 },
+  { key: 'mouthLine', value: 0.008, min: 0.002, max: 0.03, step: 0.0005 },
+] as const;
+const FACE_DEFINES = FACE_PARAMS.map((p, i) => `#define F_${p.key} uFace[${i}]`).join('\n');
+
+export const FACE_VERT = /* glsl */ `
+out vec3 vN;
+out vec3 vView;
+out vec3 vObj;
+void main() {
+  vObj = position;
+  vN = normalize(mat3(modelMatrix) * normal);
+  vec4 vp = modelViewMatrix * vec4(position, 1.0);
+  vView = vp.xyz;
+  gl_Position = projectionMatrix * vp;
+}
+`;
+
+export const FACE_FRAG = /* glsl */ `
+${COMMON}
+${GBUF_OUT}
+in vec3 vN;
+in vec3 vView;
+in vec3 vObj;
+uniform vec3 uColor;
+uniform vec3 uInk;
+uniform vec3 uWhite;
+uniform vec3 uBrow;
+/** 0 = solid ink ovals, 1 = round whites with small pupils. */
+uniform float uEyeType;
+/** 1 open .. 0 shut. */
+uniform float uBlink;
+uniform float uFace[${FACE_PARAMS.length}];
+/** Animated gaze (idle glances, heading), added to lookX/lookY. */
+uniform vec2 uLook;
+${FACE_DEFINES}
+
+// Approximate signed distance to an ellipse, in the same units as p.
+float ell(vec2 p, vec2 c, vec2 r) {
+  vec2 q = (p - c) / r;
+  return (length(q) - 1.0) * min(r.x, r.y);
+}
+// Edges resolve over one pixel: wider AA smears small features at distance.
+float fill(float d, float aa) { return 1.0 - smoothstep(-0.5 * aa, 0.5 * aa, d); }
+// Superellipse: power 2 = ellipse, higher = squarer.
+float sell(vec2 p, vec2 c, vec2 r, float n) {
+  vec2 q = abs((p - c) / r);
+  return (pow(pow(q.x, n) + pow(q.y, n), 1.0 / n) - 1.0) * min(r.x, r.y);
+}
+
+void main() {
+  vec3 n = normalize(vN);
+  vec3 dir = normalize(vObj);
+  vec2 p = vec2(atan(dir.x, dir.z), asin(clamp(dir.y, -1.0, 1.0)));
+  vec2 m = vec2(abs(p.x), p.y);
+  float aa = max(fwidth(p.x), fwidth(p.y));
+  // Lines never go thinner than ~1px, so the face survives distance.
+  float lw = max(0.011, aa * 1.1);
+
+  vec3 lit = toonLight(n);
+  vec3 col = uColor * lit;
+  float open = max(uBlink, 0.0);
+
+  // Proportions measured from inspo/char1 (face = brim to scarf here):
+  // whites ~1/3 face wide and ~0.4 face tall with only a quarter-eye gap,
+  // slim oval pupils, the nose hooked over the whites' lower inner edges,
+  // and a wide off-centre grin low on the face (~0.8 of the way down).
+  bool round = uEyeType > 0.5;
+  float ink = lw * 1.3;
+  float white = 0.0;
+  if (!round) {
+    vec2 bq = m - vec2(0.3, 0.02);
+    float brow = abs(length(bq) - 0.24) - lw * 0.9;
+    brow = max(max(brow, abs(m.x - 0.3) - 0.075), -bq.y);
+    col = mix(col, uBrow * mix(lit, uLightCol, 0.5), fill(brow, aa));
+    vec2 r = vec2(0.058, max(0.092 * open, lw));
+    col = mix(col, uInk, fill(ell(m, vec2(0.3, 0.07), r), aa));
+  } else {
+    // All values come from FACE_PARAMS (debug panel: Player → Face).
+    vec2 c = vec2(F_eyeSpacing, F_eyeHeight);
+    vec2 r = vec2(F_eyeWidth, F_eyeTall * open);
+    // Tilt: + lifts the outer corners.
+    float ct = cos(F_eyeTilt), st = sin(F_eyeTilt);
+    vec2 me = c + mat2(ct, st, -st, ct) * (m - c);
+    float d = open > 0.0 ? sell(me, c, r, F_eyeSquareness) : 1.0;
+    white = fill(d, aa);
+    col = mix(col, uWhite * mix(uLightCol, vec3(1.0), 0.55 - 0.25 * uNight), white);
+    // Pupils share one look direction (not mirrored), so they never cross.
+    vec2 lk = vec2(F_lookX, F_lookY) + uLook;
+    lk = clamp(lk, -max(r - vec2(F_pupilWidth, F_pupilTall * open) * 1.1, 0.0), max(r - vec2(F_pupilWidth, F_pupilTall * open) * 1.1, 0.0));
+    vec2 pc = vec2(sign(p.x) * c.x, c.y) + lk;
+    float pupil = ell(p, pc, vec2(F_pupilWidth, F_pupilTall * open));
+    col = mix(col, uInk, fill(max(pupil, d), aa));
+    if (F_outline > 0.0) col = mix(col, uInk, fill(abs(d) - max(F_outline, aa * 0.5), aa));
+    if (open <= 0.0) col = mix(col, uInk, fill(max(abs(p.y - c.y) - lw * 0.7, abs(m.x - c.x) - r.x * 0.85), aa));
+  }
+
+  // Nose: an open "c" hook.
+  vec2 nc = round ? vec2(F_noseX, F_noseHeight) : vec2(0.02, -0.1);
+  float nr = round ? F_noseSize : 0.04;
+  vec2 nq = p - nc;
+  float nose = abs(length(nq) - nr) - max(0.0066, aa * 0.5);
+  nose = max(nose, nq.x / max(length(nq), 1e-4) - 0.35);
+  if (nr > 0.001) col = mix(col, uInk, fill(nose, aa));
+
+  // Mouth: a long closed grin, off-centre, one end curling up.
+  float my = round ? F_mouthHeight : -0.4;
+  float mcx = round ? F_mouthX : 0.055;
+  float mhw = round ? F_mouthWidth : 0.205;
+  float k = round ? F_mouthCurve : 0.9;
+  float kc = round ? F_mouthCurl : 4.0;
+  float x1 = mcx + mhw;
+  float dx = p.x - (mcx - 0.075);
+  float curl = max(0.0, p.x - (x1 - 0.08));
+  float fy = my + k * dx * dx + kc * curl * curl;
+  float slope = 2.0 * k * dx + 2.0 * kc * curl;
+  float mouth = abs(p.y - fy) / sqrt(1.0 + slope * slope) - max(round ? F_mouthLine : 0.0088, aa * 0.5);
+  mouth = max(mouth, abs(p.x - mcx) - mhw);
+  col = mix(col, uInk, fill(mouth, aa));
+
+  if (!gl_FrontFacing) n = -n;
+  // Whites skip the grade entirely: the contrast is the point.
+  writeG(col, mix(-0.7, -0.95, white), n, vView);
 }
 `;

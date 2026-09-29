@@ -9,6 +9,7 @@ npm run dev
 ```
 
 WASD move · Shift run · Space jump · click/drag to look · wheel zoom ·
+R / right-click lasso (and lead / let go of a tamed creature) · E ride ·
 F fly · T +1 hour · H hide UI
 
 Try `?seed=42&t=7.2` (rose dawn) or `?seed=fjord&t=22.5` (night).

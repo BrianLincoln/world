@@ -26,12 +26,24 @@ change goes through this loop:
   build, runs JS in the page, and optionally screenshots. Use it for
   debugging.
 - `scripts/sheet.mjs out.png imgs...`: 2-column contact sheet.
+- `scripts/mobs.mjs <dir> [floof,crow,crowface,inspect,lasso,ride,ridecrow,ambient,night]`:
+  creature shots (runs with `mobs=0` and places its own flocks, except `ambient`, which looks at natural spawns). `inspect` is a
+  turntable via `__ow.inspect(i, yawRel, pitch, dist, species)`, which
+  freezes brains and hides the explorer. Remember the orbit camera faces the
+  explorer, so in scripted walks S moves *away* from the camera.
+- `scripts/bike.mjs <dir> [parked,mount,ride,sprint,turn,hop,night,wild]`:
+  bicycle shots. Scripted rides call `__ow.lockInput(yaw)`, because steering
+  is camera-relative and re-aiming the camera for a side shot would turn the
+  bike.
+- Perf with extra URL params: `Q='&mobs=0' node scripts/shots.mjs --no-build --only none --perf --uncapped`.
 
 ### Page hooks (`window.__ow`)
 - `ready()`, `stats()`, `setHour(h)`, `setPalette(name|null)`,
   `teleport(x,z)`, `view(yaw,pitch,dist)`, `setMode('walk'|'swim'|'fly', y?)`,
   `setSeed(s)`, `height(x,z)`, `gen()`.
 - `lookAtPoi(kind, dist, side?, hover?)` frames a `cabin|tor|circle|erratic`.
+- `lookAtBike(dist, side, pitch)`, `mountBike()`, `dismountBike()`,
+  `lockInput(yaw|null)` for bicycles.
 - `facePeak()` turns toward the tallest nearby ground.
 - `_r` / `_p` / `_scene` / `_terrain` / `_cam` expose internals for probes.
   For example, read G-buffer pixels with `_r.readRenderTargetPixels(_p.gbuf, ...)`.

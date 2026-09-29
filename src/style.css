@@ -17,3 +17,25 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: #efd6c3; }
 }
 #veil span { font: italic 15px/2 Georgia, serif; opacity: 0.75; }
 #veil.gone { opacity: 0; pointer-events: none; }
+#prompt {
+  position: fixed; left: 50%; bottom: 44px; transform: translateX(-50%); pointer-events: none;
+  font: 13px/1.4 ui-sans-serif, system-ui, sans-serif; color: #3d2a2a; transition: opacity 0.2s;
+  background: rgba(250, 240, 228, 0.82); padding: 5px 14px; border-radius: 999px; opacity: 0;
+}
+#prompt b {
+  display: inline-block; min-width: 1.2em; padding: 0 4px; margin-right: 2px; text-align: center;
+  border: 1.5px solid #5c3a3e; border-radius: 5px; font-weight: 600; font-size: 11px; line-height: 1.35;
+}
+/* Lasso reticle: a hand-inked loop that sits over the aimed creature. */
+#aim {
+  position: fixed; left: 0; top: 0; width: 0; height: 0; pointer-events: none; opacity: 0;
+  transition: opacity 0.15s;
+}
+#aim.on { opacity: 1; }
+#aim::before {
+  content: ''; position: absolute; left: -22px; top: -22px; width: 38px; height: 38px;
+  border: 2.5px dashed #fbf1e2; border-radius: 50%; outline: 1.5px solid rgba(92, 58, 62, 0.55); outline-offset: 1px;
+  animation: aimspin 3s linear infinite;
+}
+#aim.lead::before, #aim.unlead::before { border-style: solid; border-color: #f0c26a; }
+@keyframes aimspin { to { transform: rotate(360deg); } }

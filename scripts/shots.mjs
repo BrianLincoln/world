@@ -49,6 +49,8 @@ const SHOTS = [
   { name: 'vista', q: 'seed=hilda&t=9.8&pitch=0.04&dist=9', setup: 'window.__ow.facePeak()' },
   { name: 'vista-fjord', q: 'seed=fjord&t=17.2&pitch=0.04&dist=9', setup: 'window.__ow.facePeak()' },
   { name: 'vista-42-dawn', q: 'seed=42&t=7.2&pitch=0.04&dist=9', setup: 'window.__ow.facePeak()' },
+  { name: 'look-up', q: 'seed=hilda&t=16.8&pitch=-0.6&yaw=1.8' },
+  { name: 'look-up-steep', q: 'seed=hilda&t=16.8&pitch=-1.2&yaw=1.8' },
   { name: 'seed-42-dusk', q: 'seed=42&t=18.6&mode=fly&y=80&pitch=0.15&dist=25&yaw=2.5' },
 ];
 const only = opt('--only', null)?.split(',');
@@ -100,7 +102,7 @@ for (const s of SHOTS) {
 
 if (flag('--perf')) {
   // Walk/run/fly through the world and record frame times.
-  await page.goto(`http://localhost:${port}/?seed=hilda&t=10&ui=0&paused=1`);
+  await page.goto(`http://localhost:${port}/?seed=hilda&t=10&ui=0&paused=1${process.env.Q ?? ""}`);
   await waitReady();
   const res = await page.evaluate(async () => {
     const ow = window.__ow;

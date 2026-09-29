@@ -223,30 +223,112 @@ export function buildTuft(): THREE.BufferGeometry {
   return withKind(g, 4);
 }
 
-/** Tiny white daisy: flat 5-lobed disc on a short stem, facing up. */
-export function buildFlower(): THREE.BufferGeometry {
+/**
+ * A clump of wildflowers on thin stems that poke just above the grass.
+ * Variant 0: upright open heads (daisy or buttercup; PROP_FRAG picks the
+ * petal colour from the instance tone). Variant 1: nodding harebells on
+ * crooked stems.
+ */
+export function buildFlower(variant: 0 | 1): THREE.BufferGeometry {
   const pos: number[] = [];
+  const nrm: number[] = [];
   const kinds: number[] = [];
-  const y = 0.16;
-  const seg = 20;
-  for (let i = 0; i < seg; i++) {
-    const a0 = (i / seg) * Math.PI * 2;
-    const a1 = ((i + 1) / seg) * Math.PI * 2;
-    const r = (a: number) => 0.09 * (0.6 + 0.4 * Math.abs(Math.cos(a * 2.5)));
-    pos.push(0, y, 0, Math.cos(a1) * r(a1), y, Math.sin(a1) * r(a1), Math.cos(a0) * r(a0), y, Math.sin(a0) * r(a0));
-    kinds.push(5, 5, 5);
+  const tri = (a: number[], b: number[], c: number[], n: number[][], k: number) => {
+    pos.push(...a, ...b, ...c);
+    for (const v of n) nrm.push(...v);
+    kinds.push(k, k, k);
+  };
+  // Tapered double-sided ribbon along a polyline (stems, basal leaves).
+  const ribbon = (pts: number[][], w: number, k: number, taper = 0.4) => {
+    for (let s = 0; s < pts.length - 1; s++) {
+      const [p0, p1] = [pts[s], pts[s + 1]];
+      const dx = p1[0] - p0[0], dz = p1[2] - p0[2];
+      const l = Math.hypot(dx, dz) || 1;
+      // Width runs across the direction of travel (or along x if vertical).
+      const px = l > 1e-4 ? -dz / l : 1, pz = l > 1e-4 ? dx / l : 0;
+      const w0 = w * (1 - taper * (s / (pts.length - 1)));
+      const w1 = w * (1 - taper * ((s + 1) / (pts.length - 1)));
+      const A = [p0[0] - px * w0, p0[1], p0[2] - pz * w0];
+      const B = [p0[0] + px * w0, p0[1], p0[2] + pz * w0];
+      const C = [p1[0] - px * w1, p1[1], p1[2] - pz * w1];
+      const D = [p1[0] + px * w1, p1[1], p1[2] + pz * w1];
+      const n = [dx * 2, 0.9, dz * 2];
+      tri(A, B, C, [n, n, n], k);
+      tri(B, D, C, [n, n, n], k);
+    }
+  };
+  // Stem that rises and leans outward along `a`; `crook` bends the top over.
+  const stem = (a: number, h: number, lean: number, crook: number) => {
+    const dx = Math.cos(a), dz = Math.sin(a);
+    const pts: number[][] = [];
+    const segs = 4;
+    for (let s = 0; s <= segs; s++) {
+      const t = s / segs;
+      const o = lean * t * t + crook * Math.max(0, t - 0.6) * 2.5;
+      const y = h * t - crook * 0.6 * Math.max(0, t - 0.75) * 4;
+      pts.push([dx * o, y, dz * o]);
+    }
+    ribbon(pts, 0.02, 4, 0.45);
+    return pts[segs];
+  };
+  // Open head: 5 rounded petals in a shallow cup, tilted toward `a`, with a core.
+  const openHead = (c: number[], a: number, r: number) => {
+    const tilt = 0.35;
+    const tx = Math.cos(a) * tilt, tz = Math.sin(a) * tilt;
+    const up = [tx, 1, tz];
+    const at = (ang: number, rr: number, lift: number) => {
+      const x = Math.cos(ang) * rr, z = Math.sin(ang) * rr;
+      return [c[0] + x, c[1] + lift - (x * tx + z * tz), c[2] + z];
+    };
+    const seg = 20;
+    const rad = (ang: number) => r * (0.55 + 0.45 * Math.abs(Math.cos(ang * 2.5)));
+    for (let i = 0; i < seg; i++) {
+      const a0 = (i / seg) * Math.PI * 2, a1 = ((i + 1) / seg) * Math.PI * 2;
+      const o0 = at(a0, rad(a0), r * 0.25), o1 = at(a1, rad(a1), r * 0.25);
+      tri(at(0, 0, 0), o1, o0, [up, up, up], 5);
+    }
+    for (let i = 0; i < 6; i++) {
+      const a0 = (i / 6) * Math.PI * 2, a1 = ((i + 1) / 6) * Math.PI * 2;
+      tri(at(0, 0, r * 0.18), at(a1, r * 0.3, r * 0.14), at(a0, r * 0.3, r * 0.14), [up, up, up], 6);
+    }
+  };
+  // Nodding bell hanging from the stem tip: a flared 5-point cone, mouth down.
+  const bell = (c: number[], r: number) => {
+    // Rounded shoulder ring, then a flared lip; normals lean up so the bell
+    // stays in the lit band instead of going grey.
+    const seg = 14;
+    const rings: [number, number][] = [[0, r * 0.15], [r * 0.35, r * 0.75], [r * 1.1, r * 0.9], [r * 1.5, r * 1.15]];
+    const ring = (j: number, ang: number) => {
+      const [d, rr] = rings[j];
+      const f = j === rings.length - 1 ? 1 + 0.18 * Math.cos(ang * 5) : 1;
+      return [c[0] + Math.cos(ang) * rr * f, c[1] - d + r * 0.15, c[2] + Math.sin(ang) * rr * f];
+    };
+    const nm = (ang: number) => [Math.cos(ang) * 0.45, 1, Math.sin(ang) * 0.45];
+    for (let j = 0; j < rings.length - 1; j++) {
+      for (let i = 0; i < seg; i++) {
+        const a0 = (i / seg) * Math.PI * 2, a1 = ((i + 1) / seg) * Math.PI * 2;
+        tri(ring(j, a0), ring(j + 1, a0), ring(j + 1, a1), [nm(a0), nm(a0), nm(a1)], 15);
+        tri(ring(j, a0), ring(j + 1, a1), ring(j, a1), [nm(a0), nm(a1), nm(a1)], 15);
+      }
+    }
+  };
+
+  for (let i = 0; i < 3; i++) {
+    const a = (i / 3) * Math.PI * 2 + 0.6 * i;
+    const h = [0.34, 0.27, 0.21][i];
+    if (variant === 0) openHead(stem(a, h, 0.07 + 0.03 * i, 0), a, 0.085 - 0.012 * i);
+    else bell(stem(a, h + 0.04, 0.05, 0.07), 0.046 - 0.006 * i);
   }
-  // yellow core
-  for (let i = 0; i < 6; i++) {
-    const a0 = (i / 6) * Math.PI * 2;
-    const a1 = ((i + 1) / 6) * Math.PI * 2;
-    const r = 0.025;
-    pos.push(0, y + 0.004, 0, Math.cos(a1) * r, y + 0.004, Math.sin(a1) * r, Math.cos(a0) * r, y + 0.004, Math.sin(a0) * r);
-    kinds.push(6, 6, 6);
+  // Two short basal leaves to seat the clump in the grass.
+  for (let i = 0; i < 2; i++) {
+    const a = i * Math.PI + 0.9;
+    const dx = Math.cos(a), dz = Math.sin(a);
+    ribbon([[0, 0, 0], [dx * 0.05, 0.08, dz * 0.05], [dx * 0.12, 0.12, dz * 0.12]], 0.022, 4, 0.8);
   }
+
   const g = new THREE.BufferGeometry();
   g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
-  g.setAttribute('normal', new THREE.Float32BufferAttribute(new Array(pos.length / 3).fill(0).flatMap(() => [0, 1, 0]), 3));
+  g.setAttribute('normal', new THREE.Float32BufferAttribute(nrm, 3));
   g.setAttribute('aKind', new THREE.Float32BufferAttribute(kinds, 1));
   return g;
 }

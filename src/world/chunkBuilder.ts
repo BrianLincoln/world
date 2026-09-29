@@ -16,6 +16,8 @@ export interface ChunkRequest {
   x0: number;
   z0: number;
   size: number;
+  /** Skip ground detail (tufts, flowers): used for main-thread colliders. */
+  propsOnly?: boolean;
 }
 
 /** Instance layout (8 floats): x, y, z, scaleXZ, rotY, scaleY, lean, tone. */
@@ -263,7 +265,7 @@ export function buildChunk(gen: WorldGen, req: ChunkRequest): ChunkResult {
   }
 
   // ---- ground detail near the camera: grass tufts and small white flowers
-  if (size <= 64) {
+  if (size <= 64 && !req.propsOnly) {
     const g0x = Math.ceil(x0 / TUFT_GRID), g1x = Math.floor((x0 + size - 0.001) / TUFT_GRID);
     const g0z = Math.ceil(z0 / TUFT_GRID), g1z = Math.floor((z0 + size - 0.001) / TUFT_GRID);
     for (let gj = g0z; gj <= g1z; gj++) {
@@ -278,12 +280,26 @@ export function buildChunk(gen: WorldGen, req: ChunkRequest): ChunkResult {
         const r = hash01(gi, gj, seed, 43);
         const pd = paths.length ? pathDist(x, z) : 30;
         if (pd < 1.4) continue;
-        const fl = gen.flowers(x, z);
-        if (r < fl * 0.35) {
-          flowers.push(lx, h, lz, 0.8 + 0.5 * hash01(gi, gj, seed, 44), hash01(gi, gj, seed, 45) * 6.283, 1, 0, hash01(gi, gj, seed, 46));
-        } else if (r < 0.32) {
+        if (r < 0.32) {
           tufts.push(lx, h - 0.05, lz, 0.7 + 0.7 * hash01(gi, gj, seed, 47), hash01(gi, gj, seed, 48) * 6.283,
             0.7 + 0.6 * hash01(gi, gj, seed, 49), 0, hash01(gi, gj, seed, 50));
+        }
+        // Wildflowers grow among the grass: dense in patches, a few strays
+        // elsewhere. Each ~10 m patch cell leans to one species, so colours
+        // drift across a meadow instead of speckling.
+        const fl = gen.flowers(x, z);
+        if (hash01(gi, gj, seed, 51) < 0.02 + fl * 0.26) {
+          const fx = lx + (hash01(gi, gj, seed, 52) - 0.5) * TUFT_GRID * 0.8;
+          const fz = lz + (hash01(gi, gj, seed, 53) - 0.5) * TUFT_GRID * 0.8;
+          if (fx >= 0 && fz >= 0 && fx < size && fz < size) {
+            const px = Math.floor(x / 10), pz = Math.floor(z / 10);
+            const sp = hash01(px, pz, seed, 54) * 0.75 + hash01(gi, gj, seed, 55) * 0.25;
+            // 0 daisy (tone < 0.6), 1 harebell, else buttercup (tone > 0.6).
+            const bell = sp > 0.4 && sp < 0.62 ? 1 : 0;
+            const tone = sp < 0.4 ? 0.3 * hash01(gi, gj, seed, 46) : 0.65 + 0.35 * hash01(gi, gj, seed, 46);
+            flowers.push(fx, meshHeight(fx, fz) - 0.02, fz, 0.8 + 0.5 * hash01(gi, gj, seed, 44), hash01(gi, gj, seed, 45) * 6.283,
+              0.85 + 0.3 * hash01(gi, gj, seed, 56), bell, tone);
+          }
         }
       }
     }

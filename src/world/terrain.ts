@@ -126,13 +126,13 @@ export class Terrain {
       trees: {
         name: 'trees',
         geos: [...treeLods, ...treeLods2],
-        material: makePropMaterial({ bend: 0.24, wind: 0.012, heightRef: TREE_HEIGHT, toneVar: 0.22, doubleSide: true, cutaway: true }),
+        material: makePropMaterial({ bend: 0.24, wind: 0.012, heightRef: TREE_HEIGHT, toneVar: 0.22, doubleSide: true, cutaway: 'occluders' }),
         lodFor: (s) => (s <= 64 ? 0 : s <= 128 ? 1 : 2),
       },
       bushes: {
         name: 'bushes',
         geos: [buildBush(3, 2), buildBush(3, 1), buildBush(3, 1)],
-        material: makePropMaterial({ wind: 0.01, heightRef: 1.6, toneVar: 0.25, cutaway: true }),
+        material: makePropMaterial({ wind: 0.01, heightRef: 1.6, toneVar: 0.25, cutaway: 'near' }),
         lodFor: (s) => (s <= 64 ? 0 : 1),
       },
       rocks: {
@@ -149,8 +149,8 @@ export class Terrain {
       },
       flowers: {
         name: 'flowers',
-        geos: [buildFlower()],
-        material: makePropMaterial({ toneVar: 0.05, doubleSide: true }),
+        geos: [buildFlower(0), buildFlower(1)],
+        material: makePropMaterial({ wind: 0.1, heightRef: 0.45, toneVar: 0.05, doubleSide: true }),
         lodFor: () => 0,
       },
       cabins: {
@@ -421,7 +421,7 @@ export class Terrain {
     addInstances(this.kinds.bushes, r.bushes, 1);
     addInstances(this.kinds.rocks, r.rocks, 1);
     addInstances(this.kinds.tufts, r.tufts, 1);
-    addInstances(this.kinds.flowers, r.flowers, 1);
+    addInstances(this.kinds.flowers, r.flowers, 2, (i) => Math.round(r.flowers[i * INST_STRIDE + 6]));
     addInstances(this.kinds.cabins, r.cabins, 3, (i) => Math.round(r.cabins[i * INST_STRIDE + 6]) % 3);
 
     n.group = g;
