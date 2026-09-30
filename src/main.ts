@@ -244,7 +244,7 @@ if (params.get('towers') === '1') towerDebug.settings.links = towerDebug.setting
 if (params.has('fresh')) try { localStorage.removeItem(`fjellheim.towers.${seedText}`); } catch { /* ignore */ }
 let hadCine = false;
 /** Easing the camera between a cinematic and the orbit: where it came from, and how far along (1 = done). */
-const camBlendPos = new THREE.Vector3(), camBlendQ = new THREE.Quaternion(), camLastPos = new THREE.Vector3(), camLastQ = new THREE.Quaternion();
+const camBlendPos = new THREE.Vector3(), camBlendQ = new THREE.Quaternion(), camToQ = new THREE.Quaternion(), camLastPos = new THREE.Vector3(), camLastQ = new THREE.Quaternion();
 let camBlend = 1;
 /** Last frame's final camera pose (a blend can start from it). */
 const camPrevPos = new THREE.Vector3(), camPrevQ = new THREE.Quaternion();
@@ -328,8 +328,6 @@ function spawn() {
   }
 }
 spawn();
-// ?journey=<step>: straight to a phase 2 step (after the spawn, which it moves you from).
-if (params.get('journey') && STAGES.includes(params.get('journey') as Stage)) journey?.jump(params.get('journey') as Stage);
 if (params.has('yaw')) orbit.yaw = parseFloat(params.get('yaw')!);
 {
   const [sx, sz] = findSpawn(0, 0);
@@ -339,6 +337,8 @@ if (params.has('pitch')) orbit.pitch = parseFloat(params.get('pitch')!);
 if (params.has('dist')) orbit.targetDistance = parseFloat(params.get('dist')!);
 
 const ctx: MoveContext = { input: input.state(), camYaw: 0, camPitch: 0, dt: 0, world };
+// ?journey=<step>: straight to a phase 2 step (after the spawn and the bike reset, which would undo it).
+if (params.get('journey') && STAGES.includes(params.get('journey') as Stage)) journey?.jump(params.get('journey') as Stage);
 if (params.get('mode') === 'fly') {
   player.set('fly', ctx);
   player.body.pos.y = gen.height(player.body.pos.x, player.body.pos.z) + (params.has('y') ? parseFloat(params.get('y')!) : 60);
@@ -719,7 +719,9 @@ function frame(ts?: number) {
     camBlend = Math.min(1, camBlend + dt / 1.1);
     const k = THREE.MathUtils.smootherstep(camBlend, 0, 1);
     camera.position.lerpVectors(camBlendPos, camera.position, k);
-    camera.quaternion.slerpQuaternions(camBlendQ, camera.quaternion, k);
+    // (Not slerpQuaternions(from, camera.quaternion): it copies `from` in first, so it never turns.)
+    camToQ.copy(camera.quaternion);
+    camera.quaternion.copy(camBlendQ).slerp(camToQ, k);
     camera.updateMatrixWorld();
   }
   const vc = beacons.viewCam();

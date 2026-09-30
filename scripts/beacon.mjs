@@ -1,4 +1,4 @@
-// Beacon tower shots: node scripts/beacon.mjs <dir> [seed=fjord] [t=16] [tower=3] [shots=face,lit,far,night]
+// Beacon tower shots: node scripts/beacon.mjs <dir> [seed=fjord] [t=16] [tower=3] [shots=face,door,lit,far,night]
 import { chromium } from 'playwright';
 import http from 'node:http'; import fs from 'node:fs'; import path from 'node:path';
 const root = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
@@ -34,6 +34,12 @@ const frame = (id, a, pitch, dist, up = 0) => page.evaluate(([id, a, pitch, dist
 const set = (w) => page.evaluate((w) => window.__ow.beacons.debugSet(w), w);
 for (const s of shots) {
   if (s === 'face') { await set('none'); await frame(tower, 0.12, 0.05, 30); await idle(); await page.screenshot({ path: `${out}/${seed}-face.png` }); }
+  if (s === 'door') {
+    // The sealed doorway and its lock, from in front and a little to the side.
+    await set('none');
+    await page.evaluate((id) => { const t = window.__ow.gen().towers.towers[id]; window.__ow.goToTower(id); window.__ow.focusAt(t.door.x, t.door.y - 2, t.door.z); window.__ow.view(t.yaw + 0.45, 0.12, 20); }, tower);
+    await idle(); await W(600); await page.screenshot({ path: `${out}/${seed}-door.png` });
+  }
   if (s === 'lit') { await set(tower); await frame(tower, 0.12, 0.05, 30); await idle(); await W(1500); await page.screenshot({ path: `${out}/${seed}-lit.png` }); }
   if (s === 'far') { await set(tower); await frame(tower, 0.5, 0.08, 120, 18); await idle(); await page.screenshot({ path: `${out}/${seed}-far.png` }); }
   if (s === 'night') { await set(tower); await page.evaluate(() => window.__ow.setHour(22.5)); await frame(tower, 0.35, 0.05, 36, 4); await idle(); await W(800); await page.screenshot({ path: `${out}/${seed}-night.png` }); await page.evaluate((h) => window.__ow.setHour(h), +hour); }

@@ -1129,8 +1129,8 @@ ledge, the standing stone and lighting on top.
   icon). E, a click or Esc drops the camera back down and the arms push you
   out onto the doorway ground. `Story.findAction` now shows the external
   badge even when not walking, for this.
-- Unlit heads are dead stone (no look/tilt/hop); the head you're inside
-  holds still too.
+- Unlit heads are dead stone (no hop); the head you're inside
+  holds still too. (Superseded: every head now watches you, see below.)
 - Tests: `node scripts/beacon.mjs <dir> seed=.. tower=.. shots=unlock` plays
   it all (lock → hold E → sequence frames → walk in → head view → look →
   exit) and logs the badge each step. Checked on fjord and hilda. The panel
@@ -1313,10 +1313,14 @@ asked for as far as possible). Everything below is a first pass for review.
   reads on screen; out toward the camera it looked flat against the rock)
   and hook into the left eyehole's rims (1.2 s, drawn as the growing first part
   of a cubic, any point near rock pushed out); a tug; then it's yanked up
-  along an arc (2.2 s, slow start, snap, ease in), pushed out from the face
-  until the whole body clears all rock (checked at 24 points × 9 body
-  samples), and slips into the eye while its arms draw straight back in.
-  No more walking over the capstone.
+  along an arc (1.9 s, slow start, then a snap with only a short ease at the
+  eye), pushed out from the face until the whole body clears all rock
+  (checked at 24 points × 9 body samples), and pops into the eye (0.35 s).
+  No more walking over the capstone. Owner: the arms got awkward at the very
+  end (as the arc closes on the eye they crumple into a zig-zag, and drawing
+  them back in after it read badly too). So at 90% of the pull they burst
+  into glowing wisps all along their length (`poofArms`, its own `Puffs`
+  pool in the arm colour) and it finishes the last bit armless.
 - **Out of the head: straight outside.** The drop back into the room is
   gone (you couldn't tell where the doorway was). You reappear 3 m in front
   of the doorway facing out, with a puff of sparks, and the camera glides
@@ -1331,6 +1335,16 @@ asked for as far as possible). Everything below is a first pass for review.
 - **Lit towers watch you**: every lit tower within 700 m turns its head
   all the way round to face you (and tilts down a little), not just the
   nearest, ±0.45 rad.
+- **Every head watches you, always** (owner request): lit or unlit, at any
+  distance, every tower head turns to face you and tilts down a little. The
+  only exceptions are the head you're inside (it turns with your look) and
+  the tower being freed, which faces front because the spirit's climb plan
+  targets the resting eyehole.
+- **Ember flights**: the far head turns to face the tower you left
+  (`Slurp.yaw`), and the arc ends at the eye in that pose, coming straight
+  in along that line. You arrive looking back the way you came. Every other
+  head (including the one you left) watches the ember in flight, not your
+  hidden body, which has already been moved to the far door.
 - **Collision**: a steep rock lip below step height counts as wall (you
   stood 0.4 m into one), and from outside, the door boulder uses its drawn,
   lumpy shape, not the ellipsoid shell (lumps poked 0.5 m into you). Drop
@@ -1349,14 +1363,54 @@ asked for as far as possible). Everything below is a first pass for review.
   light with a little overshoot (`conjure`, 2.7 s). Then it points at the
   bike (bike bubble). Its own little bike comes out the same way when you
   climb on, just up the path.
-- **Exactly one bike at the cabin** (`tidyCabin`): once given, your bike
-  goes back to its spot whenever you've left it elsewhere and are 70 m+ from
-  it and away from the cabin; if it's missing, it's recreated. Any other bike
-  left within 80 m of the cabin goes once you're 70 m from it. The spirit's
+- **Exactly one bike at the cabin** (`tidyCabin`), settled once as you come
+  within `CABIN_R` (340 m, past bike draw range) of it. On foot: your bike
+  goes back to its spot (recreated if missing). Riding in: the bike under you
+  is the cabin's one, so the spot stays empty (the gift, if it was left out
+  front, goes). Any other bike within 80 m of the cabin goes either way.
+  Nothing moves or goes within 70 m of you. The spirit's
   own bike is never at the cabin after the first ride (and is gone when the
   journey's done). The ground shadow waits until a conjured bike has grown.
+- **A bike at the foot of a tower you fly to** (`Journey.towerBike`, on the
+  `arrived` event): `tower:<id>`, beside where you step out (3 m in front of
+  the doorway), side-on, on the first flat, prop-free spot off the rock
+  (`Bikes.placeNear`, which skips the POI clearance: the tower is a POI).
+  Not if one of yours is already within 25 m. Earlier tower bikes 500 m+
+  away go when a new one is made.
 - `scripts/gift.mjs`: the gift moment frame by frame, with bike counts
   near the cabin before and after.
+
+### Tower locks never buried (2026-09-29)
+- Where a door faces downhill, the stack (stood on the lowest ground under
+  its base) is several metres above the ground in front of the doorway. The
+  lock aimed for ~1.4 m over that lower ground, slid down the underside of
+  the door boulder (below the doorway itself) and ended up 1–4 m inside the
+  slope on ~20% of towers. Now `Lock` stays on the door stone (elevation
+  -0.5..0.1 before lifting) and climbs until the padlock clears the terrain
+  under it by 0.4 m (checked on all towers of 8 seeds). The pick's vertical
+  reach allows the lock up to 7.5 m above you, for the few steep drops.
+- `scripts/beacon.mjs ... shots=door` frames a tower's sealed doorway.
+
+### The door breaking and the spirit emerging (2026-09-29)
+- Owner: breaking the lock felt like a jarring jump; the spirit was just
+  out. Before, the doorway was cut open on the lock's last blow, and the
+  spirit flew out over your head within 0.5 s while the camera was still
+  easing in. The camera's focus also jumped at T_OUT.
+- Now (constants at the top of `beacons.ts`): the door stone stays sealed
+  until `T_BURST` (0.95 s). It shudders harder and harder, with ember cracks
+  running out from its middle and glowing through the seam (the door
+  instance's glow slot carries 0..1 while sealed; see the sealed branch of
+  `HEAD_FRAG`). Then `burst()` throws chunks, dust and a camera jolt, and
+  the explorer steps back. The spirit's glow stirs deep in the dark
+  doorway, it blinks and drifts out over the threshold, then curves round to
+  beside you. Everything after is shifted about 2 s later.
+- The cinematic is one continuous shot. It opens nearer face on to the door
+  (yaw ±0.55, 15 m) and eases to the old side-on pair shot as the spirit
+  comes out.
+- Bug fix in `main.ts`: the camera blend's rotation never blended.
+  `q.slerpQuaternions(from, q, k)` copies `from` into `q` first, so it held
+  the old view for 1.1 s and then snapped. This affected every cinematic
+  blend-in and blend-out (freeing, leaving a head).
 
 ## Towers: no capstone, four builds (2026-09-29)
 - **The capstone brim is gone.** It was there as a standable ledge for the

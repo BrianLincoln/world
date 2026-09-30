@@ -47,6 +47,8 @@ export interface JourneyDeps {
   mount(k: Bike): void;
 }
 
+/** Coming within this of the cabin (m) settles which bike stands there (past bike draw range). */
+const CABIN_R = 340;
 /** The spirit's bike is this small, and rides this far to the right of the path (m). */
 const LITTLE = 0.55, BESIDE = 1.5;
 /** How far ahead of you it likes to ride, and how far before it stops to wait (m). */
@@ -133,6 +135,8 @@ export class Journey {
   private t = 0;
   private leader: Leader | null = null;
   private sBike: Bike | null = null;
+  /** You were within CABIN_R of the cabin last frame. */
+  private atCabin = false;
   private turn = 0;
   private callT = 0;
   private tmp = new THREE.Vector3();
@@ -178,6 +182,7 @@ export class Journey {
   // ------------------------------------------------------------ events from the towers
 
   private event(e: BeaconEvent, t: Tower) {
+    if (e === 'arrived') this.towerBike(t);
     const target = this.stage === 'lock1' || this.stage === 'enter1' ? this.home : this.stage === 'lock2' || this.stage === 'enter2' ? this.next : null;
     if (!target || t.id !== target.id) {
       if (e === 'arrived' && this.stage === 'enter2') this.setStage('done');
@@ -461,23 +466,57 @@ export class Journey {
   // ------------------------------------------------------------ bikes at the cabin
 
   /**
-   * Exactly one bike at the cabin, and only once it's been given: yours
-   * comes back to its spot outside whenever you've left it elsewhere and
-   * aren't near it (or the spot), and any other bike left about the cabin
-   * quietly goes once you're away.
+   * Exactly one bike at the cabin, and only once it's been given. Settled as
+   * you come within CABIN_R of it: on foot, yours is back at its spot
+   * outside (wherever you left it); riding in, the bike under you is the
+   * cabin's one and the spot stays empty. Any other bike left about the
+   * cabin quietly goes either way.
    */
   private tidyCabin() {
     const b = this.d.body.pos, st = this.d.gen.story;
     const g = this.giftSpot();
     const given = this.stage !== 'wait' && this.stage !== 'gift';
+    const near = Math.hypot(g.x - b.x, g.z - b.z) < CABIN_R;
+    if (!given || !near) { this.atCabin = near; return; }
+    if (this.atCabin) return;
+    this.atCabin = true;
+    const riding = this.d.cycling();
+    // Nothing goes or moves within sight of you.
+    const far = (k: Bike) => Math.hypot(k.pos.x - b.x, k.pos.z - b.z) > 70;
     for (const [key, k] of this.d.bikes.bikes) {
-      if (k.ridden || key === 'spirit') continue;
-      const far = Math.hypot(k.pos.x - b.x, k.pos.z - b.z) > 70;
-      if (key === 'gift') {
-        if (given && far && Math.hypot(k.pos.x - g.x, k.pos.z - g.z) > 20 && Math.hypot(g.x - b.x, g.z - b.z) > 40) this.d.bikes.move(k, g.x, g.z, g.heading);
-      } else if (far && Math.hypot(k.pos.x - st.x, k.pos.z - st.z) < 80) this.d.bikes.bikes.delete(key);
+      if (k === riding || key === 'spirit' || key === 'gift' || !far(k)) continue;
+      if (Math.hypot(k.pos.x - st.x, k.pos.z - st.z) < 80) this.d.bikes.bikes.delete(key);
     }
-    if (given && !this.d.bikes.bikes.has('gift')) this.gift();
+    const gift = this.d.bikes.bikes.get('gift');
+    if (riding) {
+      // Left out front last time and you've come back on another: it's gone home.
+      if (gift && gift !== riding && far(gift) && Math.hypot(gift.pos.x - st.x, gift.pos.z - st.z) < 80) this.d.bikes.bikes.delete('gift');
+    } else if (!gift) this.gift();
+    else if (far(gift) && Math.hypot(gift.pos.x - g.x, gift.pos.z - g.z) > 20 && Math.hypot(g.x - b.x, g.z - b.z) > 40) this.d.bikes.move(gift, g.x, g.z, g.heading);
+  }
+
+  /**
+   * Arriving at a tower by ember: a bike waits at its foot, a little out
+   * from the doorway and off to one side, unless one of yours is there.
+   */
+  private towerBike(t: Tower) {
+    const bikes = this.d.bikes, g = t.door.ground;
+    const fx = Math.sin(t.yaw), fz = Math.cos(t.yaw);
+    for (const [key, k] of bikes.bikes) {
+      if (k.ridden || key === 'spirit') continue;
+      if (Math.hypot(k.pos.x - g.x, k.pos.z - g.z) < 25) return;
+      // One from an earlier trip, far behind: it goes.
+      if (key.startsWith('tower:') && Math.hypot(k.pos.x - g.x, k.pos.z - g.z) > 500) bikes.bikes.delete(key);
+    }
+    const tip = new THREE.Vector3();
+    const offRock = (x: number, z: number) => {
+      const y = this.d.gen.height(x, z);
+      for (const dy of [0.4, 1.2]) for (const d of [-0.8, 0, 0.8]) if (this.d.beacons.solidAt(tip.set(x + fx * d, y + dy, z + fz * d))) return false;
+      return true;
+    };
+    // Beside where you come out (3 m in front of the doorway), side-on to it.
+    const x = g.x + fx * 4.5 + fz * 2.6, z = g.z + fz * 4.5 - fx * 2.6;
+    bikes.placeNear(`tower:${t.id}`, x, z, t.yaw + Math.PI / 2, 1 + (t.id % 15), 7, offRock);
   }
 
   /** Pull a bike out of the spirit's heart (it appears at `size` when done). */

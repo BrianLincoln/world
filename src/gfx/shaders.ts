@@ -1076,11 +1076,15 @@ const vec3 DOOR_C = vec3(0.0, -0.2, 0.98);
 const vec2 DOOR_SIZE = vec2(0.3, 0.44);
 float gKind = 0.0;
 float gOpen = 0.0;
-float doorR(vec3 d) {
+// Direction d in the doorway's own frame (the rim is about 1 out).
+vec2 doorQ(vec3 d) {
   vec3 c = normalize(DOOR_C);
   vec3 r = normalize(cross(vec3(0.0, 1.0, 0.0), c));
   vec3 u = cross(c, r);
-  vec2 q = abs(vec2(dot(d, r), dot(d, u)) / DOOR_SIZE);
+  return vec2(dot(d, r), dot(d, u)) / DOOR_SIZE;
+}
+float doorR(vec3 d) {
+  vec2 q = abs(doorQ(d));
   return pow(pow(q.x, 3.0) + pow(q.y, 3.0), 1.0 / 3.0);
 }
 // 0 = solid shell, 1 / 2 = the eyes (or 1 = the doorway).
@@ -1218,6 +1222,23 @@ void main() {
       float seam = step(0.97, dr) * step(dr, 1.035) * step(0.4, d.z);
       col = mix(col, stone * uShadeCol * 0.55, seam);
       col *= dr < 0.97 && d.z > 0.4 ? 0.94 : 1.0;
+      // Giving way (the glow slot runs 0..1 as it does): ember light through
+      // the seam, and jagged cracks running out from the middle of the stone.
+      if (shaftGlow > 0.0 && d.z > 0.4) {
+        vec2 q = doorQ(d);
+        float rr = length(q);
+        float ang = atan(q.y, q.x) / 6.2832 * 7.0;
+        float jag = ang + 0.1 * sin(rr * 19.0 + ang * 2.0) + 0.05 * sin(rr * 47.0);
+        float sector = floor(jag);
+        float keep = step(0.25, fract(sin(sector * 12.9898) * 43758.5453));
+        float off = (0.5 - abs(fract(jag) - 0.5)) * 0.8976 * rr;
+        float reach = shaftGlow * 1.25;
+        float crack = keep * step(off, 0.016 + 0.014 * shaftGlow) * step(rr, reach) * step(dr, 0.97);
+        crack = max(crack, step(rr, 0.12 * shaftGlow * shaftGlow));
+        float glow = max(crack, seam * step(0.3, shaftGlow));
+        col = mix(col, mix(uEmber, uCore, 0.4 + 0.4 * shaftGlow), glow);
+        em = max(em, glow * (0.55 + 0.4 * shaftGlow));
+      }
     } else if (isDoor && d.z > 0.4) {
       // Open: a worn bevel round the doorway gives the shell its thickness.
       float dr = doorR(d);

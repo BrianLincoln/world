@@ -104,7 +104,7 @@ export class Bikes {
   // ------------------------------------------------------------ placement
 
   /** Flat, dry and clear of props for a bike standing at (x, z) facing `heading`. */
-  private open(x: number, z: number, heading: number, meadow: boolean): boolean {
+  private open(x: number, z: number, heading: number, meadow: boolean, pois = true): boolean {
     const g = this.gen;
     const h = g.height(x, z);
     if (h < 2.5 || h > 170) return false;
@@ -112,6 +112,7 @@ export class Bikes {
     if (Math.abs(g.height(x + fx * 0.6, z + fz * 0.6) - g.height(x - fx * 0.6, z - fz * 0.6)) > 0.3) return false;
     if (Math.abs(g.height(x + fz * 0.5, z - fx * 0.5) - g.height(x - fz * 0.5, z + fx * 0.5)) > 0.25) return false;
     if (meadow && (g.forestDensity(x, z, h) > 0.02 || g.rockiness(x, z, h) > 0.3)) return false;
+    if (!pois) return true;
     let clear = true;
     g.poiCellRange(x - 40, z - 40, x + 40, z + 40, (p) => {
       if (Math.hypot(p.x - x, p.z - z) < Math.max(p.clear * 0.7, 9)) clear = false;
@@ -249,6 +250,23 @@ export class Bikes {
     k.pitch = this.groundPitch(k);
     this.bikes.set(key, k);
     return k;
+  }
+
+  /**
+   * `place`, but on the first flat, prop-free spot near (x, z), tried in
+   * rings out to `reach` m (and `ok` agreeing; POIs are the caller's to
+   * judge). Falls back to (x, z).
+   */
+  placeNear(key: string, x: number, z: number, heading: number, tintIndex: number, reach = 6, ok?: (x: number, z: number) => boolean): Bike {
+    for (let ring = 0; ring <= reach; ring++) {
+      const n = ring ? 10 : 1;
+      for (let i = 0; i < n; i++) {
+        const a = (i / n) * Math.PI * 2;
+        const px = x + Math.cos(a) * ring, pz = z + Math.sin(a) * ring;
+        if ((!ok || ok(px, pz)) && this.open(px, pz, heading, false, false) && this.clearOfProps(px, pz, heading)) return this.place(key, px, pz, heading, tintIndex);
+      }
+    }
+    return this.place(key, x, z, heading, tintIndex);
   }
 
   /** Put a bike back on its stand somewhere else (the gift bike going home). */
