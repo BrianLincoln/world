@@ -321,7 +321,7 @@ class Lock {
   private spin = new THREE.Vector3();
   private strapV: number[] = [];
 
-  constructor(readonly tower: Tower) {
+  constructor(readonly tower: Tower, ground: (x: number, z: number) => number) {
     const b = tower.boulders[1];
     const c = new THREE.Vector3(b.x, b.y, b.z);
     const fwd = new THREE.Vector3(Math.sin(tower.yaw), 0, Math.cos(tower.yaw));
@@ -335,9 +335,18 @@ class Lock {
       return c.clone().addScaledVector(dir, b.sx * out).add(new THREE.Vector3(0, Math.sin(e) * b.sy * out, 0));
     };
     // The straps cross low on the door stone, so the padlock hangs at a
-    // child's reach: about 1.4 m over the ground at the doorway.
-    const want = tower.door.ground.y + 1.4 + 0.55 * tower.scale;
-    const e0 = Math.asin(THREE.MathUtils.clamp((want - b.y) / (b.sy * 1.05), -0.8, 0.2));
+    // child's reach: about 1.4 m over the ground at the doorway. It stays on
+    // the door stone (the doorway spans about -0.64..0.24 up, see DOOR_C in
+    // shaders.ts), and where the door faces downhill and the ground in front
+    // drops away, it climbs until the padlock clears the slope under it.
+    const s = tower.scale;
+    const want = tower.door.ground.y + 1.4 + 0.55 * s;
+    const clear = (e: number) => {
+      const p = onRock(0, e, 1.07).addScaledVector(fwd, 0.25 * s), q = onRock(0, e, 1);
+      return p.y - 1.1 * s - Math.max(ground(p.x, p.z), ground(q.x, q.z));
+    };
+    let e0 = Math.asin(THREE.MathUtils.clamp((want - b.y) / (b.sy * 1.05), -0.5, 0.1));
+    while (e0 < 0.3 && clear(e0) < 0.4) e0 += 0.02;
     const strap = (pts: THREE.Vector3[]) => {
       const m = new THREE.Mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts), 48, 0.26 * tower.scale, 8), iron);
       m.frustumCulled = false;
@@ -350,7 +359,6 @@ class Lock {
     // The padlock: a squat rusty body, a keyhole, an iron shackle through the straps.
     const at = onRock(0, e0, 1.07);
     this.pos.copy(at);
-    const s = tower.scale;
     const bodyG = new RoundedBoxGeometry(1.25 * s, 1.05 * s, 0.5 * s, 3, 0.18 * s);
     const body = new THREE.Mesh(bodyG, rust);
     body.position.y = -0.55 * s;
@@ -801,7 +809,7 @@ export class Beacons {
 
     // The lock props exist for the nearest sealed tower only.
     if (near && !this.lit.has(near.id) && nearD < 160 && !this.free) {
-      if (this.lock?.tower !== near) { this.dropLock(); this.lock = new Lock(near); this.group.add(this.lock.group); }
+      if (this.lock?.tower !== near) { this.dropLock(); this.lock = new Lock(near, (x, z) => this.d.gen.height(x, z)); this.group.add(this.lock.group); }
     } else if (this.lock && !this.free && (!near || this.lock.tower !== near || nearD > 180)) this.dropLock();
 
     this.updateSwing(dt, mode, held);

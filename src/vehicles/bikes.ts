@@ -21,6 +21,8 @@ const SPAWN_R = 380;
 const DROP_R = 520;
 const DRAW_R = 320;
 const MOUNT_R = 2.1;
+/** No world bikes within this of the story cabin (m). */
+const CABIN_CLEAR = 350;
 
 export interface Bike {
   key: string;
@@ -223,6 +225,9 @@ export class Bikes {
         const s = this.spotInCell(cx, cz);
         if (!s) { this.empty.add(key); continue; }
         if (Math.hypot(s.x - p.x, s.z - p.z) > SPAWN_R) continue;
+        // None near the story's cabin: the only bike there is the one the
+        // hearth spirit gives you (story/journey.ts).
+        if (Math.hypot(s.x - this.gen.story.x, s.z - this.gen.story.z) < CABIN_CLEAR) { this.empty.add(key); continue; }
         if (!this.create(key, s, 1 + (hashInt(cx, cz, this.gen.seed, 814) % 16))) this.empty.add(key);
       }
     }
@@ -423,7 +428,7 @@ export class Bikes {
     const U = TERRAIN_U.uMobShadow.value;
     let slot = 0;
     for (const k of this.bikes.values()) {
-      if (k.ridden || k.pos.distanceTo(camera.position) > 80 || k.pos.y < SEA_LEVEL) continue;
+      if (k.ridden || (k.scale ?? 1) < 0.6 || k.pos.distanceTo(camera.position) > 80 || k.pos.y < SEA_LEVEL) continue;
       while (slot < U.length && U[slot].y > -1e3) slot++;
       if (slot >= U.length) return;
       U[slot].set(k.pos.x, k.pos.y, k.pos.z, 0.55);

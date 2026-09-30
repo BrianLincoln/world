@@ -7,6 +7,8 @@ import type { WorldGen } from '../world/worldgen';
 import type { Sfx } from './audio';
 import type { BeaconEvent, Beacons } from './beacons';
 import type { Story } from './story';
+import { makeSolidMaterial } from '../gfx/materials';
+import { Puffs } from '../gfx/puffs';
 
 // Phase 2: the gift and the first journey (DESIGN.md, Player Sequence).
 //
@@ -113,7 +115,20 @@ class Leader {
   }
 }
 
+/**
+ * The hearth spirit pulling a bike out of its glowing heart: a spark rises
+ * out of its chest, swells into a ball of light, arcs over to where the bike
+ * will stand and bursts, and the bike spins up out of the light to full size.
+ */
+interface Conjure { bike: Bike; t: number; to: THREE.Vector3; heading: number; size: number }
+const CONJURE = 2.7;
+
 export class Journey {
+  /** Its sparkles and the ball of light (add to the scene). */
+  readonly group = new THREE.Group();
+  private sparks = new Puffs('#ffe7a0', 50, 0.8, 0.9);
+  private ball = new THREE.Mesh(new THREE.IcosahedronGeometry(1, 3), makeSolidMaterial('#ffcf73', 0.8));
+  private conj: Conjure | null = null;
   stage: Stage = 'wait';
   private t = 0;
   private leader: Leader | null = null;
@@ -123,6 +138,9 @@ export class Journey {
   private tmp = new THREE.Vector3();
 
   constructor(private d: JourneyDeps) {
+    this.ball.visible = false;
+    this.ball.frustumCulled = false;
+    this.group.add(this.sparks.group, this.ball);
     this.load();
     d.beacons.onEvent = (e, t) => this.event(e, t);
   }
@@ -178,6 +196,20 @@ export class Journey {
   update(dt: number) {
     const story = this.d.story;
     this.t += dt;
+    this.sparks.update(dt);
+    this.updateConjure(dt);
+    // A saved journey never outlives the story it belongs to (a fresh start).
+    if (!story.done && this.stage !== 'wait') {
+      this.stage = 'wait';
+      this.save();
+      this.d.bikes.bikes.delete('gift');
+      this.d.bikes.bikes.delete('spirit');
+      this.sBike = null;
+      this.leader = null;
+      this.spirit.riding = null;
+      story.lent = false;
+    }
+    this.tidyCabin();
     if (this.stage === 'wait') {
       // The hearth is lit and the house has settled: a few moments later, the gift.
       if (story.done && story.step.id === 'home') { if (this.t > 5) this.startGift(); }
@@ -190,21 +222,26 @@ export class Journey {
     }
     const b = this.d.body;
     const riding = this.d.cycling();
-    // From the first ride on, your bike always turns up again outside the cabin.
-    if (this.stage !== 'gift') {
-      const k = this.gift();
-      const g = this.giftSpot();
-      if (!k.ridden && Math.hypot(k.pos.x - b.pos.x, k.pos.z - b.pos.z) > 220 && Math.hypot(k.pos.x - g.x, k.pos.z - g.z) > 20 && Math.hypot(g.x - b.pos.x, g.z - b.pos.z) > 120) this.d.bikes.move(k, g.x, g.z, g.heading);
-    }
+
     switch (this.stage) {
       case 'gift': {
-        const k = this.gift();
-        // It waits beside the bike and points at it.
-        const at = k.pos.clone().add(new THREE.Vector3(Math.cos(k.heading), 0, -Math.sin(k.heading)).multiplyScalar(-1.6));
+        const g = this.giftSpot();
+        // It comes out to the yard beside where the bike will stand...
+        const at = new THREE.Vector3(g.x - Math.cos(g.heading) * 1.6, 0, g.z + Math.sin(g.heading) * 1.6);
         at.y = this.d.gen.height(at.x, at.z);
+        const k = this.d.bikes.bikes.get('gift');
+        if (!k) {
+          this.want(at, b.pos, 'stand', null);
+          // ...and once you're watching, pulls it out of its heart.
+          if (!this.conj && this.spirit.arrived && (b.pos.distanceTo(at) < 16 || this.t > 25)) {
+            const nk = this.d.bikes.place('gift', g.x, g.z, g.heading, 0);
+            this.conjure(nk, 1);
+          }
+          break;
+        }
+        if (this.conj) break;
+        // Then it points at it: yours.
         this.want(at, k.pos, 'point', 'bike');
-        // Its own little bike stands ready just along the path.
-        if (!this.sBike) this.parkAtPath(this.d.gen.journey.toHome, 7);
         if (riding === k) {
           this.spirit.celebrate();
           this.setStage('ride1');
@@ -287,7 +324,6 @@ export class Journey {
   // ------------------------------------------------------------ riding
 
   private startGift() {
-    this.gift();
     this.setStage('gift');
     this.d.story.lent = true;
   }
@@ -316,7 +352,12 @@ export class Journey {
    * the bike, climb on. Returns true while that's still going on.
    */
   private board(dt: number, line: [number, number][]): boolean {
-    if (!this.sBike) this.parkAtPath(line, 6);
+    if (!this.sBike) {
+      // Its own little bike, out of its heart too, just along the path.
+      this.parkAtPath(line, 6);
+      this.conjure(this.sBike!, LITTLE);
+    }
+    if (this.conj) return true;
     const k = this.sBike!;
     this.boardT += dt;
     if (this.boardT < 0.05 && this.stage === 'ride2') this.spirit.greet();
@@ -417,6 +458,96 @@ export class Journey {
     if (this.sBike) { this.d.bikes.bikes.delete('spirit'); this.sBike = null; }
   }
 
+  // ------------------------------------------------------------ bikes at the cabin
+
+  /**
+   * Exactly one bike at the cabin, and only once it's been given: yours
+   * comes back to its spot outside whenever you've left it elsewhere and
+   * aren't near it (or the spot), and any other bike left about the cabin
+   * quietly goes once you're away.
+   */
+  private tidyCabin() {
+    const b = this.d.body.pos, st = this.d.gen.story;
+    const g = this.giftSpot();
+    const given = this.stage !== 'wait' && this.stage !== 'gift';
+    for (const [key, k] of this.d.bikes.bikes) {
+      if (k.ridden || key === 'spirit') continue;
+      const far = Math.hypot(k.pos.x - b.x, k.pos.z - b.z) > 70;
+      if (key === 'gift') {
+        if (given && far && Math.hypot(k.pos.x - g.x, k.pos.z - g.z) > 20 && Math.hypot(g.x - b.x, g.z - b.z) > 40) this.d.bikes.move(k, g.x, g.z, g.heading);
+      } else if (far && Math.hypot(k.pos.x - st.x, k.pos.z - st.z) < 80) this.d.bikes.bikes.delete(key);
+    }
+    if (given && !this.d.bikes.bikes.has('gift')) this.gift();
+  }
+
+  /** Pull a bike out of the spirit's heart (it appears at `size` when done). */
+  private conjure(k: Bike, size: number) {
+    this.conj = { bike: k, t: 0, to: k.pos.clone(), heading: k.heading, size };
+    k.scale = 0.001;
+    this.spirit.celebrate();
+    this.d.sfx.chirp(true);
+  }
+
+  private updateConjure(dt: number) {
+    const c = this.conj;
+    this.ball.visible = false;
+    if (!c) return;
+    c.t += dt;
+    const sp = this.spirit, k = c.bike, t = c.t;
+    const chest = sp.pos.clone().add(new THREE.Vector3(0, 0.35, 0));
+    const over = chest.clone().add(new THREE.Vector3(0, 1.3, 0));
+    const land = c.to.clone().add(new THREE.Vector3(0, 0.55 * c.size, 0));
+    let r = 0;
+    const p = new THREE.Vector3();
+    if (t < 0.5) {
+      // A spark out of its chest.
+      const e = t / 0.5;
+      p.copy(chest).addScaledVector(new THREE.Vector3(Math.sin(sp.heading), 0, Math.cos(sp.heading)), 0.3 * e);
+      r = 0.16 * e;
+      if (Math.random() < dt * 20) this.sparks.emit(p, 1, 0.05, 0.6);
+    } else if (t < 1.3) {
+      // Rising and swelling over its head.
+      const e = THREE.MathUtils.smootherstep(t, 0.5, 1.3);
+      p.lerpVectors(chest, over, e);
+      r = 0.16 + 0.24 * e + 0.03 * Math.sin(t * 30);
+      if (Math.random() < dt * 30) this.sparks.emit(p, 1, 0.06, 1.2);
+    } else if (t < 1.85) {
+      // Arcing over to where the bike will stand.
+      const e = THREE.MathUtils.smootherstep(t, 1.3, 1.85);
+      p.lerpVectors(over, land, e);
+      p.y += Math.sin(e * Math.PI) * 1.2;
+      r = 0.4 * (1 - 0.2 * e);
+    } else if (t - dt < 1.85) {
+      this.sparks.emit(land, 24, 0.12, 3.2);
+      this.d.sfx.chirp(false);
+    }
+    if (r > 0) {
+      this.ball.visible = true;
+      this.ball.position.copy(p);
+      this.ball.scale.setScalar(r);
+    }
+    // The bike spins up out of the light, a little bounce as it lands.
+    if (t >= 1.85) {
+      const e = Math.min(1, (t - 1.85) / 0.7);
+      const grow = 1 - Math.pow(1 - e, 3) * Math.cos(e * 7);
+      k.scale = Math.max(0.001, c.size * grow);
+      k.heading = c.heading + (1 - THREE.MathUtils.smootherstep(e, 0, 1)) * Math.PI * 2;
+      k.pos.copy(c.to);
+      k.pos.y = this.d.gen.height(c.to.x, c.to.z) + (1 - e) * 0.3;
+      k.stand = 1;
+      k.skel.pose(k);
+    } else {
+      k.scale = 0.001;
+      k.skel.pose(k);
+    }
+    if (t >= CONJURE) {
+      k.scale = c.size;
+      k.heading = c.heading;
+      k.pos.copy(c.to);
+      this.conj = null;
+    }
+  }
+
   // ------------------------------------------------------------ dev jumps
 
   /** Jump straight to a stage (the panel, ?journey=): finishes phase 1 and sets the world up for it. */
@@ -433,12 +564,14 @@ export class Journey {
     this.t = 0;
     const j = this.d.gen.journey;
     const front = (t: Tower, d: number) => [t.door.ground.x + Math.sin(t.yaw) * d, t.door.ground.z + Math.cos(t.yaw) * d] as const;
-    const gift = this.gift();
+    this.conj = null;
+    this.ball.visible = false;
+    if (s === 'wait' || s === 'gift') this.d.bikes.bikes.delete('gift');
+    const gift = s === 'wait' || s === 'gift' ? null! : this.gift();
     if (s === 'wait' || s === 'gift') {
       const g = this.giftSpot();
-      this.d.bikes.move(gift, g.x, g.z, g.heading);
-      this.d.place(g.x + Math.sin(g.heading) * -5, g.z + Math.cos(g.heading) * -5, g.heading);
-      if (s === 'gift') this.startGift();
+      this.d.place(g.x + Math.sin(g.heading) * -7, g.z + Math.cos(g.heading) * -7, g.heading);
+      if (s === 'gift') { this.startGift(); this.spirit.teleport(new THREE.Vector3(g.x - Math.cos(g.heading) * 1.6, this.d.gen.height(g.x, g.z), g.z + Math.sin(g.heading) * 1.6)); }
     } else if (s === 'ride1') {
       const [x, z] = j.toHome[0];
       this.d.bikes.move(gift, x, z, Math.atan2(j.toHome[1][0] - x, j.toHome[1][1] - z));

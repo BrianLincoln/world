@@ -1335,3 +1335,25 @@ asked for as far as possible). Everything below is a first pass for review.
   stood 0.4 m into one), and from outside, the door boulder uses its drawn,
   lumpy shape, not the ellipsoid shell (lumps poked 0.5 m into you). Drop
   tests: 0 bad on fjord and hilda.
+
+### Bikes at the cabin (2026-09-29)
+- A bike stood by the cabin from the start: world bikes are placed on path
+  verges, and the journey trail is a path now. **No world bikes within
+  350 m of the story cabin** (`CABIN_CLEAR` in bikes.ts). A saved journey
+  step also can't outlive its story: if the hearth isn't lit, the journey
+  goes back to `wait` and its bikes go.
+- **The gift is pulled out of the hearth spirit's heart**: it comes out to
+  the yard, and once you're near and watching it throws its arms up. A
+  spark rises out of its chest and swells into a ball of light over its
+  head, arcs over to the spot and bursts, and the bike spins up out of the
+  light with a little overshoot (`conjure`, 2.7 s). Then it points at the
+  bike (bike bubble). Its own little bike comes out the same way when you
+  climb on, just up the path.
+- **Exactly one bike at the cabin** (`tidyCabin`): once given, your bike
+  goes back to its spot whenever you've left it elsewhere and are 70 m+ from
+  it and away from the cabin; if it's missing, it's recreated. Any other bike
+  left within 80 m of the cabin goes once you're 70 m from it. The spirit's
+  own bike is never at the cabin after the first ride (and is gone when the
+  journey's done). The ground shadow waits until a conjured bike has grown.
+- `scripts/gift.mjs`: the gift moment frame by frame, with bike counts
+  near the cabin before and after.

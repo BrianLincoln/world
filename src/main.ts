@@ -261,6 +261,7 @@ scene.add(beacons.group);
 // Phase 2: the bike, the ride to the home tower, the first two towers (story only).
 let journey = null as Journey | null;
 function makeJourney() {
+  if (journey) scene.remove(journey.group);
   const host = storyHost!;
   const story = host.story;
   journey = host.active && story ? new Journey({
@@ -269,6 +270,7 @@ function makeJourney() {
     place: (x, z, h) => { if (riding) dismount(); if (cycling) dismountBike(); player.set('walk', ctx); placePlayer(x, z); player.body.heading = h; orbit.yaw = h + Math.PI; orbit.pitch = 0.2; orbit.snap(); },
     mount: (k) => mountBike(k),
   }) : null;
+  if (journey) scene.add(journey.group);
 }
 makeJourney();
 if (params.get('lit') === 'all') beacons.debugSet('all');
