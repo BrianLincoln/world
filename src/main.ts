@@ -25,6 +25,8 @@ import { Bikes, type Bike } from './vehicles/bikes';
 import { TowerDebug } from './ui/towerDebug';
 import { Beacons } from './story/beacons';
 import { Journey, STAGES, type Stage } from './story/journey';
+import { Herd } from './story/herd';
+import { PHASE3 } from './story/phase3';
 import { Colliders } from './world/colliders';
 import { Terrain } from './world/terrain';
 import { SEA_LEVEL, WorldGen } from './world/worldgen';
@@ -102,7 +104,7 @@ const mobCtx: MobCtx = {
   surface: (x, z) => Math.max(gen.height(x, z), SEA_LEVEL),
   collide: (pos, vel, r) => {
     colliders.push(pos, vel, r);
-    storyHost?.story?.collide(pos, vel, r);
+    storyHost?.story?.collide(pos, vel, r, true);
     beacons?.collide(pos, vel, r);
   },
   puff: (at, n, size, spread) => puffs.emit(at, n, size, spread),
@@ -271,9 +273,39 @@ function makeJourney() {
     mount: (k) => mountBike(k),
   }) : null;
   if (journey) scene.add(journey.group);
+  makeHerd();
 }
+// Phase 3: the creatures living at the stable (story only).
+let herd = null as Herd | null;
+function makeHerd() {
+  const story = storyHost!.story;
+  herd = storyHost!.active && story?.stable ? new Herd({ mobs, story, sfx: storyHost!.sfx, saveKey: seedText, camera, ctx: mobCtx, puffs: (at, n, size, spread) => puffs.emit(at, n, size, spread) }) : null;
+  if (story) story.herdCount = () => herd?.count ?? 0;
+  // In the story the lasso is the spirit's gift, and a creature is only
+  // rideable once it's been brought home to the stable.
+  mobs.rules.stable = !!storyHost!.active;
+}
+if (params.has('fresh')) try { localStorage.removeItem(`fjellheim.herd.${seedText}`); } catch { /* ignore */ }
 makeJourney();
-if (params.get('lit') === 'all') beacons.debugSet('all');
+
+/** Dev: straight to a phase 3 step (the journey done, everything before it built), standing by the pasture gate. */
+function stableJump(id: string) {
+  const story = storyHost?.story;
+  if (!journey || !story?.stable) return false;
+  journey.jump('done');
+  if (!story.debugJump(id)) return false;
+  const g = story.anchor('gateOut');
+  if (riding) dismount();
+  if (cycling) dismountBike();
+  player.set('walk', ctx);
+  const out = g.clone().sub(story.stable.gate).setY(0).normalize();
+  placePlayer(g.x + out.x * 5, g.z + out.z * 5);
+  player.body.heading = Math.atan2(-out.x, -out.z);
+  orbit.yaw = Math.atan2(out.x, out.z);
+  orbit.pitch = 0.2;
+  orbit.snap();
+  return true;
+}
 if (params.get('beacons') === '0') beacons.group.visible = false;
 
 /** Find dry, gentle ground near a point: spiral search. */
@@ -339,6 +371,8 @@ if (params.has('dist')) orbit.targetDistance = parseFloat(params.get('dist')!);
 const ctx: MoveContext = { input: input.state(), camYaw: 0, camPitch: 0, dt: 0, world };
 // ?journey=<step>: straight to a phase 2 step (after the spawn and the bike reset, which would undo it).
 if (params.get('journey') && STAGES.includes(params.get('journey') as Stage)) journey?.jump(params.get('journey') as Stage);
+// ?stable=<step>: straight to a phase 3 step.
+if (params.get('stable')) stableJump(params.get('stable')!);
 if (params.get('mode') === 'fly') {
   player.set('fly', ctx);
   player.body.pos.y = gen.height(player.body.pos.x, player.body.pos.z) + (params.has('y') ? parseFloat(params.get('y')!) : 60);
@@ -394,7 +428,7 @@ const ui = new DebugUI({
     mobs.spawnFlockAt(name, b.pos.x + Math.sin(b.heading) * 18, b.pos.z + Math.cos(b.heading) * 18, mobCtx);
   },
   crowPlump: { get: () => crowStyle.plump, set: (v) => { crowStyle.plump = v; crow.setPlump(v); } },
-  journey: { stages: STAGES, jump: (s) => journey?.jump(s as Stage) },
+  journey: { stages: [...STAGES, ...PHASE3.steps.map((st) => st.id)], jump: (s) => (STAGES.includes(s as Stage) ? journey?.jump(s as Stage) : stableJump(s)) },
   towers: {
     settings: towerDebug.settings,
     count: () => gen.towers.towers.length,
@@ -533,11 +567,12 @@ function frame(ts?: number) {
     resize();
   }
 
-  if (input.pressed('KeyF') && !riding && !cycling && !beacons.busy && !journey?.busy) player.set(player.current.name === 'fly' ? 'walk' : 'fly', ctx);
+  const storyBusy = !!storyHost?.story?.busy;
+  if (input.pressed('KeyF') && !riding && !cycling && !beacons.busy && !journey?.busy && !storyBusy) player.set(player.current.name === 'fly' ? 'walk' : 'fly', ctx);
   // Only take the press (pressed() consumes it) when a tower is on offer.
   const beaconUsed = !!beacons.action(player.current.name) && (input.pressed('KeyE') || input.pressed('Mouse0')) && beacons.act(player.current.name);
   if (!beaconUsed) storyHost?.story?.handleAction(input);
-  if (input.pressed('KeyE') && !beaconUsed && !journey?.busy) {
+  if (input.pressed('KeyE') && !beaconUsed && !journey?.busy && !storyBusy) {
     // Something else in reach? Climb straight across; otherwise E hops off.
     const next = nextMount();
     if (next && (riding || cycling)) switchTo(next);
@@ -545,6 +580,7 @@ function frame(ts?: number) {
     else if (cycling) dismountBike();
     else if (next) switchTo(next);
   }
+  mobs.rules.lasso = !storyHost?.active || !!storyHost.story?.hasLasso;
   const lassoKey = input.pressed('KeyR') || input.pressed('Mouse2');
   if (lassoKey && mobs.act() === 'throw') rig.throwLasso();
   if (input.pressed('KeyH')) ui.toggle();
@@ -560,7 +596,7 @@ function frame(ts?: number) {
 
   ctx.input = input.state();
   // Watching a tower's spirit (or being carried in and out): hands off.
-  if (beacons.busy || journey?.busy) ctx.input = { ...ctx.input, x: 0, y: 0, run: false, jump: false, jumpPressed: false, up: false, down: false };
+  if (beacons.busy || journey?.busy || storyBusy) ctx.input = { ...ctx.input, x: 0, y: 0, run: false, jump: false, jumpPressed: false, up: false, down: false };
   ctx.camYaw = inputYaw ?? orbit.yaw;
   ctx.camPitch = orbit.pitch;
   ctx.dt = dt;
@@ -647,6 +683,7 @@ function frame(ts?: number) {
   mobCtx.player.heading = body.heading;
   mobCtx.player.mode = mode;
   mobs.update(mobCtx, camera, hand, mode === 'walk' || mode === 'glide' || mode === 'ride' || mode === 'bike');
+  herd?.update(dt);
   bikes.update(dt, body.pos, camera);
   bikes.shadows(camera);
   rig.ropeAim = null;
@@ -664,7 +701,7 @@ function frame(ts?: number) {
   if (storyHost?.story) {
     storyHost.story.external = beacons.action(mode);
     // No pats in the middle of a cutscene.
-    storyHost.story.noPat = beacons.busy || !!journey?.busy;
+    storyHost.story.noPat = beacons.busy || !!journey?.busy || storyBusy;
   }
   storyHost?.story?.update(dt, input, mode);
   journey?.update(dt);
@@ -715,7 +752,7 @@ function frame(ts?: number) {
   // A tower's spirit being freed: the camera watches it, not you, easing
   // in from where it was and back to you after (never a cut).
   // Or the hearth spirit pulling your bike out of its heart.
-  const cine = beacons.cinematic() ?? journey?.cinematic() ?? null;
+  const cine = beacons.cinematic() ?? journey?.cinematic() ?? storyHost?.story?.cinematic() ?? null;
   if (cine) {
     if (!hadCine) { camBlendPos.copy(camera.position); camBlendQ.copy(camera.quaternion); camBlend = 0; }
     camera.position.copy(cine.pos);
@@ -987,6 +1024,15 @@ window.__ow = {
     if (best) { best.state = 'caught'; best.stateT = 99; }
     return !!best;
   },
+  /** Phase 3 (shots/tests): `n` fresh creatures of a species, lassoed inside the pasture so they come to live there. */
+  bringHome: (name: string, n = 1) => {
+    const st = storyHost?.story?.stable;
+    if (!st) return false;
+    const at = st.spot(Math.random, 1.5);
+    mobs.spawnFlockAt(name, at.x, at.z, mobCtx, n);
+    for (const m of mobs.all()) if (m.state === 'wild' && m.species.name === name && st.inside(m.pos.x, m.pos.z, 1)) { m.state = 'caught'; m.stateT = 99; }
+    return true;
+  },
   mountNearest: () => { const m = mobs.mountable(player.body.pos) ?? mobs.tamed[0]; if (m) mount(m); return !!m; },
   bikes,
   bikeMode,
@@ -1011,6 +1057,9 @@ window.__ow = {
   /** Phase 2: the journey director; `journeyJump(stage)` jumps to a step. */
   journey: () => journey,
   journeyJump: (s: Stage) => journey?.jump(s),
+  /** Phase 3: jump to a step (`stableJump('fence')`), and the herd. */
+  stableJump,
+  herd: () => herd,
   /** Stop the clock (true) and step frames by hand with `advance`, or hand it back (false). */
   manual: (on: boolean) => { if (manualStep && !on) { manualStep = false; timer.update(); requestAnimationFrame(frame); } else manualStep = on; },
   /** Run `n` frames of exactly `dt` seconds each (only in manual mode). */

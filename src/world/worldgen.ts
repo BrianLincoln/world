@@ -1,6 +1,6 @@
 import { Simplex } from '../core/noise';
 import { clamp, hash01, hashInt, lerp, mulberry32, smoothstep } from '../core/rng';
-import { brookQuery, findStorySite, RUIN_D, RUIN_W, siteToLocal, type StorySite } from './storySite';
+import { brookQuery, findStorySite, PASTURE_D, PASTURE_W, pasturePlane, RUIN_D, RUIN_W, siteToLocal, type StorySite } from './storySite';
 import { buildTowerNet, HOME_VIEW, type Tower, type TowerNet } from './towers';
 
 // The world is a pure function of (seed, x, z). Nothing here touches three.js
@@ -150,11 +150,17 @@ export class WorldGen {
       else if (p.boulders) for (const b of p.boulders) avoid.push(b.x, b.z, b.sx + 2.5);
     });
     for (const t of st.trees) avoid.push(t.x, t.z, 4.5);
+    const pa = st.pasture;
+    const inPasture = (x: number, z: number) => {
+      if (!pa) return false;
+      const l = siteToLocal(pa, x, z);
+      return Math.abs(l.x) < PASTURE_W / 2 + 5 && Math.abs(l.z) < PASTURE_D / 2 + 5;
+    };
     for (const b of st.boulders) avoid.push(b.x, b.z, 3.5);
     avoid.push(st.stump.x, st.stump.z, 2.5);
     const wet = (x: number, z: number) => this.height(x, z) < 2.2 || this.brookDist(x, z) < 5.5;
     const blockedAt = (x: number, z: number) => {
-      if (wet(x, z)) return true;
+      if (wet(x, z) || inPasture(x, z)) return true;
       for (let k = 0; k < avoid.length; k += 3) if (Math.hypot(x - avoid[k], z - avoid[k + 1]) < avoid[k + 2]) return true;
       return false;
     };
@@ -396,8 +402,15 @@ export class WorldGen {
         }
       }
     }
-    // The story brook: a channel with sandy banks, carved into whatever is there.
     const st = this.story;
+    // The pasture: eased onto its gentle plane, blending out over 10 m.
+    const pa = st.pasture;
+    if (pa && Math.abs(x - pa.x) < 40 && Math.abs(z - pa.z) < 40) {
+      const l = siteToLocal(pa, x, z);
+      const e = Math.hypot(Math.max(0, Math.abs(l.x) - PASTURE_W / 2 - 2), Math.max(0, Math.abs(l.z) - PASTURE_D / 2 - 2));
+      if (e < 10) h = lerp(h, pasturePlane(pa, l.x, l.z), 1 - smoothstep(0, 10, e));
+    }
+    // The story brook: a channel with sandy banks, carved into whatever is there.
     if (st.brook.length && x > st.box[0] && x < st.box[2] && z > st.box[1] && z < st.box[3]) {
       const q = brookQuery(st.brook, x, z, this.bq);
       if (q.d < 5.2) h = Math.min(h, q.bed + (h - q.bed) * smoothstep(1.2, 5.2, q.d));
@@ -436,6 +449,16 @@ export class WorldGen {
       if (t > -2 && t < HOME_VIEW && Math.abs((x - y.x) * dz - (z - y.z) * dx) / dl < 4 + r + t * 0.05) return true;
     }
     if (x < st.box[0] || x > st.box[2] || z < st.box[1] || z > st.box[3]) return false;
+    // The pasture is open grass: nothing else in it, and bare ground under the stable.
+    const pa = st.pasture;
+    if (pa) {
+      const q = siteToLocal(pa, x, z);
+      const m = kind === 'tuft' ? -0.6 : kind === 'rock' ? 4 : kind === 'tree' ? 5 : 3;
+      if (Math.abs(q.x) < PASTURE_W / 2 + m + r && Math.abs(q.z) < PASTURE_D / 2 + m + r) {
+        if (kind !== 'tuft') return true;
+        if (q.x * pa.end > PASTURE_W / 2 - 7 && Math.abs(q.z) < 6) return true;
+      }
+    }
     const l = siteToLocal(st, x, z);
     const pad = kind === 'tuft' ? 0.4 : kind === 'rock' ? 3 : 1.5;
     if (Math.abs(l.x) < RUIN_W / 2 + pad + r + (kind === 'tuft' ? 0 : 1.2) && Math.abs(l.z) < RUIN_D / 2 + pad + r) return true;

@@ -830,7 +830,7 @@ export class Crow implements Species {
     d.look.x += (lx - d.look.x) * e(12);
     d.look.y += ((d.lookAt ? pitchT - d.headPitch : 0) - d.look.y) * e(12);
     d.eye.set(d.look.x, -d.look.y, lids, 0);
-    d.saddle.visible = m.state === 'tamed';
+    d.saddle.visible = m.stabled;
     d.root.updateMatrixWorld(true);
   }
 

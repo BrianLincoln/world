@@ -23,7 +23,8 @@ import { Puffs } from '../gfx/puffs';
 //   ride2   ...and it's waiting on its bike to lead you there.
 //   lock2   The same again at that tower...
 //   enter2  ...and from its head, home glows: fly back as an ember.
-//   done    It goes back to its fire.
+//   done    It goes back to its fire. The next time you come home, phase 3
+//           (the stable, see phase3.ts) begins.
 //
 // From `ride1` on, the gift bike always turns up again outside the cabin.
 // Which stage you're at is saved per seed.
@@ -314,6 +315,9 @@ export class Journey {
           const far = this.spirit.pos.distanceTo(b.pos) > 90;
           if (far) this.goHome();
           else this.want(this.spirit.pos.clone(), b.pos, 'stand', null);
+        } else if (story.stableReady && Math.hypot(b.pos.x - this.d.gen.story.x, b.pos.z - this.d.gen.story.z) < 35 && b.grounded) {
+          // Home again after lighting the first two towers: the stable (phase 3).
+          story.startStable();
         }
         break;
       }

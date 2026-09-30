@@ -5,30 +5,37 @@ import { Puffs } from '../gfx/puffs';
 import type { CharacterRig } from '../player/character';
 import type { Input } from '../player/input';
 import type { Body } from '../player/movement';
-import { siteLocal, siteToLocal, type StorySite } from '../world/storySite';
+import { GATE_HW } from './stableGeometry';
+import { PASTURE_D, PASTURE_W, siteLocal, siteToLocal, type StorySite } from '../world/storySite';
 import type { WorldGen } from '../world/worldgen';
 import type { Sfx } from './audio';
-import { RuinCabin, type PartId } from './cabin';
+import { RuinCabin } from './cabin';
+import type { Buildable, Part, PartId } from './build';
+import { Stable } from './stable';
+import { PHASE3 } from './phase3';
 import { CAB } from './geometry';
 import { Hud } from './hud';
 import { glowCanvas, iconCanvas, tex, type IconName } from './icons';
 import { Billboard, OVERLAY_U } from './overlay';
 import { PHASE1, type Anchor, type PhaseDef, type Resource, type StepDef, type TargetTag } from './phase1';
-import { AxeProp, ChopTree, easeGlint, Flyer, PickProp, SmashRock, Stumps, Woods, type WoodTree } from './props';
+import { AxeProp, ChopTree, easeGlint, Flyer, LassoProp, PickProp, SmashRock, Stumps, Woods, type WoodTree } from './props';
 import type { Colliders, PropHit } from '../world/colliders';
 import { BIG_ROCK, Harvest, rubbleOf, type RegrowCtx, type Taken } from '../world/harvest';
 import { hash01 } from '../core/rng';
 import { segDist } from '../world/worldgen';
 import { PAT, Spirit } from './spirit';
 
-// The story director. It runs a phase table (phase1.ts) over the story set:
-// the broken cabin, the axe, the grove, the brook stones and the spirit. It
+// The story director. It runs the phase tables (phase1.ts, phase3.ts) over
+// the story set: the broken cabin, the axe, the grove, the brook stones, the
+// spirit, and later the stable and its pasture. It
 // knows the step *kinds* (meet, pickup, gather, build, light, rest), not the
 // content, so later phases can reuse it. It owns the interaction system
 // (walk up to things; E / click also works), the inventory, the clock while
 // the story runs, the idle hints and the save.
 
 const SAVE_VERSION = 2;
+/** The lasso gift shot: the camera settles this long before the spark, and holds on the post this long after (s). */
+const GIFT_LEAD = 1.1, GIFT_HOLD = 1.5;
 /** How long a tool stays in hand after its last use before it's stowed again (s). */
 const TOOL_HOLD = 0.7;
 /** Seconds without progress before the spirit repeats its hint, more obviously. */
@@ -71,9 +78,12 @@ interface SaveData {
   world: Taken[];
   /** The harvest clock (in-game hours). */
   clock?: number;
-  filled: Record<PartId, number>;
+  filled: Partial<Record<PartId, number>>;
   built: PartId[];
   lit: boolean;
+  /** Which phase table the step is in (absent: phase 1). */
+  phase?: number;
+  lasso?: boolean;
   done: boolean;
   hour: number;
 }
@@ -130,7 +140,19 @@ export class Story {
   readonly group = new THREE.Group();
   readonly overlayGroup = new THREE.Group();
   readonly hud: Hud;
-  readonly phase: PhaseDef = PHASE1;
+  /** Phase tables in order (phase 2 is the journey's own director). */
+  readonly phases: PhaseDef[] = [PHASE1, PHASE3];
+  phaseIndex = 0;
+  get phase(): PhaseDef { return this.phases[this.phaseIndex]; }
+  /** The stable and its pasture (phase 3), when the site has room for one. */
+  readonly stable: Stable | null = null;
+  readonly lasso: LassoProp | null = null;
+  hasLasso = false;
+  /** How many creatures live at the stable (set by the herd, see story/herd.ts). */
+  herdCount: () => number = () => 0;
+  /** The lasso's gift: the spirit pulls it out of its heart (-1 = not running). */
+  private giftT = -1;
+  private giftBall = new THREE.Mesh(new THREE.IcosahedronGeometry(1, 3), makeSolidMaterial('#ffcf73', 0.8));
   readonly far: FarLight;
   readonly woods: Woods;
   private sparkles = new Puffs('#ffe7a0', 30, 0.8, 0.9);
@@ -182,6 +204,18 @@ export class Story {
     this.cabin = new RuinCabin(site, d.puffs);
     this.group.add(this.cabin.root, this.cabin.embers.group, this.cabin.smoke.group, this.cabin.column.batch.mesh, this.sparkles.group, this.chipPuffs.group);
     this.overlayGroup.add(this.cabin.overlay);
+    if (site.pasture) {
+      const st = (this.stable = new Stable(site, d.puffs));
+      this.group.add(st.root);
+      this.overlayGroup.add(st.overlay);
+      // The lasso hangs coiled on the gatepost once it's been given.
+      const post = st.local(-GATE_HW, PASTURE_D / 2 + 0.15, 1.08);
+      this.lasso = new LassoProp(post, siteLocal(site.pasture, 0, 1).x - site.pasture.x, siteLocal(site.pasture, 0, 1).z - site.pasture.z);
+      this.group.add(this.lasso.group);
+    }
+    this.giftBall.visible = false;
+    this.giftBall.frustumCulled = false;
+    this.group.add(this.giftBall);
     site.trees.forEach((t, i) => {
       const tree = new ChopTree(t, ground(t.x, t.z), i);
       tree.onLanded = (tr) => this.treeLanded(tr);
@@ -241,6 +275,22 @@ export class Story {
     this.anchors.set('chimney', this.cabin.parts.chimney.centre.clone());
     this.anchors.set('far', this.far.pos.clone());
     this.anchors.set('lookout', new THREE.Vector3(site.lookout.x, 0, site.lookout.z));
+    const stb = this.stable;
+    if (stb) {
+      const pa = site.pasture!;
+      const P = (lx: number, lz: number, up = 0) => stb.local(lx, lz, up);
+      this.anchors.set('plotSpot', P(-pa.end * 3, 2));
+      this.anchors.set('stableSite', stb.local(pa.end * (PASTURE_W / 2 - 2.5), 0, 1.5));
+      this.anchors.set('stableFront', stb.front.clone());
+      this.anchors.set('roofTop', stb.parts.sroof.centre.clone());
+      this.anchors.set('gate', stb.gate.clone().setY(stb.gate.y + 0.8));
+      this.anchors.set('gateIn', stb.gateIn.clone());
+      // Outside the gate, off to the side so it isn't in your way.
+      this.anchors.set('gateOut', P(3.2, PASTURE_D / 2 + 2.4));
+      this.anchors.set('fenceSide', P(-PASTURE_W / 4, PASTURE_D / 2, 0.8));
+      this.anchors.set('lasso', this.lasso!.pos.clone());
+      this.anchors.set('woods', this.findWoods(gen));
+    }
     for (const [k, v] of this.anchors) if (v.y === 0 && k !== 'far') v.y = ground(v.x, v.z);
 
     // Interactables.
@@ -248,6 +298,7 @@ export class Story {
     for (const t of this.trees) this.targets.push({ tag: 'tree', pos: t.pos, reach: CHOP_REACH + t.canopy, mat: t.mat, ok: () => t.standing });
     this.targets.push({ tag: 'pick', pos: this.pick.pos, reach: 2.0 + hb.sc, mat: this.pick.mat, ok: () => !this.pick.taken });
     for (const r of this.rocks) this.targets.push({ tag: 'rock', pos: r.pos, reach: SMASH_REACH + r.radius, mat: r.mat, ok: () => !r.broken && this.hasPick });
+    if (this.lasso) { const l = this.lasso; this.targets.push({ tag: 'lasso', pos: l.pos, reach: 2.2, mat: l.mat, ok: () => l.shown && !l.taken }); }
     this.targets.push({
       tag: 'hearth', pos: this.cabin.hearthPos, reach: 2.0, mat: this.cabin.hearthMat,
       ok: () => !this.cabin.lit && d.env.hour >= (this.step.kind === 'light' ? this.step.readyAt : 99),
@@ -270,8 +321,8 @@ export class Story {
         if (dd < 25) return false;
         return dd > 120 || !this.frustum.intersectsSphere(this.sphere.set(this.sphere.center.set(x, y, z), r));
       },
-      // The cabin's clearing stays cleared.
-      keep: (x, z) => Math.hypot(x - site.x, z - site.z) < 40,
+      // The cabin's clearing and the pasture stay cleared.
+      keep: (x, z) => Math.hypot(x - site.x, z - site.z) < 40 || !!this.stable?.inside(x, z, -6),
     };
 
     d.scene.add(this.group);
@@ -285,6 +336,33 @@ export class Story {
   }
 
   get step(): StepDef { return this.phase.steps[Math.min(this.stepIndex, this.phase.steps.length - 1)]; }
+
+  /** Whichever building a part belongs to. */
+  private owner(id: PartId): Buildable {
+    return id in this.cabin.parts ? this.cabin : this.stable!;
+  }
+
+  part(id: PartId): Part { return this.owner(id).parts[id]!; }
+
+  /**
+   * Open ground at the edge of the woods nearest the pasture, where the
+   * spirit looks while you fetch logs for the stable.
+   */
+  private findWoods(gen: WorldGen): THREE.Vector3 {
+    const c = this.stable!.local(0, 0);
+    let best = this.anchor('grove').clone(), bd = Infinity;
+    for (let r = 30; r <= 110; r += 10) {
+      for (let k = 0; k < 24; k++) {
+        const a = (k / 24) * Math.PI * 2;
+        const x = c.x + Math.cos(a) * r, z = c.z + Math.sin(a) * r;
+        const h = gen.height(x, z);
+        if (h < 3 || gen.forestDensity(x, z, h) < 0.5) continue;
+        if (r < bd) { bd = r; best = new THREE.Vector3(x, h + 2, z); }
+      }
+      if (bd < Infinity) break;
+    }
+    return best;
+  }
 
   anchor(a: Anchor) { return this.anchors.get(a)!; }
 
@@ -343,11 +421,118 @@ export class Story {
     return out;
   }
 
+  // ------------------------------------------------------------ the lasso gift
+
+  /** Little hearts floating up (a creature coming home). */
+  private floaters: { bb: Billboard; from: THREE.Vector3; t: number; dx: number }[] = [];
+
+  hearts(at: THREE.Vector3) {
+    for (let i = 0; i < 3; i++) {
+      const bb = new Billboard(tex(iconCanvas('heart')), 0.42, 20);
+      bb.alpha = 0;
+      this.overlayGroup.add(bb.mesh);
+      this.floaters.push({ bb, from: at.clone(), t: -i * 0.22, dx: (i - 1) * 0.35 });
+    }
+  }
+
+  private updateFloaters(dt: number) {
+    for (const f of this.floaters) {
+      f.t += dt;
+      const k = Math.max(0, f.t) / 1.5;
+      f.bb.pos.copy(f.from).add(new THREE.Vector3(f.dx + Math.sin(f.t * 5) * 0.08, k * 1.6, 0));
+      f.bb.alpha = f.t < 0 ? 0 : Math.min(1, k * 6) * (1 - THREE.MathUtils.smoothstep(k, 0.6, 1));
+      f.bb.scale = 0.7 + 0.5 * Math.min(1, k * 4);
+      if (k >= 1) this.overlayGroup.remove(f.bb.mesh);
+    }
+    this.floaters = this.floaters.filter((f) => f.t < 1.5);
+  }
+
+  /** Others coming up to the gate (a creature on a lead): it swings open for them too. */
+  gateFor: THREE.Vector3[] = [];
+
+  /**
+   * The lasso step: once you're outside by the gate with it, the spirit
+   * takes the camera and pulls the lasso out of its heart: a spark rises
+   * from its chest, swells over its head, arcs to the gatepost and bursts,
+   * and the coiled rope bounces in there.
+   */
+  private updateGift(dt: number) {
+    const st = this.step;
+    const l = this.lasso;
+    this.giftBall.visible = false;
+    // The shot holds on the post a moment after the lasso's there.
+    if (l && l.shown && this.giftT >= 0) { this.giftT += dt; if (!this.busy) this.giftT = -1; return; }
+    if (!l || st.kind !== 'pickup' || st.item !== 'lasso' || l.shown) { this.giftT = -1; return; }
+    const b = this.d.body.pos;
+    if (this.giftT < 0) {
+      const near = b.distanceTo(this.anchor('gateOut')) < 14 && !this.stable!.inside(b.x, b.z) && this.d.body.grounded;
+      if (this.spirit.arrived && near && !this.lent) {
+        this.giftT = 0;
+        this.spirit.celebrate();
+        this.d.sfx.chirp(true);
+      }
+      return;
+    }
+    this.giftT += dt;
+    const t = this.giftT - GIFT_LEAD;
+    if (t < 0) return;
+    const sp = this.spirit;
+    const chest = sp.pos.clone().add(new THREE.Vector3(0, 0.35, 0));
+    const over = chest.clone().add(new THREE.Vector3(0, 1.3, 0));
+    const land = l.pos.clone().setY(l.pos.y + 0.25);
+    const p = new THREE.Vector3();
+    let r = 0;
+    if (t < 0.5) {
+      const e = t / 0.5;
+      p.copy(chest).addScaledVector(new THREE.Vector3(Math.sin(sp.heading), 0, Math.cos(sp.heading)), 0.3 * e);
+      r = 0.16 * e;
+    } else if (t < 1.3) {
+      const e = THREE.MathUtils.smootherstep(t, 0.5, 1.3);
+      p.lerpVectors(chest, over, e);
+      r = 0.16 + 0.2 * e + 0.03 * Math.sin(t * 30);
+      if (Math.random() < dt * 30) this.sparkles.emit(p, 1, 0.06, 1.2);
+    } else if (t < 1.85) {
+      const e = THREE.MathUtils.smootherstep(t, 1.3, 1.85);
+      p.lerpVectors(over, land, e);
+      p.y += Math.sin(e * Math.PI) * 1.2;
+      r = 0.36 * (1 - 0.3 * e);
+    } else {
+      this.sparkles.emit(land, 22, 0.1, 3, undefined, { life: 0.7, rise: 0.4, up: 1.6 });
+      this.d.sfx.chirp(false);
+      l.show();
+      this.dirty = true;
+      return;
+    }
+    this.giftBall.visible = true;
+    this.giftBall.position.copy(p);
+    this.giftBall.scale.setScalar(r);
+  }
+
+  /** The gift shot is running: hands off, the camera is the spirit's. */
+  get busy() { return this.giftT >= 0 && this.giftT < GIFT_LEAD + 1.85 + GIFT_HOLD; }
+
+  /** The gift shot: three-quarters on to the spirit and the gatepost, from outside the pasture. */
+  cinematic(): { pos: THREE.Vector3; at: THREE.Vector3 } | null {
+    if (!this.busy) return null;
+    const sp = this.spirit.pos, g = this.lasso!.pos;
+    const mid = sp.clone().lerp(g, 0.5);
+    const t = this.giftT - GIFT_LEAD;
+    const onPost = THREE.MathUtils.smootherstep(t, 1.4, 2.4);
+    const at = mid.clone().setY(mid.y + 0.5 + 0.7 * THREE.MathUtils.smootherstep(t, 0.3, 1.3) * (1 - onPost));
+    at.lerp(g, 0.45 * onPost);
+    const out = this.anchor('gateOut').clone().sub(this.stable!.gate).setY(0).normalize();
+    const side = new THREE.Vector3(out.z, 0, -out.x);
+    const pos = at.clone().addScaledVector(out, 10.5 - 2 * onPost).addScaledVector(side, -1.5).setY(at.y + 0.9);
+    pos.y = Math.max(pos.y, this.d.gen.height(pos.x, pos.z) + 0.8);
+    return { pos, at };
+  }
+
   // ------------------------------------------------------------ world hooks
 
   /** Solid story props (cabin walls, standing trunks, stumps). */
-  collide(pos: THREE.Vector3, vel: THREE.Vector3, r: number) {
+  collide(pos: THREE.Vector3, vel: THREE.Vector3, r: number, mob = false) {
     this.cabin.push(pos, vel, r);
+    this.stable?.push(pos, vel, r, mob);
     const l = siteToLocal(this.site, pos.x, pos.z);
     if (Math.abs(l.x) > 130 || Math.abs(l.z) > 130) return;
     for (const t of this.woods.trees) {
@@ -614,6 +799,17 @@ export class Story {
 
   /** Waypoints from a to b: around the cabin outside, through its door in and out. */
   route(a: THREE.Vector3, b: THREE.Vector3): THREE.Vector3[] {
+    // In or out of the pasture (once it's fenced): through the gate.
+    const stb = this.stable;
+    if (stb && stb.parts.fence.state === 'built') {
+      const ia = stb.inside(a.x, a.z, -0.5), ib = stb.inside(b.x, b.z, -0.5);
+      if (ia && !ib) return [stb.gateIn.clone(), stb.gateOut.clone(), ...this.routeCabin(stb.gateOut, b)];
+      if (!ia && ib) return [...this.routeCabin(a, stb.gateOut), stb.gateIn.clone(), b.clone()];
+    }
+    return this.routeCabin(a, b);
+  }
+
+  private routeCabin(a: THREE.Vector3, b: THREE.Vector3): THREE.Vector3[] {
     const s = this.site;
     const la = siteToLocal(s, a.x, a.z), lb = siteToLocal(s, b.x, b.z);
     const inA = this.inLocal(la, 0.05), inB = this.inLocal(lb, 0.05);
@@ -665,10 +861,11 @@ export class Story {
       face: st.face ? this.anchor(st.face) : null,
       pose: st.pose ?? 'stand',
       icon: st.icon ?? null,
-      lead: st.kind !== 'meet',
+      lead: st.lead ?? st.kind !== 'meet',
       settled: st.kind === 'rest',
     };
-    if (st.kind === 'build') for (const p of st.parts) this.cabin.showSketch(p);
+    if (st.kind === 'build') for (const p of st.parts) this.owner(p).showSketch(p);
+    if (this.phase.id === 'stable') this.stable?.showStakes();
     if (restoring) {
       sp.teleport(this.anchor(st.anchor));
       sp.warmth = sp.warmthTarget = st.warmth;
@@ -686,6 +883,19 @@ export class Story {
     this.dirty = true;
   }
 
+  /** Phase 3 can begin: the house is lit and the first two towers are too (the journey says when). */
+  get stableReady() { return !!this.stable && this.phaseIndex === 0 && this.done; }
+
+  /** Start phase 3: a hello, then it walks you out to the pasture. */
+  startStable() {
+    if (!this.stableReady) return;
+    this.phaseIndex = 1;
+    this.stepIndex = 0;
+    this.spirit.greet();
+    this.enterStep();
+    this.dirty = true;
+  }
+
   private goToStep(id: string) {
     const i = this.phase.steps.findIndex((s) => s.id === id);
     if (i < 0) return;
@@ -699,19 +909,19 @@ export class Story {
   }
 
   private remainingFor(parts: PartId[]) {
-    return parts.reduce((a, p) => a + this.cabin.remaining(p), 0) - this.tokens.filter((t) => parts.includes(t.part)).length;
+    return parts.reduce((a, p) => a + this.owner(p).remaining(p), 0) - this.tokens.filter((t) => parts.includes(t.part)).length;
   }
 
   /** 0..1 progress through the current step (for the spirit's warming). */
   private progress(): number {
     const st = this.step;
     if (st.kind === 'gather') {
-      const need = st.for.reduce((a, p) => a + this.cabin.remaining(p), 0);
+      const need = st.for.reduce((a, p) => a + this.owner(p).remaining(p), 0);
       return need > 0 ? Math.min(1, this.inv[st.resource] / need) : 1;
     }
     if (st.kind === 'build') {
-      const tot = st.parts.reduce((a, p) => a + this.cabin.parts[p].need, 0);
-      const got = st.parts.reduce((a, p) => a + this.cabin.parts[p].filled, 0);
+      const tot = st.parts.reduce((a, p) => a + this.part(p).need, 0);
+      const got = st.parts.reduce((a, p) => a + this.part(p).filled, 0);
       return got / tot;
     }
     return 0;
@@ -722,9 +932,10 @@ export class Story {
     const p = this.d.body.pos;
     switch (st.kind) {
       case 'meet': return Math.hypot(p.x - this.anchor(st.near).x, p.z - this.anchor(st.near).z) < st.radius;
-      case 'pickup': return st.item === 'axe' ? this.hasAxe : this.hasPick;
+      case 'pickup': return st.item === 'axe' ? this.hasAxe : st.item === 'pick' ? this.hasPick : this.hasLasso;
       case 'gather': return this.inv[st.resource] + this.pending(st.resource) >= this.remainingFor(st.for) && this.pending(st.resource) === 0;
-      case 'build': return st.parts.every((id) => this.cabin.parts[id].state === 'built');
+      case 'build': return st.parts.every((id) => this.part(id).state === 'built');
+      case 'herd': return this.herdCount() >= st.count;
       case 'light': return this.cabin.lit;
       case 'rest': return false;
     }
@@ -821,7 +1032,7 @@ export class Story {
     const st = this.step;
     if (st.kind !== 'build') return false;
     const p = this.d.body.pos, z = this.anchor(st.zone);
-    return Math.hypot(p.x - z.x, p.z - z.z) < st.zoneRadius || this.nearCabinSide(st.parts);
+    return Math.hypot(p.x - z.x, p.z - z.z) < st.zoneRadius || st.parts.some((id) => this.owner(id).near([id], p));
   }
 
   private activeTag(): TargetTag | null {
@@ -864,7 +1075,12 @@ export class Story {
       if (this.swingGap() > 0.35) this.stepIn = 0; else this.startSwing();
       return;
     }
-    if (t.tag === 'axe' || t.tag === 'pick') {
+    if (t.tag === 'lasso') {
+      this.lasso!.take();
+      this.hasLasso = true;
+      d.sfx.pickup();
+      this.sparkles.emit(t.pos.clone().setY(t.pos.y + 0.3), 8, 0.07, 1.6, undefined, { life: 0.6, rise: 0.4, up: 1.4 });
+    } else if (t.tag === 'axe' || t.tag === 'pick') {
       const prop = t.tag === 'axe' ? this.axe : this.pick;
       prop.take();
       if (t.tag === 'axe') this.hasAxe = true; else this.hasPick = true;
@@ -967,6 +1183,10 @@ export class Story {
     this.worldBreaks = this.worldBreaks.filter((w) => { if (w.rock.broken && !w.rock.group.visible) { this.group.remove(w.rock.group); return false; } return true; });
     this.regrowth(dt);
     this.cabin.update(dt, d.camera.position, body.pos);
+    this.stable?.update(dt, d.camera.position, [body.pos, ...this.gateFor]);
+    this.lasso?.update(dt);
+    this.updateGift(dt);
+    this.updateFloaters(dt);
     this.sparkles.update(dt);
     this.chipPuffs.update(dt);
     this.far.update(d.camera, d.env.hour);
@@ -1069,15 +1289,15 @@ export class Story {
       this.depositT -= dt;
       if (this.depositing) {
         // Face what you're building.
-        const part = st.parts.find((p) => this.cabin.remaining(p) > 0);
-        if (part) this.face(this.cabin.parts[part].centre, dt);
+        const part = st.parts.find((p) => this.owner(p).remaining(p) > 0);
+        if (part) this.face(part === 'fence' ? this.stable!.gate : this.part(part).centre, dt);
       }
       if (this.depositing && this.inv[st.resource] > 0 && this.depositT <= 0) {
-        const part = st.parts.find((p) => this.cabin.remaining(p) - this.tokens.filter((t) => t.part === p).length > 0);
+        const part = st.parts.find((p) => this.owner(p).remaining(p) - this.tokens.filter((t) => t.part === p).length > 0);
         if (part) {
           this.depositT = 0.3;
           this.inv[st.resource]--;
-          const P = this.cabin.parts[part];
+          const P = this.part(part);
           const slot = P.filled + this.tokens.filter((t) => t.part === part).length;
           const bb = new Billboard(tex(iconCanvas(st.resource === 'logs' ? 'log' : 'stone')), 0.55, 30);
           this.overlayGroup.add(bb.mesh);
@@ -1092,16 +1312,17 @@ export class Story {
     for (const tk of this.tokens) {
       tk.t += dt;
       const k = Math.min(1, tk.t / 0.5);
-      const to = this.cabin.slotPos(this.cabin.parts[tk.part], tk.slot, new THREE.Vector3());
+      const to = this.owner(tk.part).slotPos(this.part(tk.part), tk.slot, new THREE.Vector3());
       const e = k * k * (3 - 2 * k);
       tk.bb.pos.copy(tk.from).lerp(to, e);
       tk.bb.pos.y += Math.sin(k * Math.PI) * 1.4;
       tk.bb.scale = 1 - 0.2 * k;
       if (k >= 1) {
-        const P = this.cabin.parts[tk.part];
-        const finished = this.cabin.fill(tk.part);
+        const P = this.part(tk.part);
+        const O = this.owner(tk.part);
+        const finished = O.fill(tk.part);
         d.sfx.slot(P.filled, tk.res === 'stones');
-        this.dust(this.cabin.slotPos(P, tk.slot, new THREE.Vector3()).lerp(P.centre, 0.5));
+        this.dust(O.slotPos(P, tk.slot, new THREE.Vector3()).lerp(P.centre, 0.5));
         if (finished) {
           setTimeout(() => d.sfx.thunk(), 180);
           this.spirit.celebrate();
@@ -1184,7 +1405,9 @@ export class Story {
   /** Per resource: has the story asked for it yet? (Its HUD row shows from then on.) */
   private opened(): Record<Resource, boolean> {
     const out = { logs: false, stones: false } as Record<Resource, boolean>;
-    this.phase.steps.forEach((s, i) => { if (s.kind === 'gather' && i <= this.stepIndex) out[s.resource] = true; });
+    this.phases.forEach((ph, k) => ph.steps.forEach((s, i) => {
+      if (s.kind === 'gather' && (k < this.phaseIndex || (k === this.phaseIndex && i <= this.stepIndex))) out[s.resource] = true;
+    }));
     return out;
   }
 
@@ -1192,7 +1415,7 @@ export class Story {
   private enoughOf(): Record<Resource, boolean> {
     const out = { logs: false, stones: false } as Record<Resource, boolean>;
     for (const r of Object.keys(out) as Resource[]) {
-      const need = this.phase.parts.filter((p) => p.resource === r).reduce((a, p) => a + this.cabin.remaining(p.id), 0) - this.tokens.filter((t) => t.res === r).length;
+      const need = this.phase.parts.filter((p) => p.resource === r).reduce((a, p) => a + this.owner(p.id).remaining(p.id), 0) - this.tokens.filter((t) => t.res === r).length;
       out[r] = need > 0 && this.inv[r] >= need;
     }
     return out;
@@ -1236,26 +1459,31 @@ export class Story {
     this.chipPuffs.emit(at, 4, 0.05, 2.8, undefined, { life: 0.5, rise: -9, drag: 1.5, up: 2.5 });
   }
 
-  /** Close to the cabin wall that carries one of these parts. */
-  private nearCabinSide(parts: PartId[]) {
-    const l = siteToLocal(this.site, this.d.body.pos.x, this.d.body.pos.z);
-    if (parts.includes('chimney')) return l.x > CAB.W / 2 - 0.2 && l.x < CAB.W / 2 + 4 && Math.abs(l.z) < CAB.D / 2 + 2.5;
-    return l.z > CAB.D / 2 - 0.2 && l.z < CAB.D / 2 + 5 && Math.abs(l.x) < CAB.W / 2 + 2;
-  }
-
   private hintTarget(): { at: THREE.Vector3; face: THREE.Vector3 | null } | null {
     const st = this.step;
     const sp = this.spirit.want;
+    // Later phases: the nearest world tree or rock to where the spirit waits.
+    const world = (kind: 'tree' | 'rock') => {
+      const a = this.anchor(st.anchor), c = this.d.colliders;
+      for (const r of [20, 40, 70]) {
+        const h = kind === 'tree' ? c.nearestTree(a.x, a.z, r) : c.nearestRock(a.x, a.z, r, Infinity);
+        if (!h) continue;
+        const y = this.d.gen.height(h.x, h.z);
+        const pos = new THREE.Vector3(h.x, y, h.z);
+        return { at: pos.clone().add(a.clone().sub(pos).setY(0).setLength(h.radius + 1.3)), face: pos.setY(y + (kind === 'tree' ? 1.5 : 0.5)) };
+      }
+      return null;
+    };
     if (st.kind === 'gather' && st.targets === 'tree') {
       const seat = this.anchor('seat');
-      const tree = this.trees.filter((t) => t.standing).sort((a, b) => a.pos.distanceTo(seat) - b.pos.distanceTo(seat))[0];
-      if (!tree) return null;
+      const tree = this.phaseIndex === 0 ? this.trees.filter((t) => t.standing).sort((a, b) => a.pos.distanceTo(seat) - b.pos.distanceTo(seat))[0] : null;
+      if (!tree) return world('tree');
       const at = tree.pos.clone().add(seat.clone().sub(tree.pos).setY(0).setLength(1.3));
       return { at, face: tree.pos.clone().setY(tree.pos.y + 1.5) };
     }
     if (st.kind === 'gather' && st.targets === 'rock') {
-      const r = this.rocks.find((x) => !x.broken);
-      return r ? { at: this.anchor('pickSpot'), face: r.pos } : null;
+      const r = this.phaseIndex === 0 ? this.rocks.find((x) => !x.broken) : null;
+      return r ? { at: this.anchor('pickSpot'), face: r.pos } : world('rock');
     }
     if (st.kind === 'light' && this.d.env.hour < st.readyAt) return null;
     if (st.kind === 'build' && this.inv[st.resource] === 0) return null;
@@ -1293,6 +1521,7 @@ export class Story {
     }
     p.stay = 7 + Math.random() * 9;
     const spots: Anchor[] = ['doorstep', 'yard', 'stumpSpot', 'chimneySpot', 'seat'];
+    if (this.phaseIndex > 0) spots.push('gateOut', 'stableFront');
     const looks: Anchor[] = ['grove', 'cabin', 'chimney', 'far', 'rocks'];
     const pick = <T>(a: T[]) => a[Math.floor(Math.random() * a.length)];
     const at = this.anchor(pick(spots)).clone();
@@ -1335,23 +1564,30 @@ export class Story {
     }
   }
 
-  /** Debug: jump straight to a step with everything before it done. */
+  /** Debug: jump straight to a step (in any phase) with everything before it done. */
   debugJump(id: string) {
-    const i = this.phase.steps.findIndex((s) => s.id === id);
-    if (i < 0) return false;
-    for (let k = 0; k < i; k++) {
-      const st = this.phase.steps[k];
-      if (st.kind === 'pickup' && st.item === 'axe') { this.axe.take(); this.hasAxe = true; }
-      if (st.kind === 'pickup' && st.item === 'pick') { this.pick.take(); this.hasPick = true; }
-      if (st.kind === 'build') for (const p of st.parts) this.cabin.setBuilt(p);
-      if (st.kind === 'gather' && st.targets === 'tree') for (const t of this.trees.slice(0, 3)) t.setFelled();
-      if (st.kind === 'gather' && st.targets === 'rock') for (const r of this.rocks.slice(0, 2)) r.setBroken();
-      if (st.kind === 'light') this.cabin.light(true);
+    const pi = this.phases.findIndex((ph) => ph.steps.some((st) => st.id === id));
+    if (pi < 0 || (pi > 0 && !this.stable)) return false;
+    for (let k = 0; k <= pi; k++) {
+      const steps = this.phases[k].steps;
+      const upTo = k < pi ? steps.length : steps.findIndex((st) => st.id === id);
+      for (let j = 0; j < upTo; j++) {
+        const st = steps[j];
+        if (st.kind === 'pickup' && st.item === 'axe') { this.axe.take(); this.hasAxe = true; }
+        if (st.kind === 'pickup' && st.item === 'pick') { this.pick.take(); this.hasPick = true; }
+        if (st.kind === 'pickup' && st.item === 'lasso') { this.lasso!.show(true); this.lasso!.take(); this.hasLasso = true; }
+        if (st.kind === 'build') for (const p of st.parts) this.owner(p).setBuilt(p);
+        if (st.kind === 'gather' && st.targets === 'tree' && k === 0) for (const t of this.trees.slice(0, 3)) t.setFelled();
+        if (st.kind === 'gather' && st.targets === 'rock' && k === 0) for (const r of this.rocks.slice(0, 2)) r.setBroken();
+        if (st.kind === 'light') this.cabin.light(true);
+      }
     }
-    this.stepIndex = i;
+    if (pi > 0) this.done = true;
+    this.phaseIndex = pi;
+    this.stepIndex = this.phase.steps.findIndex((st) => st.id === id);
     const st = this.step;
     if (st.kind === 'build') this.inv[st.resource] = this.remainingFor(st.parts);
-    this.d.env.hour = st.easeTo !== undefined ? st.easeTo - (st.kind === 'light' ? 0.6 : 0) : st.hour ?? this.d.env.hour;
+    if (pi === 0) this.d.env.hour = st.easeTo !== undefined ? st.easeTo - (st.kind === 'light' ? 0.6 : 0) : st.hour ?? this.d.env.hour;
     this.enterStep(true);
     this.spirit.warmth = this.spirit.warmthTarget = st.warmth;
     return true;
@@ -1373,9 +1609,11 @@ export class Story {
       smashed: this.rocks.filter((r) => r.broken).map((r) => r.index),
       world: this.d.harvest.all(),
       clock: this.d.harvest.clock,
-      filled: { roof: this.cabin.parts.roof.filled, door: this.cabin.parts.door.filled, chimney: this.cabin.parts.chimney.filled },
-      built: (Object.keys(this.cabin.parts) as PartId[]).filter((p) => this.cabin.parts[p].state === 'built'),
+      filled: Object.fromEntries(this.allParts().map((p) => [p.id, p.filled])),
+      built: this.allParts().filter((p) => p.state === 'built').map((p) => p.id),
       lit: this.cabin.lit,
+      phase: this.phaseIndex,
+      lasso: this.hasLasso,
       done: this.done,
       hour: this.d.env.hour,
     };
@@ -1391,13 +1629,14 @@ export class Story {
     if (!data || data.v !== SAVE_VERSION) {
       this.d.harvest.clear();
       this.refreshTaken();
-      if (this.d.active) this.d.env.hour = this.phase.startHour;
+      if (this.d.active) this.d.env.hour = PHASE1.startHour!;
       return;
     }
     this.d.harvest.load(data.world ?? [], data.clock ?? 0);
     this.d.colliders.reset(this.d.gen);
     this.refreshTaken();
     const saved = data.step === 'hammer' ? 'pick' : data.step;
+    this.phaseIndex = data.phase && this.stable ? Math.min(data.phase, this.phases.length - 1) : 0;
     const i = this.phase.steps.findIndex((s) => s.id === saved);
     this.stepIndex = Math.max(0, i);
     this.inv = { logs: data.inv.logs ?? 0, stones: data.inv.stones ?? 0 };
@@ -1407,13 +1646,22 @@ export class Story {
     if (this.hasPick) this.pick.take();
     for (const k of data.felled) this.trees[k]?.setFelled();
     for (const k of data.smashed ?? []) this.rocks[k]?.setBroken();
-    for (const p of data.built) this.cabin.setBuilt(p);
+    const known = (p: PartId) => p in this.cabin.parts || (!!this.stable && p in this.stable.parts);
+    for (const p of data.built) if (known(p)) this.owner(p).setBuilt(p);
     // Only parts already started come back as sketches; the current step shows its own (enterStep).
-    for (const p of Object.keys(data.filled) as PartId[]) if (!data.built.includes(p) && data.filled[p] > 0) { this.cabin.showSketch(p); this.cabin.setFilled(p, data.filled[p]); }
+    for (const p of Object.keys(data.filled) as PartId[]) {
+      const n = data.filled[p] ?? 0;
+      if (known(p) && !data.built.includes(p) && n > 0) { this.owner(p).showSketch(p); this.owner(p).setFilled(p, n); }
+    }
+    if (data.lasso && this.lasso) { this.lasso.show(true); this.lasso.take(); this.hasLasso = true; }
     if (data.lit) this.cabin.light(true);
     this.done = data.done;
     if (this.d.active) this.d.env.hour = data.hour;
-    if (this.done) this.spirit.want = { at: this.anchor('hearthSeat').clone(), face: this.anchor('hearth'), pose: 'sit', icon: null, lead: false, settled: true };
+    if (this.done && this.phaseIndex === 0) this.spirit.want = { at: this.anchor('hearthSeat').clone(), face: this.anchor('hearth'), pose: 'sit', icon: null, lead: false, settled: true };
+  }
+
+  private allParts(): Part[] {
+    return [...Object.values(this.cabin.parts), ...(this.stable ? Object.values(this.stable.parts) : [])];
   }
 
   /** Forget this seed's progress (debug / tests). */
@@ -1436,8 +1684,13 @@ export class Story {
     const nearest = (list: { pos: THREE.Vector3 }[]) => list.sort((a, b) => a.pos.distanceTo(p) - b.pos.distanceTo(p))[0]?.pos ?? null;
     switch (st.kind) {
       case 'meet': return this.anchor(st.near);
-      case 'pickup': return st.item === 'axe' ? this.axe.pos : this.pick.pos;
-      case 'gather': return st.targets === 'tree' ? nearest(this.trees.filter((t) => t.standing)) : nearest(this.rocks.filter((r) => !r.broken));
+      case 'pickup': return st.item === 'axe' ? this.axe.pos : st.item === 'pick' ? this.pick.pos : this.lasso!.pos;
+      case 'herd': return null;
+      case 'gather': {
+        if (this.phaseIndex === 0) return st.targets === 'tree' ? nearest(this.trees.filter((t) => t.standing)) : nearest(this.rocks.filter((r) => !r.broken));
+        const h = this.hintTarget();
+        return h ? h.face : null;
+      }
       case 'build': return this.anchor(st.zone);
       case 'light': return this.d.env.hour >= st.readyAt ? this.cabin.hearthPos : this.anchor('doorstep');
       case 'rest': return null;
@@ -1448,7 +1701,8 @@ export class Story {
     return {
       step: this.step.id, index: this.stepIndex, inv: { ...this.inv }, axe: this.hasAxe, lit: this.cabin.lit, done: this.done,
       hour: this.d.env.hour, warmth: this.spirit.warmth, spirit: this.spirit.pos.clone(),
-      parts: Object.fromEntries(Object.entries(this.cabin.parts).map(([k, v]) => [k, `${v.state}:${v.filled}/${v.need}`])),
+      phase: this.phase.id, lasso: this.hasLasso,
+      parts: Object.fromEntries(this.allParts().map((v) => [v.id, `${v.state}:${v.filled}/${v.need}`])),
       felled: this.trees.filter((t) => !t.standing).length, idle: this.idleT,
     };
   }

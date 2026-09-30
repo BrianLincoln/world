@@ -61,6 +61,12 @@ export class Mobs {
     /** Debug: brains paused, animation runs. */
     freeze: false,
   };
+  /**
+   * `lasso`: you have one (in the story, only once the spirit has given it).
+   * `stable`: a tamed creature must be brought home to the stable before it
+   * can be ridden (the story); otherwise it's saddled as soon as it's tamed.
+   */
+  readonly rules = { lasso: true, stable: false };
   readonly flocks = new Map<string, Flock>();
   readonly tamed: Mob[] = [];
   private spawnT = 0;
@@ -198,10 +204,32 @@ export class Mobs {
   private newMob(id: string, sp: Species, f: Flock | null): Mob {
     return {
       id, species: sp, pos: new THREE.Vector3(), vel: new THREE.Vector3(), heading: 0, grounded: false,
-      state: 'wild', leashed: false, ridden: false, flock: f,
+      state: 'wild', leashed: false, ridden: false, stabled: false, flock: f,
       rnd: mulberry32(hashInt(id.length, [...id].reduce((a, c) => Math.imul(a ^ c.charCodeAt(0), 16777619) >>> 0, 2166136261), this.gen.seed, 9)),
       tint: new THREE.Color(1, 1, 1), stay: new THREE.Vector3(), stateT: 0, happy: 0, data: null,
     };
+  }
+
+  /**
+   * A creature that lives at the stable, back from a save: tamed, saddled
+   * and standing at `at`, looking as it did (`tint`).
+   */
+  adopt(name: string, id: string, at: THREE.Vector3, tint: THREE.Color, ctx: MobCtx): Mob | null {
+    const sp = this.species.find((s) => s.name === name);
+    if (!sp) return null;
+    const rnd = mulberry32(hashInt(id.length, id.charCodeAt(id.length - 1), this.session, 711));
+    const f: Flock = { key: id, species: sp, home: at.clone(), centre: at.clone(), target: at.clone(), members: [], t: 0, data: { rnd, mode: 'ground', alt: 2 } };
+    const m = this.newMob(id, sp, f);
+    f.members.push(m);
+    sp.initMob(m, 0, f, ctx);
+    m.pos.copy(at);
+    m.flock = null;
+    m.tint.copy(tint);
+    m.state = 'tamed';
+    m.stabled = true;
+    this.tamed.push(m);
+    sp.reset(m);
+    return m;
   }
 
   /** Debug: drop a fresh flock of a species right here (crows land, floofs hover, stelks graze). */
@@ -219,6 +247,7 @@ export class Mobs {
     let bestScore = Infinity;
     for (const m of this.all()) {
       if (m.ridden || m.state === 'caught') continue;
+      if (m.state === 'wild' && !this.rules.lasso) continue;
       centre(m, v1);
       const dist = v1.distanceTo(player);
       const reach = m.state === 'wild' ? LASSO_RANGE : LEAD_RANGE;
@@ -267,7 +296,7 @@ export class Mobs {
     let best: Mob | null = null;
     let bd = range;
     for (const m of this.tamed) {
-      if (m.ridden) continue;
+      if (m.ridden || !m.stabled) continue;
       const d = Math.hypot(m.pos.x - p.x, m.pos.z - p.z);
       if (d < bd + m.species.radius && m.pos.y - p.y < 4.5 && p.y - m.pos.y < 2.5) { bd = d; best = m; }
     }
@@ -307,6 +336,14 @@ export class Mobs {
     if (this.spawnT <= 0 && !this.settings.freeze) {
       this.populate(p, ctx, 0.5 - this.spawnT);
       this.spawnT = 0.5;
+      // Tamed but never brought home, and left far behind: it wanders off wild again.
+      for (let i = this.tamed.length - 1; i >= 0; i--) {
+        const m = this.tamed[i];
+        if (m.stabled || m.leashed || m.ridden || Math.hypot(m.pos.x - p.x, m.pos.z - p.z) < DESPAWN_R) continue;
+        const r = this.ropes.get(m);
+        if (r) { this.dropRope(r); this.ropes.delete(m); }
+        this.tamed.splice(i, 1);
+      }
     }
 
     // Brains.
@@ -431,6 +468,7 @@ export class Mobs {
     m.stateT = 0;
     m.happy = 1.6;
     m.leashed = true;
+    if (!this.rules.stable) m.stabled = true;
     if (m.flock) {
       const f = m.flock;
       f.members.splice(f.members.indexOf(m), 1);
