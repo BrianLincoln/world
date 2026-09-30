@@ -1024,6 +1024,8 @@ window.__ow = {
     if (best) { best.state = 'caught'; best.stateT = 99; }
     return !!best;
   },
+  /** Drop a flock of `n` right at (x, z). */
+  spawnAt: (name: string, x: number, z: number, n?: number) => mobs.spawnFlockAt(name, x, z, mobCtx, n),
   /** Phase 3 (shots/tests): `n` fresh creatures of a species, lassoed inside the pasture so they come to live there. */
   bringHome: (name: string, n = 1) => {
     const st = storyHost?.story?.stable;

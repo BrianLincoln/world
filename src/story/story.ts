@@ -803,10 +803,22 @@ export class Story {
     const stb = this.stable;
     if (stb && stb.parts.fence.state === 'built') {
       const ia = stb.inside(a.x, a.z, -0.5), ib = stb.inside(b.x, b.z, -0.5);
-      if (ia && !ib) return [stb.gateIn.clone(), stb.gateOut.clone(), ...this.routeCabin(stb.gateOut, b)];
-      if (!ia && ib) return [...this.routeCabin(a, stb.gateOut), stb.gateIn.clone(), b.clone()];
+      if (ia && ib) return [b.clone()];
+      if (ia) return [stb.gateIn.clone(), stb.gateOut.clone(), ...this.outside(stb.gateOut, b)];
+      if (ib) return [...this.outside(a, stb.gateOut), stb.gateIn.clone(), b.clone()];
+      return this.outside(a, b);
     }
     return this.routeCabin(a, b);
+  }
+
+  /** Both ends outside the fenced pasture: round its corners if it's in the way, then round the cabin. */
+  private outside(a: THREE.Vector3, b: THREE.Vector3): THREE.Vector3[] {
+    const pa = this.site.pasture!;
+    const legs = around(pa, PASTURE_W / 2 + 1.2, PASTURE_D / 2 + 1.2, PASTURE_W / 2 + 2, PASTURE_D / 2 + 2, a, b);
+    const out: THREE.Vector3[] = [];
+    let from = a;
+    for (const p of legs) { out.push(...this.routeCabin(from, p)); from = p; }
+    return out;
   }
 
   private routeCabin(a: THREE.Vector3, b: THREE.Vector3): THREE.Vector3[] {
@@ -817,36 +829,14 @@ export class Story {
     const dx = (CAB.door.x0 + CAB.door.x1) / 2;
     const inner = W(dx, CAB.D / 2 - 0.75), outer = W(dx, CAB.D / 2 + 1.1);
     if (inA && inB) return [b.clone()];
-    if (inA) return [inner, outer, ...this.around(outer, b)];
-    if (inB) return [...this.around(a, outer), inner, b.clone()];
-    return this.around(a, b);
+    const box = (p: THREE.Vector3, q: THREE.Vector3) => around(s, CAB.W / 2 + 1.1, CAB.D / 2 + 0.6, CAB.W / 2 + 1.6, CAB.D / 2 + 1.1, p, q);
+    if (inA) return [inner, outer, ...box(outer, b)];
+    if (inB) return [...box(a, outer), inner, b.clone()];
+    return box(a, b);
   }
 
   private inLocal(l: { x: number; z: number }, m: number) {
     return Math.abs(l.x) < CAB.W / 2 - m && Math.abs(l.z) < CAB.D / 2 - m;
-  }
-
-  /** Outside the cabin: straight if clear, else via its (expanded) corners. */
-  private around(a: THREE.Vector3, b: THREE.Vector3): THREE.Vector3[] {
-    const s = this.site;
-    const hx = CAB.W / 2 + 1.6, hz = CAB.D / 2 + 1.1;
-    const la = siteToLocal(s, a.x, a.z), lb = siteToLocal(s, b.x, b.z);
-    const hits = (p: { x: number; z: number }, q: { x: number; z: number }) => segBox(p.x, p.z, q.x, q.z, CAB.W / 2 + 1.1, CAB.D / 2 + 0.6);
-    if (!hits(la, lb)) return [b.clone()];
-    const cs = [[hx, hz], [-hx, hz], [-hx, -hz], [hx, -hz]].map(([x, z]) => ({ x, z }));
-    let best: { x: number; z: number }[] | null = null, bl = Infinity;
-    const len = (pts: { x: number; z: number }[]) => pts.reduce((acc, p, i) => i ? acc + Math.hypot(p.x - pts[i - 1].x, p.z - pts[i - 1].z) : 0, 0);
-    for (let i = 0; i < 4; i++) {
-      const p1 = [la, cs[i], lb];
-      if (!hits(la, cs[i]) && !hits(cs[i], lb) && len(p1) < bl) { bl = len(p1); best = [cs[i]]; }
-      for (const j of [(i + 1) % 4, (i + 3) % 4]) {
-        const p2 = [la, cs[i], cs[j], lb];
-        if (!hits(la, cs[i]) && !hits(cs[j], lb) && len(p2) < bl) { bl = len(p2); best = [cs[i], cs[j]]; }
-      }
-    }
-    const out = (best ?? []).map((c) => { const p = siteLocal(s, c.x, c.z); return new THREE.Vector3(p.x, 0, p.z); });
-    out.push(b.clone());
-    return out;
   }
 
   // ------------------------------------------------------------ steps
@@ -1465,7 +1455,7 @@ export class Story {
     // Later phases: the nearest world tree or rock to where the spirit waits.
     const world = (kind: 'tree' | 'rock') => {
       const a = this.anchor(st.anchor), c = this.d.colliders;
-      for (const r of [20, 40, 70]) {
+      for (const r of [20, 40, 70, 110]) {
         const h = kind === 'tree' ? c.nearestTree(a.x, a.z, r) : c.nearestRock(a.x, a.z, r, Infinity);
         if (!h) continue;
         const y = this.d.gen.height(h.x, h.z);
@@ -1706,6 +1696,30 @@ export class Story {
       felled: this.trees.filter((t) => !t.standing).length, idle: this.idleT,
     };
   }
+}
+
+/**
+ * From a to b round a box (the frame's |x| < hx, |z| < hz): straight if the
+ * way is clear, else via one or two of its corners, pushed out to (cx, cz).
+ */
+function around(f: { x: number; z: number; rot: number }, hx: number, hz: number, cx: number, cz: number, a: THREE.Vector3, b: THREE.Vector3): THREE.Vector3[] {
+  const la = siteToLocal(f, a.x, a.z), lb = siteToLocal(f, b.x, b.z);
+  const hits = (p: { x: number; z: number }, q: { x: number; z: number }) => segBox(p.x, p.z, q.x, q.z, hx, hz);
+  if (!hits(la, lb)) return [b.clone()];
+  const cs = [[cx, cz], [-cx, cz], [-cx, -cz], [cx, -cz]].map(([x, z]) => ({ x, z }));
+  let best: { x: number; z: number }[] | null = null, bl = Infinity;
+  const len = (pts: { x: number; z: number }[]) => pts.reduce((acc, p, i) => i ? acc + Math.hypot(p.x - pts[i - 1].x, p.z - pts[i - 1].z) : 0, 0);
+  for (let i = 0; i < 4; i++) {
+    const p1 = [la, cs[i], lb];
+    if (!hits(la, cs[i]) && !hits(cs[i], lb) && len(p1) < bl) { bl = len(p1); best = [cs[i]]; }
+    for (const j of [(i + 1) % 4, (i + 3) % 4]) {
+      const p2 = [la, cs[i], cs[j], lb];
+      if (!hits(la, cs[i]) && !hits(cs[j], lb) && len(p2) < bl) { bl = len(p2); best = [cs[i], cs[j]]; }
+    }
+  }
+  const out = (best ?? []).map((c) => { const p = siteLocal(f, c.x, c.z); return new THREE.Vector3(p.x, 0, p.z); });
+  out.push(b.clone());
+  return out;
 }
 
 /** Does segment p-q cross the box |x| < hx, |z| < hz? */
