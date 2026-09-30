@@ -54,10 +54,12 @@ for (const name of list) {
   if (s.herd) await page.evaluate(() => window.__ow.manual(true));
   if (s.herd) {
     // A mixed herd living here: tame some fresh arrivals and walk them in.
-    await page.evaluate(() => {
+    // HERD='[["glimmer",2],...]' swaps in other kinds.
+    const herd = process.env.HERD ? JSON.parse(process.env.HERD) : [['stelk', 4], ['floof', 3], ['crow', 3]];
+    await page.evaluate((herd) => {
       const ow = window.__ow;
-      for (const [sp, n] of [['stelk', 4], ['floof', 3], ['crow', 3]]) { ow.bringHome(sp, n); ow.advance(2, 1 / 30); }
-    });
+      for (const [sp, n] of herd) { ow.bringHome(sp, n); ow.advance(2, 1 / 30); }
+    }, herd);
     await page.evaluate(() => { window.__ow.manual(true); window.__ow.advance(300, 1 / 30); window.__ow.manual(false); });
   }
   if (s.wait) await page.waitForTimeout(s.wait * 1000);

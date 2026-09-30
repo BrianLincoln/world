@@ -1622,3 +1622,77 @@ asked for as far as possible). Everything below is a first pass for review.
 - Next: a way to let a creature go (or trade one out when you're full),
   creatures coming to the gate to greet you, a lantern on the stable at
   night, and feel passes on the pasture size and the build zones.
+
+## Wild creatures and biomes (ten new mounts)
+
+- **One base class, `mobs/beast.ts`.** The stelk's brain and body plan made
+  general: herds find a spot by a per-species `habitat(site)` score
+  (`Site` = height, slope, forest, bog, glimmer, hollow, rock, night),
+  idle there (graze/look/step), wander on, bolt when rushed; tamed ones
+  follow on the lead, wait at `stay`, live at the stable (`herd.ts` needed
+  nothing new). Fliers (the moonmoth) get a hover brain instead of `move`
+  (lazy loops, resting on the ground by day). Each species file supplies
+  geometry, a skeleton (`build`) and a `pose`; shared helpers do legs
+  (`makeLegs`/`poseLegs`, the stelk's swing), gait blending (`gaitMix`),
+  foot lift, eyes, seat, saddle (`saddleGeometry`) and collar. The stelk,
+  crow and floof are untouched (the stelk only exports `sculpt`/`taper`).
+  `mobs/shapes.ts` has the small shape helpers; `mobs/beasts.ts` lists them.
+- **Spawning:** the manager keeps `Species.herds × settings.beastHerds ×
+  density` herds of each new kind, newcomers every `Species.every` s. Only
+  two habitat searches per 0.5 s tick, and a failed search (nowhere suitable
+  nearby) waits 4-9 s: every sample costs a few `height()` calls.
+  Debug panel: Creatures → "Spawn the wilder creatures".
+- **Riding: `MountTrait` in `movement.ts`.** `gallopUpdate` (the stelk's
+  mode) grew optional traits, all off for the stelk (its behaviour is
+  unchanged line for line): `slopeDrag`/`maxClimb` (mossback climbs
+  anything; the others stall on slopes past their limit), `grip`/`brake`
+  (the hare slides wide and takes ages to stop), `leapFwd`/`airTurn`
+  (rockhopper and hare bounds), `cling` (the wurm: boulders are floor via
+  `ramp`, never runs off a ledge), `thicket` (the brambler: `collide` gets
+  `noTrees`, and a forest speed bonus), `mudder` (bog mud slows everyone
+  else to 55%), `diver` (the bog hag: C dives, Space rises, leaps out at
+  the surface), and `ability` on Space: `phase` (0.42 s ghost dash, only
+  towers block), `burrow` (underground 1.4 s, +1.2 s in bog; the rider is
+  hidden, `main.ts` trails mud), `charge` (static builds 1/45 per metre run,
+  needs 0.3; 30 m/s, low gravity, rides over rocks up to 1.8 m, trees
+  knocked down via `story.knockTree`, creatures flung by `Mobs.shove`).
+  `GallopState` carries the ability state and a one-frame `fx` for effects
+  (`beastWork` in `main.ts`: mud, glimmer and spark puffs).
+  The moonmoth uses the ordinary flying ride with a new `fly.ease` (0.8:
+  floaty). Prompts read `Species.verb`.
+- **Glow:** creature paint tag 4 = its own colour, self-lit (0.3 by day,
+  0.75 at night emissive). Glimmer spots/ears/tail, moth eyespots, hare
+  ears and tail, stormback sparks, the mossback's glowcaps.
+- **Biomes (`worldgen.ts`):** `bog`, `glimmer`, `hollow`, from five new
+  Simplex fields seeded after the old ones (so every old field is as it
+  was). Bogs and hollows are carved into `height()` via `wildCarve`, after
+  the base height: the story site, towers and POIs are all placed on the
+  base height, so they don't move. `wildRoom` fades both out round the
+  story box, towers, POIs (cabins, circles, erratics) and the journey's
+  routes; the journey is planned on `tameHeight` (no carving) and
+  `forestBase`, so it's exactly what it was. Verified: story site, towers
+  and journey routes identical to master on hilda, 42 and fjord, and the
+  vista/cabin shots are pixel-identical. Bogs thin the forest
+  (`forestDensity` × (1 - 0.85 bog)); the story, towers and POIs use
+  `forestBase`. Coverage of land on hilda (6 km square): bog ~11%, glimmerwood ~9%, hollows ~2%.
+- **Terrain look:** `aBiome.w` (it held the unused flower mask) is now
+  bog − glimmer: bog moss / wet peat, glimmer moss. New prop kinds 25-28
+  (cattail, glowcap, toadstool stalk, reed blade); flowers have variants 2
+  (reeds, in the shallows) and 3 (glowcaps, shining after dark).
+- **Perf:** frame time unchanged (uncapped avg 4.7 ms vs 5.1 on master,
+  same machine). Chunk builds are ~25% slower (2.5 → 3.2 ms): the extra
+  noise in `height()`. New creatures add ~10 batches each, drawn only when
+  one is visible.
+- **Scripts:** `scripts/beasts.mjs <dir> [names] [look,ride]` (turntable,
+  ride, run and Space for each, logs speeds and ability state),
+  `scripts/biomes.mjs <dir> "name:x,z,yaw,pitch,dist,hour;..."`,
+  `HERD='[["glimmer",2]]' node scripts/stable.mjs` for a pasture of other
+  kinds. `__ow.rideState()` reads the ability state.
+- **Limitations / next:** no true caves (height field), so "caves" are the
+  hollows; the wurm clings to steep walls, not ceilings. No health or
+  damage anywhere (the no-combat pillar); the charge shoves and spooks.
+  Wild creatures don't use their tricks (a wild glimmer doesn't phase, a
+  wild mudsnoot doesn't burrow). Burrowing/phasing through a cabin can
+  leave you pushed out the near side if you stop inside. The hollows'
+  walls are steep enough to facet at far LODs. Feel passes on every mount
+  still wanted; sound for the new tricks.

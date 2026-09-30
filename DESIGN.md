@@ -139,6 +139,44 @@ These apply to everything.
   carved notches, one painted per creature. Upgrades to hold more come
   later.
 
+### Wild creatures and their biomes
+- Ten more creatures, all lassoable and rideable like the first three, each
+  living in its own kind of place and each getting about in its own way
+  (not just faster or slower):
+  - **Mossback** (forest edges, meadows): a huge old turtle wearing a hill
+    of moss, toadstools and a seedling. Slow, but no slope is too steep.
+  - **Glimmer** (glimmerwood; any forest at night): a dusk-blue fox-cat
+    with shining spots, ears and tail. Nimble; Space phases it a few metres
+    straight through trees and walls.
+  - **Mudsnoot** (bogs): a bristly bog pig with a shovel snout. Mud doesn't
+    slow it; Space burrows underground and it bursts up further on (further
+    in bog mud).
+  - **Moonmoth** (forests, glimmerwood, hollows): a giant pale moth with
+    shining eyespots. Rests by day, drifts at night. The floatiest flier.
+  - **Rockhopper** (crags): a small shaggy ram. Bouncy, sure-footed on steep
+    rock, and Space is an enormous bound.
+  - **Bog hag** (bogs, marshy shores): a hunched frog-seal-marsh-wife under
+    a pondweed shawl. Waddles on land; in water it's fast and dives.
+  - **Brambler** (deep forest): a deer woven of branches and leaves. Walks
+    straight through trees and bushes, quicker the deeper the wood.
+  - **Woolly wurm** (hollows, cliffs): a huge banded caterpillar. Very slow,
+    but clings: straight up ravine walls and over boulders, never falls.
+  - **Stormback** (open downs): a shaggy bison-yak that builds static as it
+    runs; Space lets it go in a charge that flattens trees and throws
+    creatures aside.
+  - **Lantern hare** (meadows, woodland edges): a pony-sized hare with
+    glowing ears and tail. The fastest thing there is, and hard to stop.
+- Three new biomes for them, none of them near the start area, the towers,
+  the journey's paths or any cabin:
+  - **Bogs:** low fens eased down to just above the water, with pools and
+    meres, reeds and bulrushes instead of grass, and few trees.
+  - **Glimmerwood:** patches of forest floored with teal moss and glowcaps
+    that shine after dark.
+  - **The hollows:** long, narrow, steep-walled ravines in the hills (the
+    world has no true caves: it's a height field).
+- There is no combat (see Pillars), so nothing has health or takes damage.
+  A charge flings creatures aside and spooks their herd; that's all.
+
 ## Player Sequence
 
 The objective sequence is built as data, like phase 1.
@@ -197,5 +235,5 @@ Not to be built unless asked.
 
 - Cartography and a wall map
 - Trolls and night hazards
-- More mounts
+- More mounts (beyond the thirteen)
 - A workshop

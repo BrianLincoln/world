@@ -38,7 +38,7 @@ npm run shots    # build + headless GPU screenshots -> shots/   (look at them!)
   `src/player/movement.ts`. The camera and rig stay independent of it.
 
 ## Where things are
-- `src/world/`: `worldgen.ts` (height, biomes, POIs, paths),
+- `src/world/`: `worldgen.ts` (height, biomes incl. bog/glimmerwood/hollows, POIs, paths),
   `chunkBuilder.ts` (worker: grid, normals, scatter), `terrain.ts`
   (quadtree streaming, LOD, instancing), `towers.ts` (the beacon-tower
   network, grown from the home tower so it always connects), `storySite.ts`
@@ -49,7 +49,9 @@ npm run shots    # build + headless GPU screenshots -> shots/   (look at them!)
   outlines/grade → FXAA), `geometry.ts` (trees, rocks, cabins), `sky.ts`.
 - `src/player/`: input → movement modes → character rig; `orbitCamera.ts`.
 - `src/mobs/`: creatures. `manager.ts` (spawning, lasso, leads, shadows),
-  `floof.ts`, `crow.ts` (geometry + brain + animation per species),
+  `floof.ts`, `crow.ts`, `stelk.ts` (geometry + brain + animation per species),
+  `beast.ts` (shared brain/body for the ten wilder kinds in `beasts.ts`;
+  their ride traits are `MountTrait` in `movement.ts`),
   `parts.ts` (instanced part batches, fur), `rope.ts`.
 - `src/vehicles/`: bicycles. `bicycle.ts` (geometry, instanced parts,
   skeleton), `bikes.ts` (seeded placement, parking, riding presentation,
