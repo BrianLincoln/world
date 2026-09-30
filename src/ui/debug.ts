@@ -20,7 +20,7 @@ export interface DebugHooks {
   colliders: { enabled: boolean };
   /** Camera close-up on the face, and the explorer holds still. */
   faceCam(on: boolean): void;
-  mobs: { settings: { enabled: boolean; density: number; freeze: boolean; stelkHerds: number } };
+  mobs: { settings: { enabled: boolean; density: number; freeze: boolean; stelkHerds: number; beastHerds: number }; species: readonly { name: string; herds?: number }[] };
   bikes: { settings: { enabled: boolean } };
   /** Drop a flock of `species` in front of the explorer. */
   spawnFlock(species: string): void;
@@ -120,6 +120,11 @@ export class DebugUI {
     fc.add({ c: () => h.spawnFlock('crow') }, 'c').name('spawn crows here');
     fc.add({ e: () => h.spawnFlock('stelk') }, 'e').name('spawn stelk here');
     fc.add(h.mobs.settings, 'stelkHerds', 0, 6, 1).name('stelk herds');
+    // The wilder creatures (beast.ts): each lives in its own biome.
+    fc.add(h.mobs.settings, 'beastHerds', 0, 4, 0.5).name('wild herds (new kinds)');
+    const fb = fc.addFolder('Spawn the wilder creatures');
+    for (const sp of h.mobs.species) if (sp.herds !== undefined) fb.add({ s: () => h.spawnFlock(sp.name) }, 's').name(sp.name);
+    fb.close();
     const plump = { plump: h.crowPlump.get() };
     fc.add(plump, 'plump', 0, 1, 0.01).name('crow roundness').onFinishChange((v: number) => h.crowPlump.set(v));
     fc.add(h.bikes.settings, 'enabled').name('bicycles');

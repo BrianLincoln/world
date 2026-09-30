@@ -333,6 +333,55 @@ export function buildFlower(variant: 0 | 1): THREE.BufferGeometry {
   return g;
 }
 
+/**
+ * Bog reeds: a clump of tall blades (kind 4) and a few bulrushes, each a
+ * stiff stalk topped with a fat brown cattail (kind 25). Stands in the
+ * shallows and along pool edges.
+ */
+export function buildReeds(): THREE.BufferGeometry {
+  const parts: THREE.BufferGeometry[] = [];
+  const rnd = mulberry32(77);
+  for (let i = 0; i < 9; i++) {
+    // A blade: a thin tapered cone, leaning out and bent at the tip.
+    const a = rnd() * Math.PI * 2, h = 0.8 + rnd() * 0.7, lean = 0.12 + rnd() * 0.18;
+    const g = new THREE.ConeGeometry(0.05, h, 4, 3, true);
+    g.translate(0, h / 2, 0);
+    const pos = g.getAttribute('position') as THREE.BufferAttribute;
+    for (let k = 0; k < pos.count; k++) {
+      const y = pos.getY(k) / h;
+      pos.setX(k, pos.getX(k) + Math.cos(a) * lean * y * y * h);
+      pos.setZ(k, pos.getZ(k) + Math.sin(a) * lean * y * y * h);
+    }
+    g.translate(Math.cos(a) * 0.1, 0, Math.sin(a) * 0.1);
+    g.computeVertexNormals();
+    parts.push(stripToCore(withKind(g, 28)));
+  }
+  for (let i = 0; i < 3; i++) {
+    const a = (i / 3) * Math.PI * 2 + 0.4, r = 0.06 + 0.05 * i, h = 1.15 + 0.2 * i;
+    const x = Math.cos(a) * r, z = Math.sin(a) * r;
+    parts.push(stripToCore(withKind(new THREE.CylinderGeometry(0.012, 0.016, h, 4).translate(x, h / 2, z), 4)));
+    parts.push(stripToCore(withKind(new THREE.CapsuleGeometry(0.045, 0.2, 3, 6).translate(x, h - 0.08, z), 25)));
+    parts.push(stripToCore(withKind(new THREE.CylinderGeometry(0.006, 0.01, 0.12, 3).translate(x, h + 0.12, z), 4)));
+  }
+  const g = mergeGeometries(parts)!;
+  return g;
+}
+
+/**
+ * Glowcaps: a little family of toadstools on the glimmerwood floor, cream
+ * stalks (kind 27) under round teal caps (kind 26) that shine after dark.
+ */
+export function buildGlowcaps(): THREE.BufferGeometry {
+  const parts: THREE.BufferGeometry[] = [];
+  const caps: [number, number, number, number][] = [[0, 0, 0.26, 0.13], [0.2, 0.08, 0.17, 0.09], [-0.12, 0.17, 0.12, 0.07], [0.07, -0.2, 0.09, 0.05]];
+  for (const [x, z, h, r] of caps) {
+    parts.push(stripToCore(withKind(new THREE.CylinderGeometry(r * 0.3, r * 0.42, h, 6).translate(x, h / 2, z), 27)));
+    const cap = new THREE.SphereGeometry(r, 10, 6, 0, Math.PI * 2, 0, Math.PI * 0.55).scale(1, 0.72, 1).translate(x, h, z);
+    parts.push(stripToCore(withKind(cap, 26)));
+  }
+  return mergeGeometries(parts)!;
+}
+
 function box(w: number, h: number, d: number, x: number, y: number, z: number, kind: number) {
   const g = new THREE.BoxGeometry(w, h, d);
   g.translate(x, y, z);

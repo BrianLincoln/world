@@ -52,11 +52,19 @@ export class WorldGen {
   private nForest2: Simplex;
   private nRock: Simplex;
   private nMisc: Simplex;
+  // The wild biomes (bog, glimmerwood, hollows). Seeded after the others so
+  // adding them left every older noise field as it was.
+  private nBog: Simplex;
+  private nFen: Simplex;
+  private nGlim: Simplex;
+  private nHollow: Simplex;
+  private nHollowMask: Simplex;
   private peakCache = new Map<number, Peak | null>();
   private poiCache = new Map<number, Poi[]>();
   private pathCache = new Map<number, PathSeg[]>();
   private _story: StorySite | null = null;
   private _journey: Journey | null = null;
+  private journeyBox: [number, number, number, number] | null = null;
   private _towers: TowerNet | null = null;
   private towerCells: Map<number, number[]> | null = null;
   private bq = { d: 0, bed: 0, t: 0, i: 0 };
@@ -76,17 +84,22 @@ export class WorldGen {
     this.nForest2 = new Simplex(s());
     this.nRock = new Simplex(s());
     this.nMisc = new Simplex(s());
+    this.nBog = new Simplex(s());
+    this.nFen = new Simplex(s());
+    this.nGlim = new Simplex(s());
+    this.nHollow = new Simplex(s());
+    this.nHollowMask = new Simplex(s());
   }
 
   /** The guaranteed start area (see storySite.ts). Lazily built from the base height field. */
   get story(): StorySite {
-    return (this._story ??= findStorySite(this.seed, { base: (x, z) => this.baseHeight(x, z), forest: (x, z, h) => this.forestDensity(x, z, h) }));
+    return (this._story ??= findStorySite(this.seed, { base: (x, z) => this.baseHeight(x, z), forest: (x, z, h) => this.forestBase(x, z, h) }));
   }
 
   /** The beacon tower network (see towers.ts). Lazily built from the base height field. */
   get towers(): TowerNet {
     if (!this._towers) {
-      this._towers = buildTowerNet(this.seed, { base: (x, z) => this.baseHeight(x, z), forest: (x, z, h) => this.forestDensity(x, z, h) }, this.story);
+      this._towers = buildTowerNet(this.seed, { base: (x, z) => this.baseHeight(x, z), forest: (x, z, h) => this.forestBase(x, z, h) }, this.story);
       this.towerCells = new Map();
       for (const t of this._towers.towers) {
         const key = Math.floor(t.x / POI_CELL) * 73856093 + Math.floor(t.z / POI_CELL) * 19349663;
@@ -152,7 +165,7 @@ export class WorldGen {
     for (const t of st.trees) avoid.push(t.x, t.z, 4.5);
     for (const b of st.boulders) avoid.push(b.x, b.z, 3.5);
     avoid.push(st.stump.x, st.stump.z, 2.5);
-    const wet = (x: number, z: number) => this.height(x, z) < 2.2 || this.brookDist(x, z) < 5.5;
+    const wet = (x: number, z: number) => this.tameHeight(x, z) < 2.2 || this.brookDist(x, z) < 5.5;
     const blockedAt = (x: number, z: number) => {
       if (wet(x, z)) return true;
       for (let k = 0; k < avoid.length; k += 3) if (Math.hypot(x - avoid[k], z - avoid[k + 1]) < avoid[k + 2]) return true;
@@ -167,9 +180,9 @@ export class WorldGen {
       // Keep a bike's width of dry ground either side too.
       if (blockedAt(x, z) || wet(x + 4, z) || wet(x - 4, z) || wet(x, z + 4) || wet(x, z - 4)) c = Infinity;
       else {
-        const h = this.height(x, z);
-        const sl = Math.max(Math.abs(this.height(x + 4, z) - this.height(x - 4, z)), Math.abs(this.height(x, z + 4) - this.height(x, z - 4))) / 8;
-        c = 1 + 14 * sl * sl + 1.2 * this.forestDensity(x, z, h);
+        const h = this.tameHeight(x, z);
+        const sl = Math.max(Math.abs(this.tameHeight(x + 4, z) - this.tameHeight(x - 4, z)), Math.abs(this.tameHeight(x, z + 4) - this.tameHeight(x, z - 4))) / 8;
+        c = 1 + 14 * sl * sl + 1.2 * this.forestBase(x, z, h);
       }
       costs[k] = c;
       return c;
@@ -378,7 +391,20 @@ export class WorldGen {
 
   /** Final ground height including flattened pads under cabins. */
   height(x: number, z: number): number {
+    return this.heightOf(x, z, true);
+  }
+
+  /**
+   * The ground without the wild biomes: what the journey's routes are planned
+   * on (the bogs and hollows then keep clear of those routes, see wildRoom).
+   */
+  private tameHeight(x: number, z: number): number {
+    return this.heightOf(x, z, false);
+  }
+
+  private heightOf(x: number, z: number, wild: boolean): number {
     let h = this.baseHeight(x, z);
+    if (wild) h += this.wildCarve(x, z, h);
     const cx = Math.floor(x / POI_CELL);
     const cz = Math.floor(z / POI_CELL);
     for (let dz = -1; dz <= 1; dz++) {
@@ -465,13 +491,128 @@ export class WorldGen {
 
   // ---------------------------------------------------------------- biomes
 
-  /** 0..1 grove density. Clustered, with hard-ish edges and inner clearings. */
+  /** 0..1 grove density. Clustered, with hard-ish edges and inner clearings. Bogs thin it out. */
   forestDensity(x: number, z: number, h: number): number {
+    const d = this.forestBase(x, z, h);
+    if (d <= 0) return d;
+    return d * (1 - 0.85 * this.bog(x, z));
+  }
+
+  /** The forest field before the wild biomes (what the story, towers and POIs were placed on). */
+  private forestBase(x: number, z: number, h: number): number {
     const f = this.nForest.fbm(x / 460, z / 460, 4) + 0.25 * this.nForest2.noise(x / 90, z / 90);
     let d = smoothstep(0.0, 0.16, f + 0.02);
     d *= 1 - smoothstep(TREE_LINE - 45, TREE_LINE, h);
     d *= smoothstep(1.8, 4.5, h);
     return d;
+  }
+
+  // ---------------------------------------------------------------- wild biomes
+  //
+  // Three biomes where the wilder creatures live, carved into the base height
+  // (so the story site, the towers and the POIs, placed on the base, stay
+  // where they were):
+  //  - bogs: low wet fens eased down to a hair above the water, pocked with
+  //    pools and meres, reeds instead of grass, few trees;
+  //  - glimmerwood: patches of forest with teal moss and glowcaps that shine
+  //    after dark;
+  //  - the hollows: long, narrow, steep-walled ravines cut into the hills, a
+  //    dim floor between rock walls.
+  // None of them reaches the story site or a beacon tower's hill.
+
+  /** 0..1: how far from the story set and the towers the wild biomes may reach. */
+  private wildRoom(x: number, z: number): number {
+    const b = this.story.box;
+    const ds = Math.hypot(Math.max(b[0] - x, 0, x - b[2]), Math.max(b[1] - z, 0, z - b[3]));
+    let k = smoothstep(40, 110, ds);
+    if (k > 0) k *= smoothstep(110, 170, this.towerDist(x, z, 200));
+    // Nor round the cabins, stone circles and erratics (placed on the base
+    // height, so they'd float over a hollow or sink into a bog).
+    if (k > 0) {
+      const cx = Math.floor(x / POI_CELL), cz = Math.floor(z / POI_CELL);
+      for (let dz = -1; dz <= 1; dz++) for (let dx = -1; dx <= 1; dx++) {
+        for (const p of this.poisInCell(cx + dx, cz + dz)) {
+          if (p.kind === 'tower') continue;
+          k *= smoothstep(p.clear + 8, p.clear + 45, Math.hypot(x - p.x, z - p.z));
+        }
+      }
+    }
+    // Nor the journey's guided routes (a kid bikes those beside the spirit).
+    if (k > 0) {
+      const j = this.journey;
+      const bb = (this.journeyBox ??= journeyBox(j));
+      if (x > bb[0] && x < bb[2] && z > bb[1] && z < bb[3]) {
+        let d = Infinity;
+        for (const line of [j.toHome, j.toNext]) for (let i = 0; i + 1 < line.length; i++) {
+          d = Math.min(d, segDist(x, z, { ax: line[i][0], az: line[i][1], bx: line[i + 1][0], bz: line[i + 1][1] }));
+        }
+        k *= smoothstep(25, 70, d);
+      }
+    }
+    return k;
+  }
+
+  /** Bog mask from the base height (0..1, before `wildRoom`). */
+  private bogMask(x: number, z: number, hBase: number, m = this.bogNoise(x, z)): number {
+    if (hBase < 0.6 || hBase > 34 || m <= 0.14) return 0;
+    return smoothstep(0.14, 0.32, m) * smoothstep(0.6, 3, hBase) * (1 - smoothstep(14, 34, hBase));
+  }
+
+  private bogNoise(x: number, z: number): number {
+    return this.nBog.fbm(x / 1100 - 3.3, z / 1100 + 8.1, 3);
+  }
+
+  /** Hollow depth factor from the base height (0..1 at the floor, before `wildRoom`), and the wall depth. */
+  private hollowAt(x: number, z: number, hBase: number): number {
+    if (hBase < 16 || hBase > 400) return 0;
+    const mask = smoothstep(0.0, 0.18, this.nHollowMask.fbm(x / 2600 + 2.2, z / 2600 - 5.4, 2)) * smoothstep(16, 32, hBase) * (1 - smoothstep(320, 400, hBase));
+    if (mask <= 0) return 0;
+    const r = Math.abs(this.nHollow.fbm(x / 760, z / 760, 2));
+    // A flat floor, then steep walls up to the rim.
+    return mask * (1 - smoothstep(0.015, 0.1, r));
+  }
+
+  /** How much the wild biomes raise (+) or lower (-) the base height here (m). */
+  private wildCarve(x: number, z: number, hBase: number): number {
+    const bm = this.bogMask(x, z, hBase);
+    const hm = this.hollowAt(x, z, hBase);
+    if (bm <= 0 && hm <= 0) return 0;
+    const room = this.wildRoom(x, z);
+    if (room <= 0) return 0;
+    let dh = 0;
+    if (bm > 0) {
+      // The fen: a hair above the water, with pools (small) and meres (big).
+      const fen = 0.45 + 1.4 * this.nFen.fbm(x / 34, z / 34, 2) + 1.2 * this.nFen.noise(x / 170 + 9.7, z / 170 - 4.1);
+      const k = bm * room;
+      dh += (Math.min(fen, 1.4) - hBase) * smoothstep(0, 1, k);
+    }
+    if (hm > 0) {
+      const depth = Math.min(22, hBase - 4);
+      dh -= depth * smoothstep(0, 1, hm) * room;
+    }
+    return dh;
+  }
+
+  /** 0..1 bog wetland here (for scatter, colour and creatures). */
+  bog(x: number, z: number): number {
+    const n = this.bogNoise(x, z);
+    if (n <= 0.14) return 0;
+    const m = this.bogMask(x, z, this.baseHeight(x, z), n);
+    return m > 0 ? m * this.wildRoom(x, z) : 0;
+  }
+
+  /** 0..1 glimmerwood: enchanted forest patches (given the forest density there). */
+  glimmer(x: number, z: number, forest: number): number {
+    if (forest < 0.2) return 0;
+    return smoothstep(0.2, 0.36, this.nGlim.fbm(x / 820 + 1.9, z / 820 + 6.6, 2)) * smoothstep(0.2, 0.5, forest);
+  }
+
+  /** 0..1 inside a hollow (1 = on its floor). */
+  hollow(x: number, z: number): number {
+    if (this.nHollowMask.fbm(x / 2600 + 2.2, z / 2600 - 5.4, 2) <= 0) return 0;
+    const hb = this.baseHeight(x, z);
+    const m = this.hollowAt(x, z, hb);
+    return m > 0 ? m * this.wildRoom(x, z) : 0;
   }
 
   /** 0..1 boulder field strength. */
@@ -512,7 +653,7 @@ export class WorldGen {
         const h = this.baseHeight(x, z);
         if (h < 3 || h > 150 || !flatEnough(x, z, h, 3.2)) continue;
         // Meadow or a grove's edge, never deep forest.
-        if (this.forestDensity(x, z, h) > 0.45) continue;
+        if (this.forestBase(x, z, h) > 0.45) continue;
         out.push({ kind: 'cabin', x, z, y: h + 0.05, rot: rnd() * Math.PI * 2, clear: 22, variant: Math.floor(rnd() * 3) });
         // Occasionally a neighbour: a tiny hamlet.
         if (rnd() < 0.3) {
@@ -533,7 +674,7 @@ export class WorldGen {
     if (rnd() < 0.08) {
       const [x, z] = inCell();
       const h = this.baseHeight(x, z);
-      if (h > 4 && h < 130 && flatEnough(x, z, h, 3) && this.forestDensity(x, z, h) < 0.2) {
+      if (h > 4 && h < 130 && flatEnough(x, z, h, 3) && this.forestBase(x, z, h) < 0.2) {
         const boulders: Boulder[] = [];
         const n = 7 + Math.floor(rnd() * 4);
         const R = 7 + rnd() * 3;
@@ -704,6 +845,16 @@ export class WorldGen {
     }
     return out;
   }
+}
+
+/** Bounding box of the journey's routes, padded by the wild biomes' reach. */
+function journeyBox(j: Journey): [number, number, number, number] {
+  const b: [number, number, number, number] = [Infinity, Infinity, -Infinity, -Infinity];
+  for (const line of [j.toHome, j.toNext]) for (const [x, z] of line) {
+    b[0] = Math.min(b[0], x - 80); b[1] = Math.min(b[1], z - 80);
+    b[2] = Math.max(b[2], x + 80); b[3] = Math.max(b[3], z + 80);
+  }
+  return b;
 }
 
 export function segDist(x: number, z: number, s: PathSeg): number {

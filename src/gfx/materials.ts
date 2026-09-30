@@ -76,6 +76,9 @@ export const TERRAIN_U = {
   cMeadow: { value: col(BIOME.meadow) },
   cMeadowDark: { value: col(BIOME.meadowDark) },
   cForest: { value: col(BIOME.forestFloor) },
+  cBog: { value: col(BIOME.bog) },
+  cMud: { value: col(BIOME.mud) },
+  cGlimmer: { value: col(BIOME.glimmerMoss) },
   cHeath: { value: col(BIOME.heath) },
   cRock: { value: col(BIOME.rock) },
   cRockDark: { value: col(BIOME.rockDark) },
@@ -151,6 +154,7 @@ export const KIND_COLORS: THREE.Color[] = [
   col(BIOME.stone), col(BIOME.cabinWall2), col(BIOME.snow), col(BIOME.harebell),
   col(BIOME.buttercup), col(BIOME.cutWood), col(BIOME.steel), col(BIOME.soot), col(BIOME.ember), col(BIOME.cabinRoof),
   col(BIOME.cabinBare), col(BIOME.moss), col(BIOME.cabinFaded),
+  col(BIOME.cattail), col(BIOME.glowcap), col(BIOME.stalk), col(BIOME.reed),
 ];
 export const PROP_U = {
   uKind: { value: KIND_COLORS },

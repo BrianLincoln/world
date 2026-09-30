@@ -259,8 +259,9 @@ export class Colliders {
   /**
    * Push a body out of every prop too tall to step onto at its current feet
    * height, and remove the velocity going into them (so it slides along).
+   * `noTrees`: trunks don't block (a brambler walks through the wood).
    */
-  push(pos: THREE.Vector3, vel: THREE.Vector3, r: number, rampMax = 0) {
+  push(pos: THREE.Vector3, vel: THREE.Vector3, r: number, rampMax = 0, noTrees = false) {
     if (!this.enabled) return;
     const lim = pos.y + STEP;
     const out = (nx: number, nz: number, depth: number) => {
@@ -281,7 +282,7 @@ export class Colliders {
     for (let pass = 0; pass < 2; pass++) {
       this.forCells(pos.x, pos.z, r, (c) => {
         const T = c.trees;
-        for (let k = 0; k < T.length; k += 4) if (pos.y < T[k + 3]) circle(T[k], T[k + 1], T[k + 2]);
+        if (!noTrees) for (let k = 0; k < T.length; k += 4) if (pos.y < T[k + 3]) circle(T[k], T[k + 1], T[k + 2]);
         const R = c.rocks;
         for (let k = 0; k < R.length; k += 5) {
           // Cap within a step: walk (or land) onto it. Otherwise the flank is

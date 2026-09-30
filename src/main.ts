@@ -11,12 +11,14 @@ import { Sky } from './gfx/sky';
 import { CharacterRig } from './player/character';
 import { Input } from './player/input';
 import { TouchControls, isTouchDevice } from './ui/touch';
-import { BikeMode, BODY_RADIUS, CarriedMode, FlyMode, GlideMode, MovementController, RideMode, SwimMode, WalkMode, type MoveContext, type WorldQuery } from './player/movement';
+import { BikeMode, BODY_RADIUS, CarriedMode, CHARGE_RUN, FlyMode, GlideMode, MovementController, RideMode, SwimMode, WalkMode, type MoveContext, type WorldQuery } from './player/movement';
 import { Crow, crowStyle } from './mobs/crow';
 import { Mobs } from './mobs/manager';
 import type { Mob, MobCtx } from './mobs/types';
 import { Floof } from './mobs/floof';
 import { Stelk } from './mobs/stelk';
+import { makeBeasts } from './mobs/beasts';
+import type { BeastData } from './mobs/beast';
 import { OrbitCamera } from './player/orbitCamera';
 import { DebugUI } from './ui/debug';
 import { StoryHost } from './story/host';
@@ -64,13 +66,15 @@ let storyHost: StoryHost | null = null;
 const world: WorldQuery = {
   groundHeight: (x, z) => gen.height(x, z),
   floorHeight: (x, z, feetY, r) => Math.max(gen.height(x, z), colliders.surface(x, z, feetY, r), storyHost?.story?.surface(x, z, feetY, r, 0.5) ?? -Infinity, beacons?.surface(x, z, feetY) ?? -Infinity),
-  collide: (pos, vel, r, rampMax) => {
-    colliders.push(pos, vel, r, rampMax);
+  collide: (pos, vel, r, rampMax, noTrees) => {
+    colliders.push(pos, vel, r, rampMax, noTrees);
     bikes.push(pos, vel, r);
     storyHost?.story?.collide(pos, vel, r);
     beacons?.collide(pos, vel, r);
   },
   ramp: (x, z, r, maxRise) => colliders.ramp(x, z, r, maxRise),
+  wetland: (x, z) => gen.bog(x, z),
+  forest: (x, z) => gen.forestDensity(x, z, gen.height(x, z)),
   landmarks: (pos, vel, r) => beacons?.collide(pos, vel, r),
   waterLevel: SEA_LEVEL,
 };
@@ -83,12 +87,17 @@ scene.add(rig.root);
 if (params.get('eyes') === 'round') rig.eyeType = 'round';
 const puffs = new Puffs();
 scene.add(puffs.group);
+// Ride effects for the wilder mounts: churned mud, glimmer motes, static sparks.
+const mudPuffs = new Puffs('#8a7458', 40, 0, 0.6);
+const glowPuffs = new Puffs('#c9f4ff', 30, 0.8, 0.9);
+const sparkPuffs = new Puffs('#d6f0ff', 30, 0.9, 0.9);
+scene.add(mudPuffs.group, glowPuffs.group, sparkPuffs.group);
 rig.onPuff = (at, n, size, spread) => puffs.emit(at, n, size, spread);
 
 // Creatures: wild flocks, the lasso, leads and riding.
 const crow = new Crow();
 const stelk = new Stelk();
-const mobs = new Mobs(gen, [new Floof(), crow, stelk]);
+const mobs = new Mobs(gen, [new Floof(), crow, stelk, ...makeBeasts()]);
 // ?mobs=0 = no wild spawns (shots place their own), or a density multiplier.
 if (params.has('mobs')) mobs.settings.density = parseFloat(params.get('mobs')!);
 scene.add(mobs.group);
@@ -121,6 +130,10 @@ function mount(m: Mob) {
   b.heading = m.heading;
   b.grounded = m.grounded;
   mobs.mount(m);
+  // The newer mounts read their ride state (abilities) off the mode.
+  const gs = rideMode.gallopState;
+  gs.phase = gs.burrow = gs.charge = gs.static = gs.depth = gs.cool = 0;
+  if (m.data && 'gs' in m.data) (m.data as BeastData).gs = gs;
   player.set('ride', ctx);
   riding = m;
   orbit.targetDistance = Math.max(orbit.targetDistance, 12);
@@ -137,6 +150,9 @@ function dismount() {
   b.vel.set(m.vel.x * 0.5, 4, m.vel.z * 0.5);
   b.grounded = false;
   riding = null;
+  if (burrowHid) { rig.root.visible = true; burrowHid = false; }
+  const gs = rideMode.gallopState;
+  gs.phase = gs.burrow = gs.charge = 0;
   mobs.dismount(m);
   player.set('walk', ctx);
 }
@@ -628,9 +644,10 @@ function frame(ts?: number) {
       if (ev.type === 'land' && ev.impact > 3) puffs.emit(body.pos, 6, 0.16, 2.2);
       if (ev.type === 'bump') orbit.bump(Math.min(1.5, ev.impact * 0.1));
     }
+    beastWork(riding, dt);
     // A gallop kicks up dust behind.
     const gs = rideMode.gallopState;
-    if (riding.species.name === 'stelk' && body.grounded && gs.wet < 0.5 && gs.speed > 12) {
+    if ((riding.species.name === 'stelk' || (riding.species.verb && !riding.species.mount.fly)) && body.grounded && gs.wet < 0.5 && gs.speed > 12 && gs.burrow <= 0) {
       hoofT -= dt;
       if (hoofT <= 0) {
         hoofT = 0.11 - Math.min(0.06, (gs.speed - 12) * 0.003);
@@ -642,6 +659,7 @@ function frame(ts?: number) {
   if (storyHost?.story) storyHost.story.packLift = riding ? riding.species.seat(riding).pos.y - body.pos.y : 0;
   mobCtx.dt = dt;
   mobCtx.time = elapsed;
+  mobCtx.night = U.uNight.value;
   mobCtx.player.pos.copy(body.pos);
   mobCtx.player.vel.copy(body.vel);
   mobCtx.player.heading = body.heading;
@@ -661,6 +679,9 @@ function frame(ts?: number) {
   rig.hand(hand);
   mobs.updateRopes(mobCtx, hand);
   puffs.update(dt);
+  mudPuffs.update(dt);
+  glowPuffs.update(dt);
+  sparkPuffs.update(dt);
   if (storyHost?.story) {
     storyHost.story.external = beacons.action(mode);
     // No pats in the middle of a cutscene.
@@ -828,6 +849,51 @@ function stelkWork(dt: number) {
     if (buttAt < 0 && story.knockTree(b.pos, stelkDir, nose + 2.6, 0.9)) orbit.bump(0.6);
   }
 }
+/** The explorer is hidden because their mount has gone underground. */
+let burrowHid = false;
+let trickT = 0;
+const trickDir = new THREE.Vector3();
+
+/**
+ * The wilder mounts' tricks, after the move: dirt churned up over a
+ * burrowing mudsnoot (and the rider tucked out of sight), motes left behind
+ * a phasing glimmer, and a stormback's charge flattening trees and flinging
+ * creatures aside with a crackle of sparks.
+ */
+function beastWork(m: Mob, dt: number) {
+  const gs = rideMode.gallopState;
+  const b = player.body;
+  const sp = m.species.mount;
+  if (!sp.trait) return;
+  trickDir.set(Math.sin(b.heading), 0, Math.cos(b.heading));
+  const behind = v3.set(b.pos.x - trickDir.x * m.species.radius, b.pos.y + 0.2, b.pos.z - trickDir.z * m.species.radius);
+  switch (gs.fx) {
+    case 'burrow': mudPuffs.emit(behind.setY(b.pos.y + 0.3), 10, 0.28, 2.4); orbit.bump(0.5); break;
+    case 'emerge': mudPuffs.emit(v3.set(b.pos.x, b.pos.y + 0.2, b.pos.z), 12, 0.3, 2.8); orbit.bump(0.6); break;
+    case 'phase': glowPuffs.emit(v3.set(b.pos.x, b.pos.y + 1, b.pos.z), 8, 0.12, 1.4); break;
+    case 'charge': sparkPuffs.emit(v3.set(b.pos.x, b.pos.y + 1.6, b.pos.z), 10, 0.1, 2.2); orbit.bump(1.0); break;
+    case 'dive': case 'surface': puffs.emit(v3.set(b.pos.x, SEA_LEVEL + 0.1, b.pos.z), 7, 0.2, 2.2); break;
+  }
+  // Underground: a travelling ridge of dirt, the explorer tucked away.
+  const under = gs.burrow > 0;
+  if (under !== burrowHid) { rig.root.visible = !under; burrowHid = under; }
+  trickT -= dt;
+  if (trickT <= 0) {
+    trickT = 0.06;
+    if (under) mudPuffs.emit(v3.set(b.pos.x + (Math.random() - 0.5) * 0.6, b.pos.y + 0.05, b.pos.z + (Math.random() - 0.5) * 0.6), 1, 0.24, 0.9);
+    if (gs.phase > 0) glowPuffs.emit(v3.set(b.pos.x, b.pos.y + 0.9, b.pos.z), 2, 0.09, 0.6);
+    if (gs.charge > 0) sparkPuffs.emit(v3.set(b.pos.x + (Math.random() - 0.5) * 2, b.pos.y + 1.2 + Math.random(), b.pos.z + (Math.random() - 0.5) * 2), 1, 0.07, 1.2);
+    else if (gs.static > 0.6 && Math.random() < gs.static * 0.35) sparkPuffs.emit(v3.set(b.pos.x + (Math.random() - 0.5) * 1.6, b.pos.y + 2.2, b.pos.z + (Math.random() - 0.5) * 1.6), 1, 0.05, 0.5);
+  }
+  // Charging: trees ahead go down, creatures are thrown aside.
+  if (gs.charge > 0) {
+    const story = storyHost?.story;
+    const nose = m.species.radius + 0.4;
+    if (story?.knockTree(b.pos, trickDir, nose + gs.speed * dt * 1.6 + 0.6, 0.7)) orbit.bump(0.7);
+    if (mobs.shove(b.pos, trickDir, m.species.radius + 1.6, CHARGE_RUN * 0.5, m)) orbit.bump(0.5);
+  }
+}
+
 /** Seconds of dust trail left after a timed kick. */
 let trailT = 0;
 let trailEmit = 0;
@@ -873,7 +939,10 @@ function updateAimHud() {
   if (cycling) tips.push(`${e} · <b>Shift</b> pedal hard · <b>Space</b> hop`);
   if (riding) {
     const sp = riding.species.mount;
-    if (!sp.fly) tips.push(`${e} · <b>Shift</b> gallop · <b>Space</b> leap${storyHost?.story?.ramReady ? ' · <b>Click</b> knock it down' : ''}`);
+    const verb = riding.species.verb;
+    const swim = sp.trait?.diver && rideMode.gallopState.wet > 0.5 ? ' · <b>C</b> dive · <b>Space</b> rise' : '';
+    const space = sp.trait?.ability === 'charge' ? (rideMode.gallopState.static >= 0.3 ? 'charge' : 'leap') : verb ?? 'leap';
+    if (!sp.fly) tips.push(`${e} · <b>Shift</b> gallop${sp.leap || sp.trait?.ability ? ` · <b>Space</b> ${space}` : ''}${swim}${storyHost?.story?.ramReady ? ' · <b>Click</b> knock it down' : ''}`);
     else tips.push(sp.walk ? `${e} · <b>Space</b> take off / climb · <b>C</b> descend` : `${e} · <b>Space</b> climb · <b>C</b> descend`);
   }
   touch?.setContext({
@@ -987,6 +1056,8 @@ window.__ow = {
     if (best) { best.state = 'caught'; best.stateT = 99; }
     return !!best;
   },
+  /** The ride state of the newer mounts (abilities), for probes. */
+  rideState: () => { const g = rideMode.gallopState; return { speed: +g.speed.toFixed(1), phase: +g.phase.toFixed(2), burrow: +g.burrow.toFixed(2), charge: +g.charge.toFixed(2), static: +g.static.toFixed(2), depth: +g.depth.toFixed(2) }; },
   mountNearest: () => { const m = mobs.mountable(player.body.pos) ?? mobs.tamed[0]; if (m) mount(m); return !!m; },
   bikes,
   bikeMode,

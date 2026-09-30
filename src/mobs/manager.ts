@@ -56,6 +56,8 @@ export class Mobs {
     /** Stelk herds grazing within range, and seconds between newcomers. */
     stelkHerds: 2,
     stelkEvery: [20, 60] as [number, number],
+    /** The wilder creatures (beast.ts): herds of each kept around, as a multiple of their own count. */
+    beastHerds: 1,
     /** Seconds between crow fly-overs (a flock crossing over your head). */
     crowPassEvery: [45, 80] as [number, number],
     /** Debug: brains paused, animation runs. */
@@ -129,9 +131,25 @@ export class Mobs {
       this.flocks.delete(key);
     }
     const initial = this.age < 1.5;
+    // Habitat searches cost terrain lookups: only a couple of the wilder
+    // kinds look for a place per tick.
+    let searches = 2;
     for (const sp of this.species) {
       this.cooldown[sp.name] = (this.cooldown[sp.name] ?? 0) - dt;
       if (this.cooldown[sp.name] > 0) continue;
+      if (sp.herds !== undefined) {
+        if (searches <= 0) continue;
+        const want = Math.round(sp.herds * this.settings.beastHerds * this.settings.density);
+        let have = 0;
+        for (const f of this.flocks.values()) if (f.species === sp && !f.data.debug) have++;
+        if (have >= want) continue;
+        searches--;
+        const [lo, hi] = sp.every ?? [30, 60];
+        // Nowhere that suits it near here: look again in a while.
+        if (!this.launch(sp, ctx, initial)) this.cooldown[sp.name] = 4 + this.rnd() * 5;
+        else this.cooldown[sp.name] = initial ? 0.5 : lo + this.rnd() * (hi - lo);
+        continue;
+      }
       const per = sp.name === 'crow' ? this.settings.crowFlocks : sp.name === 'stelk' ? this.settings.stelkHerds : this.settings.floofFlocks;
       const want = Math.round(per * this.settings.density);
       let have = 0;
@@ -184,6 +202,7 @@ export class Mobs {
       // Crows settle on the spot for a while; floofs barely drift; stelks graze.
       if (sp.name === 'crow') Object.assign(f.data, { mode: 'ground', spot: at.clone(), relocate: 60 + rnd() * 60 });
       if (sp.name === 'stelk') Object.assign(f.data, { mode: 'graze', spot: at.clone(), relocate: 90 + rnd() * 60 });
+      if (sp.settle) { sp.settle(f, at, rnd); f.data.relocate = 90 + rnd() * 60; }
       if (f.data.speed) f.data.speed = 0.4;
     } else if (!sp.launch(f, ctx, rnd, initial)) return null;
     f.home.copy(f.centre);
@@ -284,6 +303,31 @@ export class Mobs {
   dismount(m: Mob) {
     m.ridden = false;
     m.species.reset(m);
+  }
+
+  /**
+   * A charging mount barrels into creatures: anything within `r` of `at`
+   * and ahead of it is flung aside (and its herd takes fright).
+   */
+  shove(at: THREE.Vector3, dir: THREE.Vector3, r: number, speed: number, except?: Mob): number {
+    let n = 0;
+    for (const m of this.all()) {
+      if (m === except || m.ridden) continue;
+      const dx = m.pos.x - at.x, dz = m.pos.z - at.z;
+      const d = Math.hypot(dx, dz);
+      if (d > r + m.species.radius || Math.abs(m.pos.y - at.y) > 4) continue;
+      if (dx * dir.x + dz * dir.z < -m.species.radius) continue;
+      // Out to the side it's nearer, plus along the charge.
+      const side = dx * dir.z - dz * dir.x;
+      const s = side >= 0 ? 1 : -1;
+      m.vel.x += (dir.z * s * 0.8 + dir.x * 0.5) * speed;
+      m.vel.z += (-dir.x * s * 0.8 + dir.z * 0.5) * speed;
+      m.pos.x += dir.z * s * 0.3;
+      m.pos.z += -dir.x * s * 0.3;
+      this.alarm(m);
+      n++;
+    }
+    return n;
   }
 
   get leading(): boolean {

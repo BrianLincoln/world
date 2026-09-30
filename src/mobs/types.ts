@@ -69,10 +69,17 @@ export interface MobCtx {
   collide?(pos: THREE.Vector3, vel: THREE.Vector3, radius: number): void;
   /** Dust / hearts. */
   puff(at: THREE.Vector3, count: number, size: number, spread: number): void;
+  /** 0 day .. 1 night (some creatures only come out after dark). */
+  night?: number;
 }
 
+export type SpeciesName =
+  | 'floof' | 'crow' | 'stelk'
+  | 'mossback' | 'glimmer' | 'mudsnoot' | 'moonmoth' | 'rockhopper'
+  | 'boghag' | 'brambler' | 'wurm' | 'stormback' | 'lanternhare';
+
 export interface Species {
-  readonly name: 'floof' | 'crow' | 'stelk';
+  readonly name: SpeciesName;
   /** Body radius (m), for collision, rope and targeting. */
   readonly radius: number;
   /** Height of the body centre above the feet. */
@@ -100,4 +107,11 @@ export interface Species {
   seat(m: Mob): { pos: THREE.Vector3; quat: THREE.Quaternion; spread: number };
   /** Called after a ride ends / a mob is freshly tamed, to settle its brain. */
   reset(m: Mob): void;
+  // The newer creatures (see beast.ts) also say how many wild herds to keep
+  // around, how often newcomers arrive, what Space does when ridden, and how
+  // a debug-placed herd settles.
+  readonly herds?: number;
+  readonly every?: [number, number];
+  readonly verb?: string;
+  settle?(f: Flock, at: THREE.Vector3, rnd: () => number): void;
 }

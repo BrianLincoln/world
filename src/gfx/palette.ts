@@ -190,4 +190,12 @@ export const BIOME = {
   steel: '#8e9cab',
   soot: '#3e3238',
   ember: '#ffb45a',
+  // The wild biomes.
+  bog: '#8f8a58',        // fen moss, olive going brown
+  mud: '#7a6a4e',        // wet peat at the pool edges
+  glimmerMoss: '#7f9a86', // glimmerwood floor, cool teal-sage
+  cattail: '#8a6446',
+  glowcap: '#bfeede',     // shines after dark
+  stalk: '#eadfc8',
+  reed: '#a8a05e',        // reed blades, paler than grass tufts
 };

@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { CHUNK_RES, INST_STRIDE, type ChunkRequest, type ChunkResult } from './chunkBuilder';
 import ChunkWorker from './chunk.worker.ts?worker';
-import { buildBoulder, buildBush, buildCabin, buildConifer, buildFlower, buildTuft, TREE_HEIGHT } from '../gfx/geometry';
+import { buildBoulder, buildBush, buildCabin, buildConifer, buildFlower, buildGlowcaps, buildReeds, buildTuft, TREE_HEIGHT } from '../gfx/geometry';
 import { SHADOW_LAYER } from '../gfx/groundShadow';
 import { ROCK_CELL, TREE_CELL } from './harvest';
 import { makeCasterMaterial, makePropMaterial, makeTerrainMaterial, makeWaterMaterial } from '../gfx/materials';
@@ -161,7 +161,8 @@ export class Terrain {
       },
       flowers: {
         name: 'flowers',
-        geos: [buildFlower(0), buildFlower(1)],
+        // Daisies / buttercups, harebells, bog reeds, glowcaps.
+        geos: [buildFlower(0), buildFlower(1), buildReeds(), buildGlowcaps()],
         material: makePropMaterial({ wind: 0.1, heightRef: 0.45, toneVar: 0.05, doubleSide: true }),
         lodFor: () => 0,
       },
@@ -456,7 +457,7 @@ export class Terrain {
     addInstances(this.kinds.bushes, r.bushes, 1);
     addInstances(this.kinds.rocks, r.rocks, 1);
     addInstances(this.kinds.tufts, r.tufts, 1);
-    addInstances(this.kinds.flowers, r.flowers, 2, (i) => Math.round(r.flowers[i * INST_STRIDE + 6]));
+    addInstances(this.kinds.flowers, r.flowers, 4, (i) => Math.round(r.flowers[i * INST_STRIDE + 6]));
     addInstances(this.kinds.cabins, r.cabins, 3, (i) => Math.round(r.cabins[i * INST_STRIDE + 6]) % 3);
 
     n.group = g;

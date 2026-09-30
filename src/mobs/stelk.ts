@@ -63,7 +63,7 @@ const sdd = new THREE.Vector3();
  * them. Pieces cut from the same sphere (a rump patch, a saddle) land exactly
  * on the body with smooth edges.
  */
-function sculpt(geo: THREE.BufferGeometry, fn: (d: THREE.Vector3, out: THREE.Vector3) => THREE.Vector3, off = 0) {
+export function sculpt(geo: THREE.BufferGeometry, fn: (d: THREE.Vector3, out: THREE.Vector3) => THREE.Vector3, off = 0) {
   const pos = geo.getAttribute('position') as THREE.BufferAttribute;
   const nrm = geo.getAttribute('normal') as THREE.BufferAttribute;
   const e = 1e-3;
@@ -116,7 +116,7 @@ function barrel(d: THREE.Vector3, out: THREE.Vector3) {
 }
 
 /** A tube along points, tapering r0 -> r1, with a rounded tip. */
-function taper(pts: [number, number, number][], r0: number, r1: number, segs = 20, radial = 9) {
+export function taper(pts: [number, number, number][], r0: number, r1: number, segs = 20, radial = 9) {
   const curve = new THREE.CatmullRomCurve3(pts.map((p) => new THREE.Vector3(...p)));
   const fr = curve.computeFrenetFrames(segs, false);
   const pos: number[] = [];

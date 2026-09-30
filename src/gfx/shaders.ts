@@ -89,6 +89,9 @@ in float vH;
 uniform vec3 cMeadow;
 uniform vec3 cMeadowDark;
 uniform vec3 cForest;
+uniform vec3 cBog;
+uniform vec3 cMud;
+uniform vec3 cGlimmer;
 uniform vec3 cHeath;
 uniform vec3 cRock;
 uniform vec3 cRockDark;
@@ -160,6 +163,11 @@ void main() {
   bool grass = true;
   if (nz.r * 0.8 + nz2.g * 0.35 > 0.68) c = cMeadowDark;
   if (forest + (nz2.r - 0.5) * 0.3 > 0.42) c = cForest;
+  // vBiome.w: + bog, - glimmerwood.
+  float wild = vBiome.w;
+  if (-wild + (nz2.b - 0.5) * 0.3 > 0.35 && forest > 0.3) c = cGlimmer;
+  bool bog = wild + (nz2.g - 0.5) * 0.3 > 0.4;
+  if (bog) c = h < 0.95 + nz2.r * 0.5 ? cMud : cBog;
   float heathLine = 105.0 + (nz.g - 0.5) * 70.0;
   if (h > heathLine) c = cHeath;
   // Far terrain simplifies: slope detail fades so coarse chunks don't show
@@ -170,7 +178,8 @@ void main() {
     c = slope + (nz.b - 0.5) * 0.25 > 0.55 ? cRockDark : cRock;
     grass = false;
   }
-  if (h < 1.1 + nz2.r * 1.3) { c = cSand; grass = false; }
+  if (h < 1.1 + nz2.r * 1.3 && !bog) { c = cSand; grass = false; }
+  if (bog && h < 0.95 + nz2.r * 0.5) grass = false;
   if (h < -2.5) c = cSeabed;
   if (path < 0.95 + (nz2.g - 0.5) * 0.6 && h > 0.8) { c = cPath; grass = false; }
   float snowLine = uSnowLine + (nz.r - 0.5) * 80.0 + (texture(uNoise, vWorld.xz / 90.0).b - 0.5) * 18.0;
@@ -361,7 +370,7 @@ in vec3 vLocal;
 in float vKind;
 in float vTone;
 in vec3 vWorld;
-uniform vec3 uKind[25];
+uniform vec3 uKind[29];
 uniform vec3 uGlow;
 /** Story interactable signal strength (0 = none). */
 uniform float uGlint;
@@ -380,7 +389,8 @@ uniform vec3 uFocus;
 // 7 wall, 8 roof, 9 trim, 10 window, 11 door, 12 stone, 13 wall alt, 14 snowcap(rock),
 // 15 harebell, 16 buttercup (petals of kind 5 with instance tone > 0.6),
 // 17 cut wood, 18 axe steel, 19 soot, 20 ember glow, 21 roof boards (real planks, no drawn lines),
-// 22 bare weathered wood, 23 moss, 24 faded paint (22-24 only via uWear or as moss props)
+// 22 bare weathered wood, 23 moss, 24 faded paint (22-24 only via uWear or as moss props),
+// 25 cattail, 26 glowcap (shines after dark), 27 toadstool stalk, 28 reed blade
 void main() {
   int k = int(vKind + 0.5);
   if (uCutaway > 0.5) {
@@ -439,7 +449,10 @@ void main() {
   } else if (k == 20) {
     emissive = 0.9;
   }
+  // Glowcaps: lit from within after dark, a soft pulse.
+  float capGlow = k == 26 ? uNight * (0.8 + 0.2 * sin(uTime * 1.3 + vWorld.x * 0.7 + vWorld.z)) : 0.0;
   vec3 col = k == 10 || k == 20 ? base : base * toonLight(n);
+  if (capGlow > 0.0) { col = mix(col, base * 1.15, capGlow); emissive = 0.55 * capGlow; }
   // Firelight: interior faces warm up and flicker when the hearth is lit.
   if (uFire > 0.0 && k != 10 && k != 20) {
     float fl = 0.85 + 0.15 * sin(uTime * 9.0 + vWorld.x * 2.0) * sin(uTime * 5.3);
@@ -697,7 +710,7 @@ void main() {
 // Instanced creature parts (woffs, crows). Per-vertex colour (aCol.rgb) so a
 // whole creature body is one merged mesh; aCol.a tags where features are
 // painted: 1 = eyes (around uEyeOrigin), 2 = mouth (around uMouthOrigin),
-// 3 = a lamp that glows at night.
+// 3 = a lamp that glows at night, 4 = glows in its own colour (brighter at night).
 // Per instance: instanceColor = tint, aEye = (lookX, lookY, lids, unused)
 // where lids 1 = open, 0 = shut, -1 = happy arcs.
 
@@ -840,10 +853,15 @@ void main() {
     col = mix(col, uInk, fillE(mouth, aa));
   }
   float glow = 0.0;
-  if (tag > 2.5) {
+  if (tag > 2.5 && tag < 3.5) {
     // A lamp (bicycles): lit warm at night, like the cabin windows.
     col = mix(col, uGlow, uNight);
     glow = uNight;
+  } else if (tag > 3.5) {
+    // Bioluminescence (glimmers, moonmoths, lantern hares, storm sparks):
+    // its own colour, self-lit; a soft shine by day, a real glow after dark.
+    col = mix(col, vCol.rgb * 1.08, 0.55 + 0.45 * uNight);
+    glow = 0.3 + 0.45 * uNight;
   }
   if (uEmber > 0.0 && tag < 2.5) {
     // A warm spirit glows from within: less shade, a soft bloom. Painted

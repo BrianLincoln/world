@@ -114,12 +114,15 @@ export function buildChunk(gen: WorldGen, req: ChunkRequest): ChunkResult {
       normals[v * 3] = nx;
       normals[v * 3 + 1] = ny;
       normals[v * 3 + 2] = nz;
-      biome[v * 4] = gen.forestDensity(wx, wz, h);
+      const fd = gen.forestDensity(wx, wz, h);
+      biome[v * 4] = fd;
       biome[v * 4 + 1] = gen.rockiness(wx, wz, h);
       // Brook banks read as sand/shingle (the path colour) a couple of metres out.
       // The story's own paths are drawn about twice as wide as the world's.
       biome[v * 4 + 2] = Math.min(paths.length ? pathDist(wx, wz) : 30, gen.brookDist(wx, wz) - 2.6, gen.storyPathDist(wx, wz) - 1.05);
-      biome[v * 4 + 3] = gen.flowers(wx, wz);
+      // The wild biomes: + bog, - glimmerwood (they never overlap much:
+      // bogs thin the forest out).
+      biome[v * 4 + 3] = gen.bog(wx, wz) - gen.glimmer(wx, wz, fd);
       if (h < minY) minY = h;
       if (h > maxY) maxY = h;
       if (h < 0.5) hasWater = true;
@@ -281,9 +284,27 @@ export function buildChunk(gen: WorldGen, req: ChunkRequest): ChunkResult {
         const lx = x - x0, lz = z - z0;
         if (lx < 0 || lz < 0 || lx >= size || lz >= size) continue;
         const h = meshHeight(lx, lz);
+        // Bogs: reeds in the shallows and round the pools, instead of grass.
+        if (h < 1.7 && h > -0.5) {
+          const bg = gen.bog(x, z);
+          if (bg > 0.25) {
+            if (hash01(gi, gj, seed, 61) < bg * (h < 1.05 ? 0.2 : 0.05) && !gen.storyBlock(x, z, 0, 'tuft')) {
+              flowers.push(lx, h - 0.05, lz, 0.75 + 0.6 * hash01(gi, gj, seed, 62), hash01(gi, gj, seed, 63) * 6.283, 0.8 + 0.4 * hash01(gi, gj, seed, 64), 2, hash01(gi, gj, seed, 65));
+            }
+            continue;
+          }
+        }
         if (h < 1.2 || h > 200) continue;
         if (slopeY(lx, lz) < 0.82) continue;
         const r = hash01(gi, gj, seed, 43);
+        // Glimmerwood: glowcaps scattered on the moss.
+        if (hash01(gi, gj, seed, 66) < 0.05) {
+          const gl = gen.glimmer(x, z, gen.forestDensity(x, z, h));
+          if (gl > 0.3 && hash01(gi, gj, seed, 67) < gl && !gen.storyBlock(x, z, 0, 'tuft')) {
+            flowers.push(lx, h - 0.02, lz, 0.8 + 0.8 * hash01(gi, gj, seed, 68), hash01(gi, gj, seed, 69) * 6.283, 0.8 + 0.4 * hash01(gi, gj, seed, 70), 3, hash01(gi, gj, seed, 71));
+            continue;
+          }
+        }
         const pd = paths.length ? pathDist(x, z) : 30;
         if (pd < 1.4) continue;
         if (gen.storyBlock(x, z, 0, 'tuft')) continue;

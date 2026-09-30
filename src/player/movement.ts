@@ -19,7 +19,7 @@ export interface WorldQuery {
    * standing no more than `rampMax` out of the ground are let through
    * (a fast bike rides up them instead: see `ramp`).
    */
-  collide?(pos: THREE.Vector3, vel: THREE.Vector3, radius: number, rampMax?: number): void;
+  collide?(pos: THREE.Vector3, vel: THREE.Vector3, radius: number, rampMax?: number, noTrees?: boolean): void;
   /**
    * Only the big landmarks (beacon towers): what even free flight can't pass
    * through. Walls push out, and coming down onto a top lands on it.
@@ -27,6 +27,10 @@ export interface WorldQuery {
   landmarks?(pos: THREE.Vector3, vel: THREE.Vector3, radius: number): void;
   /** Highest boulder surface under a circle, for rocks up to `maxRise` tall; -Infinity if none. */
   ramp?(x: number, z: number, radius: number, maxRise: number): number;
+  /** 0..1 bog wetland (mud slows most mounts). */
+  wetland?(x: number, z: number): number;
+  /** 0..1 forest density. */
+  forest?(x: number, z: number): number;
   waterLevel: number;
 }
 
@@ -363,6 +367,8 @@ export interface MountSpec {
   swim?: number;
   /** Seconds to build up to the sprint (a heavy animal gathers speed). */
   gather?: number;
+  /** How the newer ground mounts get about (all optional; the stelk uses none). */
+  trait?: MountTrait;
   fly?: {
     speed: number;
     sprint: number;
@@ -373,7 +379,45 @@ export interface MountSpec {
     /** Minimum clearance over ground or water. */
     hover: number;
     turn: number;
+    /** How quickly it answers the stick (1/s; default 2.2). Low = floaty. */
+    ease?: number;
   };
+}
+
+/** One-frame ability happenings, for presentation (dust, sparks, sound). */
+export type MountFx = 'phase' | 'burrow' | 'emerge' | 'charge' | 'dive' | 'surface' | null;
+
+/**
+ * Traversal traits for the ground mounts beyond the stelk. Each changes how
+ * it gets about, not just how fast.
+ */
+export interface MountTrait {
+  /** Uphill drag multiplier (0 = climbs anything without slowing; default 1). */
+  slopeDrag?: number;
+  /** Rise over run past which it can't climb on (it stalls at the foot). */
+  maxClimb?: number;
+  /** Carve-rate multiplier (quick little animals turn sharper). */
+  turn?: number;
+  /** Slowing (m/s per s) when you let go; easing off is a third quicker. Default 12 / 16. */
+  brake?: number;
+  /** Sideways grip (1/s): low = the body slides on the old line through turns. */
+  grip?: number;
+  /** Extra speed along the heading on a leap (m/s). */
+  leapFwd?: number;
+  /** Steering in the air (carve rate; default 0.8). */
+  airTurn?: number;
+  /** Gravity multiplier. */
+  gravity?: number;
+  /** Clings to whatever it's on: never falls off a ledge, crawls over boulders. */
+  cling?: boolean;
+  /** Walks through trees and bushes, and is quicker in the forest. */
+  thicket?: boolean;
+  /** Bog mud doesn't slow it (everything else with a trait wades). */
+  mudder?: boolean;
+  /** Swims under water: C dives, Space rises, and at the surface leaps out. */
+  diver?: boolean;
+  /** What Space does instead of a plain leap (see gallopUpdate). */
+  ability?: 'phase' | 'burrow' | 'charge';
 }
 
 /**
@@ -438,7 +482,8 @@ export class RideMode implements MovementMode {
     const f = s.fly;
     if (!f) return null;
     const speed = input.run ? f.sprint : f.speed;
-    const kh = 1 - Math.exp(-(wishLen > 0.05 ? 2.2 : 0.9) * dt);
+    const ease = f.ease ?? 2.2;
+    const kh = 1 - Math.exp(-(wishLen > 0.05 ? ease : Math.min(0.9, ease * 0.4)) * dt);
     b.vel.x += (wish.x * speed - b.vel.x) * kh;
     b.vel.z += (wish.z * speed - b.vel.z) * kh;
     const vy = input.up ? f.climb : input.down ? -f.climb * 1.3 : -f.sink;
@@ -482,12 +527,32 @@ export class GallopState {
   speed = 0;
   /** 0..1 how deep in water (0 = dry, 1 = swimming). */
   wet = 0;
+  // Abilities (MountTrait), all read by presentation too.
+  /** Seconds of phasing left (passing through trees and walls). */
+  phase = 0;
+  /** Seconds left underground. */
+  burrow = 0;
+  /** Seconds of a charge left, and 0..1 static built up by running. */
+  charge = 0;
+  static = 0;
+  /** Divers: how far under the swimming line (m). */
+  depth = 0;
+  /** Seconds before Space can do the ability again. */
+  cool = 0;
+  /** This frame's ability happening. */
+  fx: MountFx = null;
 }
+
+/** Charge speed (m/s). */
+export const CHARGE_RUN = 30;
 
 export function gallopUpdate(st: GallopState, b: Body, ctx: MoveContext, s: MountSpec): void {
   const { dt, world, input } = ctx;
   const walk = s.walk!;
+  const tr = s.trait;
   const e = (r: number) => 1 - Math.exp(-r * dt);
+  st.fx = null;
+  st.cool = Math.max(0, st.cool - dt);
   const wish = wishDir(ctx, tmp);
   const wl = Math.min(1, wish.length());
   const fx0 = Math.sin(b.heading), fz0 = Math.cos(b.heading);
@@ -495,61 +560,191 @@ export function gallopUpdate(st: GallopState, b: Body, ctx: MoveContext, s: Moun
   const swimY = world.waterLevel - 1.25;
   const deep = ground < swimY;
   st.wet += ((deep ? 1 : 0) - st.wet) * e(4);
+  if (st.phase > 0) st.phase = Math.max(0, st.phase - dt);
+  if (st.charge > 0) st.charge = Math.max(0, st.charge - dt);
+
+  // Space: the mount's own trick, before any plain leap.
+  let used = false;
+  if (tr?.ability && input.jumpPressed) {
+    if (tr.ability === 'phase' && st.cool <= 0 && !deep) {
+      // A glimmering dash: a few metres through whatever's in the way.
+      st.phase = 0.42;
+      st.cool = 1.1;
+      st.speed = Math.max(st.speed, walk.sprint * 1.15);
+      st.fx = 'phase';
+      used = true;
+    } else if (tr.ability === 'burrow') {
+      if (st.burrow > 0) {
+        st.burrow = 0.001; // up we come (below)
+        used = true;
+      } else if (b.grounded && !deep && ground > world.waterLevel - 0.6 && st.cool <= 0) {
+        // Nose down and under: longer in soft bog mud.
+        const mud = world.wetland ? world.wetland(b.pos.x, b.pos.z) : 0;
+        st.burrow = 1.4 + 1.2 * mud;
+        st.speed = Math.max(st.speed, walk.sprint * 0.9);
+        st.fx = 'burrow';
+        used = true;
+      }
+    } else if (tr.ability === 'charge' && b.grounded && !deep && st.charge <= 0 && st.static >= 0.3) {
+      // Let the static go: a thundering rush that barrels through the brush
+      // and sails over small gaps.
+      st.charge = 0.5 + 0.9 * st.static;
+      st.static = 0;
+      st.speed = Math.max(st.speed, CHARGE_RUN);
+      b.vel.y = 4.5;
+      b.grounded = false;
+      st.fx = 'charge';
+      b.events.push({ type: 'jump' });
+      used = true;
+    }
+  }
+  const under = st.burrow > 0;
+  const ghost = st.phase > 0 || under;
 
   // Where the rider wants to go, relative to where the mount points.
   let target = 0;
   if (wl > 0.05) {
     let d = Math.atan2(wish.x, wish.z) - b.heading;
     d = Math.atan2(Math.sin(d), Math.cos(d));
-    const gait = input.run ? walk.sprint : input.walk ? walk.speed * 0.4 : walk.speed;
+    let gait = input.run ? walk.sprint : input.walk ? walk.speed * 0.4 : walk.speed;
+    if (tr) {
+      // Bog mud drags at everything but a mudder; a thicket-walker loves the woods.
+      if (!tr.mudder && ground < 1.1 && world.wetland && b.grounded && world.wetland(b.pos.x, b.pos.z) > 0.3) gait *= 0.55;
+      if (tr.thicket && world.forest) gait *= 1 + 0.3 * world.forest(b.pos.x, b.pos.z);
+      if (under) gait = Math.max(gait, walk.sprint * 0.9);
+    }
     // Ease off for sharp turns; a slow wheel round when it's behind.
     target = gait * wl * (0.25 + 0.75 * Math.max(0, Math.cos(d)) ** 2);
     if (deep) target = Math.min(target, walk.speed * (s.swim ?? 0.4));
     // Carving: quick on the spot, wide at a gallop.
     const hs = Math.abs(st.speed);
-    const rate = b.grounded || deep ? 7.5 / (1 + hs * 0.11) : 0.8;
+    const rate = (b.grounded || deep ? 7.5 / (1 + hs * 0.11) : tr?.airTurn ?? 0.8) * (tr?.turn ?? 1) * (st.charge > 0 ? 0.4 : 1);
     b.heading += THREE.MathUtils.clamp(d, -1, 1) * rate * dt * (hs < 1.5 ? 1.4 : 1);
   }
+  if (st.charge > 0) target = CHARGE_RUN;
   if (b.grounded || deep) {
     // Gathering speed takes a while; slowing is quicker.
     // Brisk up to the canter, then `gather` seconds on to the full gallop.
     const up = target > st.speed;
-    const accel = up ? (st.speed < walk.speed ? 9 : (walk.sprint - walk.speed) / (s.gather ?? 2)) : wl < 0.05 ? 12 : 16;
+    const brake = tr?.brake;
+    const accel = up ? (st.speed < walk.speed ? 9 : (walk.sprint - walk.speed) / (s.gather ?? 2)) : wl < 0.05 ? brake ?? 12 : brake ? brake * 1.3 : 16;
     st.speed += THREE.MathUtils.clamp(target - st.speed, -accel * dt, accel * dt);
     // Uphill drags, downhill runs on a little.
-    if (b.grounded) {
+    if (b.grounded && !under) {
       const ahead = world.groundHeight(b.pos.x + fx0 * 1.2, b.pos.z + fz0 * 1.2);
-      const climb = THREE.MathUtils.clamp((ahead - ground) / 1.2, -1, 1.5);
-      if (climb > 0.35) st.speed *= Math.pow(THREE.MathUtils.clamp(1.25 - climb * 0.6, 0.3, 1), dt * 4);
+      const raw = (ahead - ground) / 1.2;
+      const climb = THREE.MathUtils.clamp(raw, -1, 1.5);
+      const drag = tr?.slopeDrag ?? 1;
+      if (climb > 0.35 && drag > 0) st.speed *= Math.pow(THREE.MathUtils.clamp(1.25 - climb * 0.6 * drag, 0.3, 1), dt * 4);
+      // Too steep for it: it stalls at the foot.
+      if (tr?.maxClimb !== undefined && raw > tr.maxClimb && st.speed > 0) st.speed = Math.min(st.speed, walk.speed * Math.max(0, 1 - (raw - tr.maxClimb) * 2.5));
     }
   }
-  const fx = Math.sin(b.heading), fz = Math.cos(b.heading);
-  b.vel.x = fx * st.speed;
-  b.vel.z = fz * st.speed;
+  // Static builds up while it runs, and seeps away standing still.
+  if (tr?.ability === 'charge') {
+    if (b.grounded && Math.abs(st.speed) > 3 && st.charge <= 0) st.static = Math.min(1, st.static + (Math.abs(st.speed) * dt) / 45);
+    else if (st.charge <= 0) st.static = Math.max(0, st.static - dt * 0.04);
+  }
 
-  if (b.grounded && input.jumpPressed && !deep && s.leap) {
+  if (!used && b.grounded && input.jumpPressed && !deep && s.leap) {
     b.vel.y = s.leap + Math.min(3, Math.abs(st.speed) * 0.08);
+    if (tr?.leapFwd) {
+      const k = tr.leapFwd * Math.sign(st.speed || 1);
+      st.speed += k;
+      // Loose-footed mounts keep their own velocity: push it along too.
+      if (tr.grip) { b.vel.x += fx0 * k; b.vel.z += fz0 * k; }
+    }
     b.grounded = false;
     b.events.push({ type: 'jump' });
   }
-  if (!b.grounded && !deep) b.vel.y = Math.max(b.vel.y - GALLOP_GRAVITY * (b.vel.y < 0 ? 1.4 : 1) * dt, -45);
+
+  const fx = Math.sin(b.heading), fz = Math.cos(b.heading);
+  if (tr?.grip && (b.grounded || deep)) {
+    // Loose footing: the body only slowly comes round onto the new line.
+    const k = e(tr.grip);
+    b.vel.x += (fx * st.speed - b.vel.x) * k;
+    b.vel.z += (fz * st.speed - b.vel.z) * k;
+  } else if (!tr?.grip || b.grounded || deep) {
+    b.vel.x = fx * st.speed;
+    b.vel.z = fz * st.speed;
+  }
+
+  const grav = GALLOP_GRAVITY * (tr?.gravity ?? 1) * (st.charge > 0 ? 0.45 : 1);
+  const airborneWater = !!tr?.diver && deep && !b.grounded;
+  if (!b.grounded && (!deep || airborneWater)) b.vel.y = Math.max(b.vel.y - grav * (b.vel.y < 0 ? 1.4 : 1) * dt, -45);
 
   // Sub-steps of at most 0.3 m, so a gallop can't skip through a trunk.
   const before = st.speed;
-  const steps = Math.max(1, Math.min(40, Math.ceil((Math.abs(st.speed) * dt) / 0.3)));
+  const hsNow = Math.hypot(b.vel.x, b.vel.z);
+  const steps = Math.max(1, Math.min(40, Math.ceil((hsNow * dt) / 0.3)));
+  const rampMax = tr?.cling ? 6 : st.charge > 0 ? 1.8 : 0;
+  const noTrees = !!tr?.thicket || st.charge > 0;
+  const hv0 = hsNow;
   for (let i = 0; i < steps; i++) {
     b.pos.x += (b.vel.x * dt) / steps;
     b.pos.z += (b.vel.z * dt) / steps;
-    world.collide?.(b.pos, b.vel, s.radius);
+    // Phasing and burrowing pass under / through everything but the towers.
+    if (ghost) world.landmarks?.(b.pos, b.vel, s.radius);
+    else world.collide?.(b.pos, b.vel, s.radius, rampMax, noTrees);
   }
-  st.speed = b.vel.x * fx + b.vel.z * fz;
+  if (!tr?.grip) st.speed = b.vel.x * fx + b.vel.z * fz;
+  // Loose-footed: whatever a collision took off the velocity comes off the speed too.
+  else st.speed = Math.max(0, Math.abs(st.speed) - Math.max(0, hv0 - Math.hypot(b.vel.x, b.vel.z))) * Math.sign(st.speed);
   const lost = Math.abs(before) - Math.abs(st.speed);
-  if (lost > 4) b.events.push({ type: 'bump', impact: lost });
+  if (lost > 4 && st.charge <= 0) b.events.push({ type: 'bump', impact: lost });
   const vyBefore = b.vel.y;
   b.pos.y += b.vel.y * dt;
 
-  const g = world.floorHeight ? world.floorHeight(b.pos.x, b.pos.z, b.pos.y, s.radius) : world.groundHeight(b.pos.x, b.pos.z);
-  if (world.groundHeight(b.pos.x, b.pos.z) < swimY) {
+  // Underground: the body keeps to the ground (presentation sinks it) and
+  // comes up where the time runs out, in front of deep water, or on Space.
+  if (under) {
+    st.burrow -= dt;
+    const aheadWet = world.groundHeight(b.pos.x + fx * 2, b.pos.z + fz * 2) < world.waterLevel - 0.5;
+    b.pos.y = world.groundHeight(b.pos.x, b.pos.z);
+    b.vel.y = 0;
+    b.grounded = true;
+    if (st.burrow <= 0 || aheadWet) {
+      st.burrow = 0;
+      st.cool = 0.7;
+      st.fx = 'emerge';
+      b.vel.y = 6.5;
+      b.grounded = false;
+      b.events.push({ type: 'jump' });
+    }
+    return;
+  }
+
+  let g = world.floorHeight ? world.floorHeight(b.pos.x, b.pos.z, b.pos.y, s.radius) : world.groundHeight(b.pos.x, b.pos.z);
+  // A clinger crawls up and over boulders as if they were ground.
+  if (tr?.cling && world.ramp) g = Math.max(g, world.ramp(b.pos.x, b.pos.z, s.radius * 0.5, 6));
+  const floorG = world.groundHeight(b.pos.x, b.pos.z);
+  if (floorG < swimY) {
+    if (tr?.diver) {
+      // Under water it's in its element: C takes it down, Space brings it up,
+      // and Space at the surface with some speed on leaps it clear.
+      if (b.grounded || vyBefore <= 0 && b.pos.y <= swimY - st.depth) {
+        const was = b.grounded;
+        const maxD = Math.max(0, swimY - floorG - 0.5);
+        const d0 = st.depth;
+        if (input.down) st.depth = Math.min(maxD, st.depth + 3.2 * dt);
+        else if (input.up) st.depth = Math.max(0, st.depth - 4 * dt);
+        else st.depth = Math.min(st.depth, maxD);
+        if (d0 === 0 && st.depth > 0) st.fx = 'dive';
+        if (d0 > 0 && st.depth === 0) st.fx = 'surface';
+        const y = swimY - st.depth;
+        b.pos.y += (y - b.pos.y) * e(was ? 6 : 3);
+        if (!was && vyBefore < -3) b.events.push({ type: 'land', impact: -vyBefore });
+        b.vel.y = 0;
+        b.grounded = true;
+        if (input.jumpPressed && st.depth < 0.2 && Math.abs(st.speed) > 4) {
+          b.vel.y = (s.leap ?? 8) * 0.9;
+          b.grounded = false;
+          st.fx = 'surface';
+          b.events.push({ type: 'jump' });
+        }
+      }
+      return;
+    }
     // Swimming: bob along with the body low in the water.
     const was = b.grounded;
     b.pos.y += (swimY - b.pos.y) * e(was ? 6 : 3);
@@ -558,9 +753,10 @@ export function gallopUpdate(st: GallopState, b: Body, ctx: MoveContext, s: Moun
     b.grounded = true;
     return;
   }
+  st.depth = 0;
   const hs = Math.abs(st.speed);
   if (b.grounded) {
-    if (b.pos.y - g > Math.max(0.5, hs * dt * 1.6)) {
+    if (!tr?.cling && b.pos.y - g > Math.max(0.5, hs * dt * 1.6)) {
       b.grounded = false; // ran off a ledge
       b.vel.y = 0;
     } else {
