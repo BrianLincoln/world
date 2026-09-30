@@ -597,13 +597,17 @@ export class Story {
   }
 
   /** Where the explorer (re)starts: the yard, or the lit cabin's doorstep once it's home. */
-  spawnPoint(): { x: number; z: number; yaw: number } {
+  spawnPoint(): { x: number; z: number; yaw: number; heading: number } {
     if (this.cabin.lit) {
+      // On the doorstep, turned out to face the camera, the cabin behind you.
       const p = this.anchor('doorstep');
       const out = siteLocal(this.site, -0.2, CAB.D / 2 + 9);
-      return { x: p.x, z: p.z, yaw: Math.atan2(out.x - this.site.x, out.z - this.site.z) };
+      const yaw = Math.atan2(out.x - this.site.x, out.z - this.site.z);
+      return { x: p.x, z: p.z, yaw, heading: yaw };
     }
-    return this.site.spawn;
+    // The start: your back to the camera, looking up the path.
+    const sp = this.site.spawn;
+    return { x: sp.x, z: sp.z, yaw: sp.yaw, heading: sp.yaw + Math.PI };
   }
 
   // ------------------------------------------------------------ navigation

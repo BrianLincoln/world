@@ -320,7 +320,7 @@ function spawn() {
     const s = storyHost.story.spawnPoint();
     placePlayer(s.x, s.z);
     orbit.yaw = s.yaw;
-    player.body.heading = s.yaw + Math.PI;
+    player.body.heading = s.heading;
     orbit.snap();
   } else {
     const [x, z] = findSpawn(0, 0);
@@ -355,10 +355,11 @@ function setSeed(s: string) {
   mobCtx.gen = gen;
   sky.setSeed(gen.seed);
   const story = storyHost?.build(gen, s);
-  const [x, z] = storyHost?.active && story ? [story.spawnPoint().x, story.spawnPoint().z] : findSpawn(0, 0);
+  const sp = storyHost?.active && story ? story.spawnPoint() : null;
+  const [x, z] = sp ? [sp.x, sp.z] : findSpawn(0, 0);
   player.set('walk', ctx);
   placePlayer(x, z);
-  if (storyHost?.active && story) { orbit.yaw = story.spawnPoint().yaw; orbit.snap(); }
+  if (sp) { orbit.yaw = sp.yaw; player.body.heading = sp.heading; orbit.snap(); }
   bikes.reset(gen, x, z, orbit.yaw, !storyHost?.active);
   towerDebug.setGen(gen);
   beacons.setGen(gen, s);
