@@ -32,7 +32,7 @@ export interface Poi {
   tower?: number;
 }
 
-export interface PathSeg { ax: number; az: number; bx: number; bz: number }
+export interface PathSeg { ax: number; az: number; bx: number; bz: number; /** Extra half-width (m): the journey's two-bike trails. */ wide?: number }
 
 /** Phase 2's guided routes: polylines (x, z) and the tower they lead to second. */
 export interface Journey { toHome: [number, number][]; toNext: [number, number][]; next: number }
@@ -112,44 +112,160 @@ export class WorldGen {
       const links = home.links.map((i) => net.towers[i]);
       const score = (t: Tower) => Math.hypot(t.x - home.x, t.z - home.z) * (t.parent === home.id ? 1 : 1.6);
       const next = links.sort((a, b) => score(a) - score(b))[0] ?? net.towers[1];
-      // Dry all the way (sampled every 6 m)?
-      const dry = (l: [number, number][]) => {
-        for (let i = 0; i + 1 < l.length; i++) {
-          const [ax, az] = l[i], [bx, bz] = l[i + 1];
-          const n = Math.ceil(Math.hypot(bx - ax, bz - az) / 6);
-          for (let k = 0; k <= n; k++) if (this.baseHeight(ax + (bx - ax) * (k / n), az + (bz - az) * (k / n)) < 1.6) return false;
-        }
-        return true;
-      };
-      // A gently wandering line a to b, or a detour through a dry midpoint off
-      // to one side when the straight way crosses water.
-      const span = (ax: number, az: number, bx: number, bz: number, depth = 0): [number, number][] => {
-        const d = Math.hypot(bx - ax, bz - az);
-        const t = d > 60 ? this.tracePath(ax, az, bx, bz, 0.06) : null;
-        const line = t ? (Math.hypot(t[0][0] - ax, t[0][1] - az) < 1 ? t : t.reverse()) : [[ax, az], [bx, bz]] as [number, number][];
-        if (dry(line) || depth > 1 || d < 30) return line;
-        const px = -(bz - az) / d, pz = (bx - ax) / d;
-        for (const o of [0.2, -0.2, 0.35, -0.35, 0.5, -0.5, 0.7, -0.7]) {
-          const mx = (ax + bx) / 2 + px * d * o, mz = (az + bz) / 2 + pz * d * o;
-          if (this.baseHeight(mx, mz) < 2.5) continue;
-          const l = [...span(ax, az, mx, mz, depth + 1), ...span(mx, mz, bx, bz, depth + 1).slice(1)];
-          if (dry(l)) return l;
-        }
-        return line;
-      };
       const leg = (pts: [number, number][]) => {
         const out: [number, number][] = [];
         for (let i = 0; i + 1 < pts.length; i++) {
-          const seg = span(pts[i][0], pts[i][1], pts[i + 1][0], pts[i + 1][1]);
+          const seg = this.route(pts[i][0], pts[i][1], pts[i + 1][0], pts[i + 1][1]);
           out.push(...(out.length ? seg.slice(1) : seg));
         }
         return out;
       };
-      const toHome = leg([yard, front(home, 30), front(home, 0)]);
-      const toNext = leg([front(home, 0), front(home, 26), front(next, 30), front(next, 0)]);
+      // The last stretch to each doorway runs straight in from the front.
+      const toHome = [...leg([yard, front(home, 30)]), front(home, 0)];
+      const toNext = [front(home, 0), ...leg([front(home, 26), front(next, 30)]), front(next, 0)];
       this._journey = { toHome, toNext, next: next.id };
     }
     return this._journey;
+  }
+
+  /**
+   * A route for the journey's paths from a to b: A* over an 8 m grid that
+   * never crosses water (the sea, lakes, the story brook) or goes through the
+   * cabin, the story's trees and stones, other landmarks or any tower's rock,
+   * and prefers gentle, open ground (a kid bikes it, beside the spirit). Then
+   * pulled straight where the way is clear and rounded at the corners.
+   */
+  private route(ax: number, az: number, bx: number, bz: number): [number, number][] {
+    const C = 8;
+    const d = Math.hypot(bx - ax, bz - az);
+    const pad = Math.max(120, d * 0.4);
+    const x0 = Math.min(ax, bx) - pad, z0 = Math.min(az, bz) - pad;
+    const W = Math.ceil((Math.max(ax, bx) + pad - x0) / C) + 1, H = Math.ceil((Math.max(az, bz) + pad - z0) / C) + 1;
+    // Things to keep off: centres and radii.
+    const avoid: number[] = [];
+    const st = this.story;
+    this.poiCellRange(x0, z0, x0 + W * C, z0 + H * C, (p) => {
+      if (p.kind === 'tower') for (const b of p.boulders!) avoid.push(b.x, b.z, b.sx + 3);
+      else if (p.kind === 'cabin') avoid.push(p.x, p.z, p.story === 'ruin' ? 7.5 : 9);
+      else if (p.boulders) for (const b of p.boulders) avoid.push(b.x, b.z, b.sx + 2.5);
+    });
+    for (const t of st.trees) avoid.push(t.x, t.z, 4.5);
+    for (const b of st.boulders) avoid.push(b.x, b.z, 3.5);
+    avoid.push(st.stump.x, st.stump.z, 2.5);
+    const wet = (x: number, z: number) => this.height(x, z) < 2.2 || this.brookDist(x, z) < 5.5;
+    const blockedAt = (x: number, z: number) => {
+      if (wet(x, z)) return true;
+      for (let k = 0; k < avoid.length; k += 3) if (Math.hypot(x - avoid[k], z - avoid[k + 1]) < avoid[k + 2]) return true;
+      return false;
+    };
+    const costs = new Float32Array(W * H).fill(-1);
+    const cost = (i: number, j: number) => {
+      const k = j * W + i;
+      if (costs[k] >= 0) return costs[k];
+      const x = x0 + i * C, z = z0 + j * C;
+      let c: number;
+      // Keep a bike's width of dry ground either side too.
+      if (blockedAt(x, z) || wet(x + 4, z) || wet(x - 4, z) || wet(x, z + 4) || wet(x, z - 4)) c = Infinity;
+      else {
+        const h = this.height(x, z);
+        const sl = Math.max(Math.abs(this.height(x + 4, z) - this.height(x - 4, z)), Math.abs(this.height(x, z + 4) - this.height(x, z - 4))) / 8;
+        c = 1 + 14 * sl * sl + 1.2 * this.forestDensity(x, z, h);
+      }
+      costs[k] = c;
+      return c;
+    };
+    const cell = (x: number, z: number) => [Math.round((x - x0) / C), Math.round((z - z0) / C)];
+    const [si, sj] = cell(ax, az), [ei, ej] = cell(bx, bz);
+    const start = sj * W + si, goal = ej * W + ei;
+    costs[start] = costs[goal] = 1;
+    // A* with a binary heap.
+    const g = new Float32Array(W * H).fill(Infinity);
+    const from = new Int32Array(W * H).fill(-1);
+    const heap: number[] = [], hf: number[] = [];
+    const push = (n: number, f: number) => {
+      heap.push(n); hf.push(f);
+      let i = heap.length - 1;
+      while (i > 0) { const p = (i - 1) >> 1; if (hf[p] <= hf[i]) break; [heap[p], heap[i]] = [heap[i], heap[p]]; [hf[p], hf[i]] = [hf[i], hf[p]]; i = p; }
+    };
+    const pop = () => {
+      const top = heap[0];
+      const ln = heap.pop()!, lf = hf.pop()!;
+      if (heap.length) {
+        heap[0] = ln; hf[0] = lf;
+        let i = 0;
+        for (;;) {
+          const l = 2 * i + 1, r = l + 1;
+          let m = i;
+          if (l < heap.length && hf[l] < hf[m]) m = l;
+          if (r < heap.length && hf[r] < hf[m]) m = r;
+          if (m === i) break;
+          [heap[m], heap[i]] = [heap[i], heap[m]]; [hf[m], hf[i]] = [hf[i], hf[m]]; i = m;
+        }
+      }
+      return top;
+    };
+    const hEst = (n: number) => Math.hypot((n % W) - ei, Math.floor(n / W) - ej);
+    g[start] = 0;
+    push(start, hEst(start));
+    const closed = new Uint8Array(W * H);
+    let found = false;
+    for (let it = 0; heap.length && it < 400000; it++) {
+      const n = pop();
+      if (closed[n]) continue;
+      closed[n] = 1;
+      if (n === goal) { found = true; break; }
+      const i = n % W, j = Math.floor(n / W);
+      for (let dj = -1; dj <= 1; dj++) for (let di = -1; di <= 1; di++) {
+        if (!di && !dj) continue;
+        const ni = i + di, nj = j + dj;
+        if (ni < 0 || nj < 0 || ni >= W || nj >= H) continue;
+        const m = nj * W + ni;
+        if (closed[m]) continue;
+        const c = cost(ni, nj);
+        if (c === Infinity) continue;
+        const ng = g[n] + (di && dj ? 1.414 : 1) * (c + cost(i, j)) * 0.5;
+        if (ng < g[m]) { g[m] = ng; from[m] = n; push(m, ng + hEst(m)); }
+      }
+    }
+    if (!found) return [[ax, az], [bx, bz]];
+    const cells: [number, number][] = [];
+    for (let n = goal; n >= 0; n = from[n]) cells.push([x0 + (n % W) * C, z0 + Math.floor(n / W) * C]);
+    cells.reverse();
+    cells[0] = [ax, az];
+    cells[cells.length - 1] = [bx, bz];
+    // Pull it straight where the straight way is clear, in runs of up to 45 m.
+    const clearLine = (p: [number, number], q: [number, number]) => {
+      const n = Math.ceil(Math.hypot(q[0] - p[0], q[1] - p[1]) / 3);
+      for (let k = 1; k < n; k++) {
+        const x = p[0] + (q[0] - p[0]) * (k / n), z = p[1] + (q[1] - p[1]) * (k / n);
+        if (blockedAt(x, z)) return false;
+      }
+      return true;
+    };
+    const pulled: [number, number][] = [cells[0]];
+    let i = 0;
+    while (i < cells.length - 1) {
+      let j = i + 1;
+      for (let k = cells.length - 1; k > i + 1; k--) {
+        if (Math.hypot(cells[k][0] - cells[i][0], cells[k][1] - cells[i][1]) <= 45 && clearLine(cells[i], cells[k])) { j = k; break; }
+      }
+      pulled.push(cells[j]);
+      i = j;
+    }
+    // Round the corners (Chaikin, twice), keeping the ends.
+    let line = pulled;
+    for (let r = 0; r < 2; r++) {
+      const out: [number, number][] = [line[0]];
+      for (let k = 0; k + 1 < line.length; k++) {
+        const [px, pz] = line[k], [qx, qz] = line[k + 1];
+        const a: [number, number] = [px * 0.75 + qx * 0.25, pz * 0.75 + qz * 0.25], b: [number, number] = [px * 0.25 + qx * 0.75, pz * 0.25 + qz * 0.75];
+        if (k > 0) out.push(blockedAt(a[0], a[1]) ? line[k] : a);
+        if (k + 1 < line.length - 1) out.push(blockedAt(b[0], b[1]) ? line[k + 1] : b);
+      }
+      out.push(line[line.length - 1]);
+      line = out;
+    }
+    return line;
   }
 
   /** Distance to the nearest beacon tower's centre (towers near (x, z) only; Infinity if none within `max`). */
@@ -614,7 +730,7 @@ export class WorldGen {
       for (let i = 0; i + 1 < line.length; i++) {
         const [ax, az] = line[i], [bx, bz] = line[i + 1];
         if (Math.max(ax, bx) + margin < x0 || Math.min(ax, bx) - margin > x1 || Math.max(az, bz) + margin < z0 || Math.min(az, bz) - margin > z1) continue;
-        out.push({ ax, az, bx, bz });
+        out.push({ ax, az, bx, bz, wide: 1.2 });
       }
     }
     // The story cabin's own little worn paths.

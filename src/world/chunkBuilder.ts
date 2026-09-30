@@ -88,7 +88,7 @@ export function buildChunk(gen: WorldGen, req: ChunkRequest): ChunkResult {
   const pathDist = (x: number, z: number) => {
     let d = 30;
     for (let k = 0; k < paths.length; k++) {
-      const pd = segDist(x, z, paths[k]);
+      const pd = segDist(x, z, paths[k]) - (paths[k].wide ?? 0);
       if (pd < d) d = pd;
     }
     return d;
@@ -204,10 +204,11 @@ export function buildChunk(gen: WorldGen, req: ChunkRequest): ChunkResult {
         const fd = gen.forestDensity(x, z, h);
         const p = fd * 0.78 + 0.008;
         if (hash01(gi, gj, seed, 3) > p) continue;
-        if (paths.length && pathDist(x, z) < 3.2) continue;
+        const sc = (0.72 + 0.45 * hash01(gi, gj, seed, 4) + 0.25 * fd) * farScale;
+        // Clear of the path by the whole canopy, not just the trunk.
+        if (paths.length && pathDist(x, z) < 1.6 + 2.4 * sc) continue;
         if (inClearing(x, z, 2)) continue;
         if (gen.storyBlock(x, z, 1.2, 'tree')) continue;
-        const sc = (0.72 + 0.45 * hash01(gi, gj, seed, 4) + 0.25 * fd) * farScale;
         trees.push(lx, h - 0.4, lz, sc, hash01(gi, gj, seed, 5) * 6.283,
           0.88 + 0.3 * hash01(gi, gj, seed, 6), (hash01(gi, gj, seed, 7) - 0.5), hash01(gi, gj, seed, 8));
       }
@@ -233,10 +234,10 @@ export function buildChunk(gen: WorldGen, req: ChunkRequest): ChunkResult {
         const edgeness = fd * (1 - fd) * 4;
         const p = edgeness * 0.55 + 0.035;
         if (hash01(gi, gj, seed, 23) > p) continue;
-        if (paths.length && pathDist(x, z) < 2.2) continue;
+        const sc = (0.7 + 0.8 * hash01(gi, gj, seed, 24)) * (bStep > 1 ? 1.2 : 1);
+        if (paths.length && pathDist(x, z) < 1.4 + 1.5 * sc) continue;
         if (inClearing(x, z, -2)) continue;
         if (gen.storyBlock(x, z, 1.4, 'bush')) continue;
-        const sc = (0.7 + 0.8 * hash01(gi, gj, seed, 24)) * (bStep > 1 ? 1.2 : 1);
         bushes.push(lx, h - 0.15, lz, sc, hash01(gi, gj, seed, 25) * 6.283, 0.7 + 0.3 * hash01(gi, gj, seed, 26), 0, hash01(gi, gj, seed, 27));
       }
     }
@@ -260,9 +261,9 @@ export function buildChunk(gen: WorldGen, req: ChunkRequest): ChunkResult {
         const rk = gen.rockiness(x, z, h);
         const p = rk * 0.3 + 0.012;
         if (hash01(gi, gj, seed, 33) > p) continue;
-        if (paths.length && pathDist(x, z) < 1.8) continue;
         const big = hash01(gi, gj, seed, 34);
         const sc = (0.35 + 1.4 * big * big * big + rk * 0.6) * (rStep > 1 ? 1.4 : 1);
+        if (paths.length && pathDist(x, z) < 2 + 1.1 * sc) continue;
         if (gen.storyBlock(x, z, sc * 0.9, 'rock')) continue;
         rocks.push(lx, h - sc * 0.25, lz, sc, hash01(gi, gj, seed, 35) * 6.283, 0.55 + 0.25 * hash01(gi, gj, seed, 36), 0, hash01(gi, gj, seed, 37));
       }

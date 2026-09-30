@@ -303,6 +303,12 @@ export class Story {
     if (!approach.length) return out;
     const S = site.spawn;
     const pathD = (x: number, z: number) => approach.reduce((d, p) => Math.min(d, segDist(x, z, p)), Infinity);
+    const trail = gen.journey.toHome;
+    const journeyD = (x: number, z: number) => {
+      let d = Infinity;
+      for (let k = 0; k + 1 < trail.length; k++) d = Math.min(d, segDist(x, z, { ax: trail[k][0], az: trail[k][1], bx: trail[k + 1][0], bz: trail[k + 1][1] }));
+      return d;
+    };
     for (let i = 0; i < 700 && out.length < 95; i++) {
       const r = (k: number) => hash01(i, k, seed, 977);
       let x: number, z: number;
@@ -322,6 +328,8 @@ export class Story {
       if (h < 2.5 || Math.abs(gen.height(x + 2, z) - gen.height(x - 2, z)) > 1.4) continue;
       if (gen.forestDensity(x, z, h) > 0.35) continue; // real forest already
       if (pathD(x, z) < 5.2 || Math.hypot(x - S.x, z - S.z) < 9.5) continue;
+      // Clear of the journey's trail to the home tower by the whole canopy.
+      if (journeyD(x, z) < 1.2 + 1.6 + 2.4 * (0.75 + r(5) * 0.45)) continue;
       if (Math.hypot(x - site.x, z - site.z) < 24) continue;
       if (gen.storyBlock(x, z, 1.2, 'tree')) continue;
       if (out.some((t) => Math.hypot(t.x - x, t.z - z) < 3.6)) continue;
