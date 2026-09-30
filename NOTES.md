@@ -1289,3 +1289,47 @@ asked for as far as possible). Everything below is a first pass for review.
   arms near the capstone lip can kink a little; the tower camera has no
   touch controls beyond the badge; no bell/voice for the waiting spirit
   beyond a chirp; the gift has no ceremony beyond pointing and a bubble.
+
+### Owner feedback round (2026-09-29): paths, the climb, the exit, the ride off
+- **Journey paths are routed** (`WorldGen.route`): A* on an 8 m grid, with
+  the cost worked out lazily per cell. It never crosses water (the full
+  `height`, so rivers and lakes, plus the story brook) and keeps 4 m of dry
+  ground either side. It keeps off the cabin (7.5 m), the story's trees,
+  stump and stones, other POIs' boulders, and every tower's rock, and it
+  prefers gentle, open ground (cost 1 + 14·slope² + 1.2·forest). Then it's
+  pulled straight in clear runs of up to 45 m and rounded (Chaikin ×2,
+  never into a blocked spot). The last stretch into each doorway is
+  straight. ~200 ms per seed (per worker). The old line crossed a lake on
+  fjord and ran through the cabin.
+- **Paths are clearer**: journey paths are drawn 1.2 m wider each side
+  (`PathSeg.wide`: two bikes side by side), and every path keeps trees
+  clear by their canopy (1.6 + 2.4·scale m), bushes by 1.4 + 1.5·scale and
+  rocks by 2 + 1.1·scale (it was a flat 3.2 / 2.2 / 1.8 from the centre).
+  The story's planted woods also keep off the trail to the home tower.
+- **The climb, again** (owner: "arms should arch out and around right up to
+  the eyes and pull himself right in"). It now waits at the foot beside the
+  doorway; both arms shoot up along big arcs out in front of the stack and
+  hook into the left eyehole's rims (1.2 s, drawn as the growing first part
+  of a cubic, any point near rock pushed out); a tug; then it's yanked up
+  along an arc (2.2 s, slow start, snap, ease in), pushed out from the face
+  until the whole body clears all rock (checked at 24 points × 9 body
+  samples), and slips into the eye while its arms draw straight back in.
+  No more walking over the capstone.
+- **Out of the head: straight outside.** The drop back into the room is
+  gone (you couldn't tell where the doorway was). You reappear 3 m in front
+  of the doorway facing out, with a puff of sparks, and the camera glides
+  down from the head's view (1.1 s blend) to a shot from in front with the
+  doorway behind you.
+- **Ride off**: coming out, the hearth spirit is there; it greets you,
+  walks to its little bike, climbs on, and waits with a bike bubble,
+  watching you, until you're on yours (or you set off along the path on
+  foot, or 40 s). Then it leads. The first ride works the same way: its bike
+  stands a few metres up the path from your gift. Its bike is never one you
+  can climb on.
+- **Lit towers watch you**: every lit tower within 700 m turns its head
+  all the way round to face you (and tilts down a little), not just the
+  nearest, ±0.45 rad.
+- **Collision**: a steep rock lip below step height counts as wall (you
+  stood 0.4 m into one), and from outside, the door boulder uses its drawn,
+  lumpy shape, not the ellipsoid shell (lumps poked 0.5 m into you). Drop
+  tests: 0 bad on fjord and hilda.

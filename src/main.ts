@@ -246,6 +246,8 @@ let hadCine = false;
 /** Easing the camera between a cinematic and the orbit: where it came from, and how far along (1 = done). */
 const camBlendPos = new THREE.Vector3(), camBlendQ = new THREE.Quaternion(), camLastPos = new THREE.Vector3(), camLastQ = new THREE.Quaternion();
 let camBlend = 1;
+/** Last frame's final camera pose (a blend can start from it). */
+const camPrevPos = new THREE.Vector3(), camPrevQ = new THREE.Quaternion();
 /** Sandbox only: how long the pick stays in the mitten after a swing at a tower's lock. */
 let sandboxPickT = 0;
 const beacons = new Beacons({
@@ -683,11 +685,14 @@ function frame(ts?: number) {
   });
   // Back in a tower's room: look in at yourself through the doorway.
   if (beacons.lowered !== null) {
-    orbit.yaw = beacons.lowered;
-    orbit.pitch = 0.1;
-    orbit.targetDistance = 12;
+    // Out of a tower's head: in front of you, a little to the side, the
+    // doorway behind you; eased down from where the head's view was.
+    orbit.yaw = beacons.lowered + 0.55;
+    orbit.pitch = 0.16;
+    orbit.targetDistance = 11;
     orbit.snap();
     beacons.lowered = null;
+    camBlendPos.copy(camPrevPos); camBlendQ.copy(camPrevQ); camBlend = 0;
   }
   // In a tower's room, the camera stays inside it too.
   beacons.clampCamera(camera.position, focus, dt);
@@ -723,6 +728,7 @@ function frame(ts?: number) {
     camera.updateProjectionMatrix();
     camera.updateMatrixWorld();
   }
+  camPrevPos.copy(camera.position); camPrevQ.copy(camera.quaternion);
   U.uFocus.value.copy(focus);
   // Contact shadow sits on the ground under the explorer and shrinks with height.
   // Floor, not bare terrain: on a rock or roof the terrain-only shadow hides.

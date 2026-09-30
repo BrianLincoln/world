@@ -75,7 +75,12 @@ const ids = await page.evaluate(() => ({ home: 0, next: window.__ow.gen().journe
 await free(ids.home, 'home');
 await page.evaluate(() => { window.__ow.beacons.escape(); window.__ow.advance(60 * 2); });
 await log('out of home');
-await snap('ride2-waiting');
+await snap('ride2-out');
+await page.evaluate(() => { const ow = window.__ow; ow.view(ow._body.heading + 2.6, 0.2, 12); ow.advance(60 * 3); });
+await snap('ride2-spirit-boarding');
+await page.evaluate(() => { window.__ow.advance(60 * 4); });
+await log('spirit on bike?');
+await snap('ride2-spirit-waits-on-bike');
 await page.evaluate(() => { window.__ow.mountBike(); window.__ow.advance(30); });
 await ride('toNext', 'ride2');
 await log('ride2 end');
