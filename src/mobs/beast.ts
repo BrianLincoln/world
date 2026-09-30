@@ -774,10 +774,9 @@ export abstract class Beast implements Species {
   emit(m: Mob, _dist: number) {
     const d = m.data as BeastData;
     if (d.hidden) return;
-    const tamed = m.state === 'tamed';
     const lead = m.state === 'caught' || m.leashed;
     for (const w of d.draws) {
-      if (!w.o.visible || (w.when === 1 && !tamed) || (w.when === 2 && !lead)) continue;
+      if (!w.o.visible || (w.when === 1 && !m.stabled) || (w.when === 2 && !lead)) continue;
       w.b.push(w.o.matrixWorld, w.tint ? m.tint : WHITE, w.eye ? d.eye : undefined);
     }
   }

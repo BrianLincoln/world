@@ -1,4 +1,4 @@
-import type { PartId } from './cabin';
+import type { PartId } from './build';
 import type { IconName } from './icons';
 import type { Pose } from './spirit';
 
@@ -6,16 +6,20 @@ import type { Pose } from './spirit';
 // an ordered list of steps; the director (story.ts) only knows the step
 // *kinds*. Later phases (more cabins, a workshop, the bike, mounts) add new
 // phase tables, and new kinds only when a genuinely new verb appears.
+// (Phase 2, the journey, is its own director: story/journey.ts. Phase 3,
+// the stable, is a table again: phase3.ts.)
 
 export type Resource = 'logs' | 'stones';
 
 /** Named places the spirit can wait at or point to (resolved by the site). */
 export type Anchor =
   | 'hearthSpot' | 'hearthSeat' | 'hearth' | 'door' | 'doorstep' | 'stumpSpot' | 'axe' | 'seat' | 'grove'
-  | 'yard' | 'cabin' | 'roof' | 'bank' | 'stones' | 'chimneySpot' | 'chimney' | 'far' | 'lookout' | 'pickSpot' | 'pick' | 'rocks';
+  | 'yard' | 'cabin' | 'roof' | 'bank' | 'stones' | 'chimneySpot' | 'chimney' | 'far' | 'lookout' | 'pickSpot' | 'pick' | 'rocks'
+  // Phase 3: the stable and its pasture.
+  | 'plotSpot' | 'stableSite' | 'stableFront' | 'roofTop' | 'gate' | 'gateIn' | 'gateOut' | 'lasso' | 'woods' | 'fenceSide';
 
 /** Interactable groups a step can switch on (they glint while it's active). */
-export type TargetTag = 'axe' | 'pick' | 'tree' | 'rock' | 'hearth';
+export type TargetTag = 'axe' | 'pick' | 'tree' | 'rock' | 'hearth' | 'lasso';
 
 interface StepBase {
   id: string;
@@ -33,6 +37,8 @@ interface StepBase {
   hour?: number;
   /** When set, the clock time-lapses to this hour as the step begins. */
   easeTo?: number;
+  /** Wait for you to keep up on the way (default: every kind but meet). */
+  lead?: boolean;
   /** Repeat-the-hint behaviour after ~20 s without progress. */
   hint: 'tug' | 'none';
   /** The spirit's reaction as the step completes. */
@@ -43,13 +49,15 @@ export type StepDef =
   /** Done when the explorer comes within `radius` of an anchor. */
   | (StepBase & { kind: 'meet'; near: Anchor; radius: number })
   /** Pick up a tool (every target with the tag). */
-  | (StepBase & { kind: 'pickup'; targets: TargetTag; item: 'axe' | 'pick' })
+  | (StepBase & { kind: 'pickup'; targets: TargetTag; item: 'axe' | 'pick' | 'lasso' })
   /** Collect enough of a resource to finish `for` (minus what's already built in). */
   | (StepBase & { kind: 'gather'; targets: TargetTag; resource: Resource; for: PartId[] })
   /** Bring the resource to the sketched parts; fall back to `gather` if you run out. */
   | (StepBase & { kind: 'build'; parts: PartId[]; resource: Resource; gather: string; zone: Anchor; zoneRadius: number })
   /** Light something, possible from `readyAt` o'clock. */
   | (StepBase & { kind: 'light'; targets: TargetTag; readyAt: number })
+  /** Bring creatures home to the pasture until `count` live there. */
+  | (StepBase & { kind: 'herd'; count: number })
   /** Nothing to ask for: the spirit potters (fire, yard, fire). At `doneAt`
    *  o'clock the story lets go of the clock. */
   | (StepBase & { kind: 'rest'; doneAt: number });
@@ -58,7 +66,8 @@ export interface PartDef { id: PartId; resource: Resource; need: number }
 
 export interface PhaseDef {
   id: string;
-  startHour: number;
+  /** The clock the phase starts at (null: it doesn't touch the time of day). */
+  startHour: number | null;
   parts: PartDef[];
   steps: StepDef[];
 }

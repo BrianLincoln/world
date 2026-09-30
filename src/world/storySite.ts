@@ -15,6 +15,25 @@ export interface StoryTree { x: number; z: number; sc: number; rot: number; lean
 export interface BrookPt { x: number; z: number; bed: number }
 export interface StoryStone { x: number; z: number; rot: number; sc: number }
 
+/** The pasture's fenced rectangle (local x along its length, local +z toward the cabin, where the gate is). */
+export const PASTURE_W = 34;
+export const PASTURE_D = 24;
+
+/**
+ * The flat open ground by the cabin where the stable goes up (phase 3): a
+ * fenced pasture with the stable across one end. The ground there is eased
+ * onto a gentle plane (see WorldGen.height).
+ */
+export interface Pasture {
+  x: number; z: number;
+  /** Local +z (the gate side) faces the cabin. */
+  rot: number;
+  /** Plane height at the centre, and its slope along local x and z. */
+  y: number; sx: number; sz: number;
+  /** Which end the stable stands at (local x sign). */
+  end: 1 | -1;
+}
+
 export interface StorySite {
   /** Cabin centre and floor-pad height. */
   x: number; z: number; y: number;
@@ -37,8 +56,10 @@ export interface StorySite {
   far: { x: number; z: number; y: number; rot: number };
   /** Where the far cabin's light is seen from at night (the doorstep, or a knoll nearby). */
   lookout: SitePoint;
-  /** Short worn footpaths: door -> yard, yard -> brook bank. */
+  /** Short worn footpaths: door -> yard, yard -> brook bank, the approach, yard -> the pasture gate. */
   paths: { ax: number; az: number; bx: number; bz: number }[];
+  /** Where the stable and its pasture go (phase 3). */
+  pasture: Pasture | null;
   /** Bounding box of everything above (quick rejects). */
   box: [number, number, number, number];
 }
@@ -230,6 +251,10 @@ export function findStorySite(seed: number, f: Field): StorySite {
       // The camera sits behind the explorer, looking up the path.
       const spawn = { x: sp.x, z: sp.z, yaw: Math.atan2(sp.x - ahead.x, sp.z - ahead.z) };
 
+      // Somewhere for the pasture (kept clear of the far light's sightline below).
+      let pasture = findPasture(f, s, yard, brook, trees, boulders, stump, paths, spawn, null, null);
+      if (!pasture && strict) continue;
+
       // The far light: seen from the doorstep if possible, else from the best
       // open knoll within ~42 m (inside the spirit's yard) (the spirit walks you there at night).
       const ds = L(-0.4, RUIN_D / 2 + 2.2);
@@ -251,14 +276,21 @@ export function findStorySite(seed: number, f: Field): StorySite {
         if (alt.margin > view.margin + 1) { view = alt; lookout = { x: bx, z: bz }; }
       }
       const far = view.far;
+      if (pasture && blocksView(pasture, lookout, far)) pasture = findPasture(f, s, yard, brook, trees, boulders, stump, paths, spawn, lookout, far);
+      if (!pasture && strict) continue;
+      if (pasture) {
+        const gate = pastureLocal(pasture, 0, PASTURE_D / 2 + 1.5);
+        paths.push({ ax: yard.x, az: yard.z, bx: gate.x, bz: gate.z });
+      }
       let x0 = x - 30, z0 = z - 30, x1 = x + 30, z1 = z + 30;
       const fd = Math.hypot(far.x - lookout.x, far.z - lookout.z);
       const vEnd = { x: lookout.x + ((far.x - lookout.x) / fd) * 130, z: lookout.z + ((far.z - lookout.z) / fd) * 130 };
-      for (const p of [...brook, ...trees, spring, lookout, vEnd, ...route]) {
+      const pc = pasture ? [-1, 1].flatMap((a) => [-1, 1].map((b) => pastureLocal(pasture, a * (PASTURE_W / 2 + 8), b * (PASTURE_D / 2 + 8)))) : [];
+      for (const p of [...brook, ...trees, spring, lookout, vEnd, ...route, ...pc]) {
         x0 = Math.min(x0, p.x - 12); z0 = Math.min(z0, p.z - 12);
         x1 = Math.max(x1, p.x + 12); z1 = Math.max(z1, p.z + 12);
       }
-      const site: StorySite = { x, z, y, rot, spawn, stump, trees, seat, brook, bank, stones, boulders, spring, far, lookout, paths, box: [x0, z0, x1, z1] };
+      const site: StorySite = { x, z, y, rot, spawn, stump, trees, seat, brook, bank, stones, boulders, spring, far, lookout, paths, pasture, box: [x0, z0, x1, z1] };
       // Strict: the next cabin's light must be clearly visible from here.
       if (ok && (!strict || view.margin >= 4)) return site;
       if (ok && strict) {
@@ -290,8 +322,115 @@ export function findStorySite(seed: number, f: Field): StorySite {
   const y = Math.max(f.base(0, 0), 4) + 0.05;
   return {
     x: 0, z: 0, y, rot: 0, spawn: { x: 1.4, z: 15, yaw: 0 }, stump: { x: -5.7, z: 5.1 }, trees: [], seat: { x: -20, z: 0 },
-    brook: [], bank: { x: 36, z: 0 }, stones: [], boulders: [{ x: 10, z: -9, rot: 0, sc: 0.95 }], spring: { x: 36, z: -40 }, far: findFarCabin(seed, f, 0, 0, y, 0).far, lookout: { x: 0, z: 5 }, paths: [], box: [-40, -40, 40, 40],
+    brook: [], bank: { x: 36, z: 0 }, stones: [], boulders: [{ x: 10, z: -9, rot: 0, sc: 0.95 }], spring: { x: 36, z: -40 }, far: findFarCabin(seed, f, 0, 0, y, 0).far, lookout: { x: 0, z: 5 }, paths: [], pasture: null, box: [-40, -40, 40, 40],
   };
+}
+
+/** Pasture-local coordinates -> world. */
+export function pastureLocal(p: Pasture, lx: number, lz: number): SitePoint {
+  return siteLocal(p, lx, lz);
+}
+
+/** The pasture's eased ground plane at pasture-local (lx, lz). */
+export function pasturePlane(p: Pasture, lx: number, lz: number): number {
+  return p.y + p.sx * lx + p.sz * lz;
+}
+
+/** Would the pasture stand in the far light's sightline from the lookout? */
+function blocksView(p: { x: number; z: number; rot: number }, lookout: SitePoint, far: SitePoint) {
+  const dx = far.x - lookout.x, dz = far.z - lookout.z, dl = Math.hypot(dx, dz) || 1;
+  for (let t = 0; t < 125; t += 3) {
+    const l = siteToLocal(p, lookout.x + (dx / dl) * t, lookout.z + (dz / dl) * t);
+    if (Math.abs(l.x) < PASTURE_W / 2 + 3 && Math.abs(l.z) < PASTURE_D / 2 + 3) return true;
+  }
+  return false;
+}
+
+/** Most the pasture's plane may tilt (rise per metre). */
+const PASTURE_SLOPE = 0.05;
+
+/**
+ * The best spot for the pasture: 38-70 m from the cabin, all round it, its
+ * gate side turned to the cabin. The ground must be dry and nearly flat (it
+ * is eased onto a plane that tilts at most 1 in 20, and must lie within 2 m
+ * of it), thinly wooded, and clear of the brook, the grove, the boulders,
+ * every path and the start clearing. Null if nowhere fits.
+ */
+function findPasture(
+  f: Field, s: { x: number; z: number; rot: number }, yard: SitePoint, brook: BrookPt[], trees: StoryTree[], boulders: StoryStone[],
+  stump: SitePoint, paths: { ax: number; az: number; bx: number; bz: number }[], spawn: SitePoint, lookout: SitePoint | null, far: SitePoint | null,
+): Pasture | null {
+  const hw = PASTURE_W / 2, hd = PASTURE_D / 2;
+  let best: Pasture | null = null, bestScore = -Infinity;
+  const inRect = (p: { x: number; z: number; rot: number }, x: number, z: number, m: number) => {
+    const l = siteToLocal(p, x, z);
+    return Math.abs(l.x) < hw + m && Math.abs(l.z) < hd + m;
+  };
+  for (let ai = 0; ai < 28; ai++) {
+    for (const r of [42, 52, 64]) {
+      const a = (ai / 28) * Math.PI * 2;
+      const cx = s.x + Math.cos(a) * r, cz = s.z + Math.sin(a) * r;
+      for (const twist of [0, (ai % 2 ? 0.3 : -0.3)]) {
+        const rot = Math.atan2(s.x - cx, s.z - cz) + twist;
+        const p = { x: cx, z: cz, rot };
+        // Clear of the cabin (and its yard pad) and of everything in the set.
+        let ok = true;
+        const cl = siteToLocal(p, s.x, s.z);
+        if (Math.hypot(Math.max(0, Math.abs(cl.x) - hw), Math.max(0, Math.abs(cl.z) - hd)) < 22) continue;
+        if (inRect(p, yard.x, yard.z, 14) || inRect(p, spawn.x, spawn.z, 16) || inRect(p, stump.x, stump.z, 4)) continue;
+        for (const b of brook) if (inRect(p, b.x, b.z, 7)) { ok = false; break; }
+        if (!ok) continue;
+        for (const t of trees) if (inRect(p, t.x, t.z, 4.5)) { ok = false; break; }
+        for (const b of boulders) if (inRect(p, b.x, b.z, 4.5)) { ok = false; break; }
+        if (!ok) continue;
+        for (const sg of paths) {
+          const n = Math.ceil(Math.hypot(sg.bx - sg.ax, sg.bz - sg.az) / 2);
+          for (let i = 0; i <= n && ok; i++) if (inRect(p, sg.ax + (sg.bx - sg.ax) * (i / n), sg.az + (sg.bz - sg.az) * (i / n), 4.5)) ok = false;
+          if (!ok) break;
+        }
+        if (!ok) continue;
+        // The cabin's front stays open: the far light's sightline from the lookout.
+        if (lookout && far && blocksView(p, lookout, far)) continue;
+        // A quick look at the corners first (most spots are far from flat).
+        let lo = Infinity, hi = -Infinity;
+        for (const [i, j] of [[0, 0], [-1, -1], [1, -1], [-1, 1], [1, 1]]) {
+          const w = siteLocal(p, i * hw, j * hd);
+          const h = f.base(w.x, w.z);
+          lo = Math.min(lo, h); hi = Math.max(hi, h);
+        }
+        if (lo < 4 || hi - lo > PASTURE_SLOPE * 2 * (hw + hd) + 4.4) continue;
+        // The ground: fit a plane, then see how far it strays from it.
+        const pts: [number, number, number][] = [];
+        let wood = 0, low = Infinity;
+        for (let i = -4; i <= 4; i++) for (let j = -3; j <= 3; j++) {
+          const lx = (i / 4) * (hw + 3), lz = (j / 3) * (hd + 3);
+          const w = siteLocal(p, lx, lz);
+          const h = f.base(w.x, w.z);
+          low = Math.min(low, h);
+          wood += f.forest(w.x, w.z, h);
+          pts.push([lx, lz, h]);
+        }
+        if (low < 4) continue;
+        wood /= pts.length;
+        if (wood > 0.45) continue;
+        let m = 0, sxx = 0, szz = 0, sxh = 0, szh = 0;
+        for (const q of pts) m += q[2];
+        m /= pts.length;
+        for (const [lx, lz, h] of pts) { sxx += lx * lx; szz += lz * lz; sxh += lx * (h - m); szh += lz * (h - m); }
+        const sx = Math.max(-PASTURE_SLOPE, Math.min(PASTURE_SLOPE, sxh / sxx));
+        const sz = Math.max(-PASTURE_SLOPE, Math.min(PASTURE_SLOPE, szh / szz));
+        let dev = 0;
+        for (const [lx, lz, h] of pts) dev = Math.max(dev, Math.abs(h - (m + sx * lx + sz * lz)));
+        if (dev > 2.2) continue;
+        // The stable at the end away from the yard.
+        const yl = siteToLocal(p, yard.x, yard.z);
+        const end: 1 | -1 = yl.x > 0 ? -1 : 1;
+        const score = -dev * 3 - wood * 8 - Math.abs(r - 47) * 0.08 - Math.abs(twist) * 2 - (Math.abs(sx) + Math.abs(sz)) * 20;
+        if (score > bestScore) { bestScore = score; best = { x: cx, z: cz, rot, y: m, sx, sz, end }; }
+      }
+    }
+  }
+  return best;
 }
 
 /**

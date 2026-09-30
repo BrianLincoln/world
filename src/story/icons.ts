@@ -5,7 +5,7 @@ import * as THREE from 'three';
 // canvases feed the HUD (as data URLs) and the in-world billboards (as
 // textures), so an icon always looks the same wherever it appears.
 
-export type IconName = 'axe' | 'log' | 'stone' | 'flame' | 'heart' | 'home' | 'check' | 'hand' | 'hammer' | 'pick' | 'smash' | 'antlers' | 'up' | 'down' | 'ember' | 'bike' | 'finger' | 'mouse' | 'mouseDown' | 'fingerDown' | 'pat';
+export type IconName = 'axe' | 'log' | 'stone' | 'flame' | 'heart' | 'home' | 'check' | 'hand' | 'hammer' | 'pick' | 'smash' | 'antlers' | 'up' | 'down' | 'ember' | 'bike' | 'finger' | 'mouse' | 'mouseDown' | 'fingerDown' | 'pat' | 'lasso' | 'stable' | 'creature';
 
 const INK = '#4a2e36';
 const SIZE = 128;
@@ -548,9 +548,95 @@ function drawPat(g: CanvasRenderingContext2D) {
   ink(g, 5);
 }
 
+/** A coiled rope with its running loop hanging out. */
+function drawLasso(g: CanvasRenderingContext2D) {
+  const coil = (w: number, col: string) => {
+    for (const [rx, ry, dy] of [[34, 26, -6], [30, 23, 0], [26, 20, 6]]) {
+      g.beginPath();
+      g.ellipse(58, 56 + dy, rx, ry, -0.2, 0, Math.PI * 2);
+      g.strokeStyle = col;
+      g.lineWidth = w;
+      g.stroke();
+    }
+    // The loop, swinging free below.
+    g.beginPath();
+    g.moveTo(82, 72);
+    g.bezierCurveTo(96, 86, 100, 98, 94, 106);
+    g.strokeStyle = col;
+    g.lineWidth = w;
+    g.stroke();
+    g.beginPath();
+    g.ellipse(88, 108, 18, 9, 0.3, 0, Math.PI * 2);
+    g.stroke();
+  };
+  coil(15, INK);
+  coil(8, '#e2bc7c');
+}
+
+/** The stable: an open-fronted shed with a turf roof and three dark stalls. */
+function drawStable(g: CanvasRenderingContext2D) {
+  // Turf roof.
+  g.beginPath();
+  g.moveTo(10, 62);
+  g.quadraticCurveTo(64, 14, 118, 62);
+  g.quadraticCurveTo(64, 50, 10, 62);
+  g.closePath();
+  g.fillStyle = '#8c8a52';
+  g.fill();
+  ink(g);
+  // Walls and the stalls.
+  g.beginPath();
+  g.roundRect(20, 58, 88, 50, 4);
+  g.fillStyle = '#b08a64';
+  g.fill();
+  ink(g);
+  for (const x of [26, 56, 86]) {
+    g.beginPath();
+    g.roundRect(x, 70, 18, 38, 3);
+    g.fillStyle = '#4a2e36';
+    g.fill();
+  }
+  // A strip of fence either side.
+  g.beginPath();
+  g.moveTo(2, 96); g.lineTo(20, 96); g.moveTo(108, 96); g.lineTo(126, 96);
+  g.moveTo(8, 88); g.lineTo(8, 112); g.moveTo(120, 88); g.lineTo(120, 112);
+  ink(g, 6);
+}
+
+/** A round fluffy creature's face: something to bring home. */
+function drawCreature(g: CanvasRenderingContext2D) {
+  g.beginPath();
+  for (let i = 0; i <= 48; i++) {
+    const a = (i / 48) * Math.PI * 2;
+    const r = 44 + 4 * Math.cos(a * 12);
+    const x = 64 + Math.cos(a) * r, y = 68 + Math.sin(a) * r * 0.86;
+    if (i === 0) g.moveTo(x, y); else g.lineTo(x, y);
+  }
+  g.closePath();
+  g.fillStyle = '#efe2cc';
+  g.fill();
+  ink(g);
+  for (const x of [48, 80]) {
+    g.beginPath();
+    g.ellipse(x, 64, 6, 10, 0, 0, Math.PI * 2);
+    g.fillStyle = INK;
+    g.fill();
+  }
+  g.beginPath();
+  g.arc(64, 80, 8, 0.2, Math.PI - 0.2);
+  ink(g, 5);
+  // Little horns.
+  for (const s of [-1, 1]) {
+    g.beginPath();
+    g.moveTo(64 + s * 22, 34);
+    g.quadraticCurveTo(64 + s * 30, 16, 64 + s * 40, 20);
+    ink(g, 7);
+  }
+}
+
 const DRAW: Record<IconName, (g: CanvasRenderingContext2D) => void> = {
   up: drawUp, down: drawDown, ember: drawEmber, bike: drawBike,
-  antlers: drawAntlers, pat: drawPat,
+  antlers: drawAntlers, pat: drawPat, lasso: drawLasso, stable: drawStable, creature: drawCreature,
   axe: drawAxe, log: drawLog, stone: drawStone, flame: drawFlame, heart: drawHeart, home: drawHome, check: drawCheck, hand: drawHand, hammer: drawHammer, pick: drawPick, smash: drawSmash,
   finger: (g) => drawFinger(g, false), fingerDown: (g) => drawFinger(g, true), mouse: (g) => drawMouse(g, false), mouseDown: (g) => drawMouse(g, true),
 };

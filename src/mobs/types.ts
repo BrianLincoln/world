@@ -4,8 +4,9 @@ import type { WorldGen } from '../world/worldgen';
 import type { PartBatch } from './parts';
 
 // Mobs: wild creatures that roam in flocks until lassoed. A tamed mob can be
-// led on a rope, left to wait, or ridden (the player's RideMode then drives
-// its position and the mob only animates).
+// led on a rope or left to wait; once it's been brought home to the stable
+// (in the story; in the sandbox at once) it's saddled and can be ridden (the
+// player's RideMode then drives its position and the mob only animates).
 
 export type MobState = 'wild' | 'caught' | 'tamed';
 
@@ -22,6 +23,8 @@ export interface Mob {
   state: MobState;
   leashed: boolean;
   ridden: boolean;
+  /** Lives at the stable: saddled, rideable, always comes home (see story/herd.ts). */
+  stabled: boolean;
   flock: Flock | null;
   /** Presentation-only randomness (AI, blinks); spawn layout uses world hashes. */
   rnd: () => number;

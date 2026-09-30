@@ -41,7 +41,7 @@ function sagged(g: THREE.BufferGeometry): THREE.BufferGeometry {
   return g;
 }
 
-function core(g: THREE.BufferGeometry, kind: number): THREE.BufferGeometry {
+export function core(g: THREE.BufferGeometry, kind: number): THREE.BufferGeometry {
   const out = g.index ? g.toNonIndexed() : g;
   for (const k of Object.keys(out.attributes)) if (k !== 'position' && k !== 'normal') out.deleteAttribute(k);
   if (!out.getAttribute('normal')) out.computeVertexNormals();
@@ -66,7 +66,7 @@ export function kbox(w: number, h: number, d: number, x: number, y: number, z: n
   return core(g, kind);
 }
 
-function rbox(w: number, h: number, d: number, r: number, x: number, y: number, z: number, kind: number, ry = 0) {
+export function rbox(w: number, h: number, d: number, r: number, x: number, y: number, z: number, kind: number, ry = 0) {
   const g = new RoundedBoxGeometry(w, h, d, 2, r);
   if (ry) g.rotateY(ry);
   g.translate(x, y, z);
@@ -126,7 +126,7 @@ function place(parts: THREE.BufferGeometry[], ry: number, x: number, y: number, 
   return parts;
 }
 
-function gable(len: number, rise: number, thick: number, kind: number, z: number): THREE.BufferGeometry {
+export function gable(len: number, rise: number, thick: number, kind: number, z: number): THREE.BufferGeometry {
   const s = new THREE.Shape();
   s.moveTo(-len / 2, 0);
   s.lineTo(len / 2, 0);

@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { buildBoulder, buildConifer, TREE_HEIGHT } from '../gfx/geometry';
 import { makeCasterMaterial, makePropMaterial } from '../gfx/materials';
 import { SHADOW_LAYER } from '../gfx/groundShadow';
@@ -476,6 +477,85 @@ export class PickProp {
   take() {
     this.taken = true;
     this.mesh.visible = false;
+  }
+}
+
+// ---------------------------------------------------------------- lasso
+
+/** A coil of rope with its running loop hanging free, and the peg it hangs on. */
+function buildLassoGeo(): THREE.BufferGeometry {
+  const parts: THREE.BufferGeometry[] = [];
+  const kind = (g: THREE.BufferGeometry, k: number) => {
+    const out = g.toNonIndexed();
+    for (const a of Object.keys(out.attributes)) if (a !== 'position' && a !== 'normal') out.deleteAttribute(a);
+    out.setAttribute('aKind', new THREE.BufferAttribute(new Float32Array(out.attributes.position.count).fill(k), 1));
+    return out;
+  };
+  // Coils: a few rope rings stacked slightly askew, hanging flat against the post.
+  for (let i = 0; i < 4; i++) {
+    const g = new THREE.TorusGeometry(0.2 - i * 0.012, 0.028, 8, 22);
+    g.rotateZ(i * 0.35);
+    g.translate(0.01 * i, -0.2 - i * 0.012, 0.04 + i * 0.022);
+    parts.push(kind(g, 17));
+  }
+  // The loop dangling out below, with its knot.
+  const loop = new THREE.TorusGeometry(0.13, 0.022, 8, 18);
+  loop.scale(1, 1.35, 1);
+  loop.rotateY(0.4);
+  loop.translate(0.1, -0.55, 0.1);
+  parts.push(kind(loop, 17));
+  const tail = new THREE.CylinderGeometry(0.022, 0.022, 0.2, 6);
+  tail.translate(0.1, -0.32, 0.1);
+  parts.push(kind(tail, 17));
+  const peg = new THREE.CylinderGeometry(0.03, 0.035, 0.22, 7);
+  peg.rotateX(Math.PI / 2);
+  peg.translate(0, 0, 0.1);
+  parts.push(kind(peg, 1));
+  const g = mergeGeometries(parts)!;
+  g.computeBoundingSphere();
+  return g;
+}
+
+/** The lasso the spirit gives you, hung on the gatepost until you take it. */
+export class LassoProp {
+  readonly group = new THREE.Group();
+  readonly mat = glintMat({ toneVar: 0 });
+  readonly mesh: THREE.Mesh;
+  readonly pos: THREE.Vector3;
+  shown = false;
+  taken = false;
+  private popT = -1;
+
+  /** Hung at `at`, facing out along (fx, fz). */
+  constructor(at: THREE.Vector3, fx: number, fz: number) {
+    this.mesh = propMesh(buildLassoGeo(), this.mat);
+    this.group.position.copy(at);
+    this.group.rotation.y = Math.atan2(fx, fz);
+    this.group.add(this.mesh);
+    this.group.visible = false;
+    this.pos = at.clone().setY(at.y - 0.25);
+  }
+
+  /** It appears (with a little bounce unless `instant`). */
+  show(instant = false) {
+    this.shown = true;
+    this.group.visible = !this.taken;
+    this.popT = instant ? -1 : 0;
+    this.mesh.scale.setScalar(instant ? 1 : 0.001);
+  }
+
+  take() {
+    this.taken = true;
+    this.group.visible = false;
+  }
+
+  update(dt: number) {
+    if (this.popT < 0) return;
+    this.popT += dt;
+    const e = Math.min(1, this.popT / 0.6);
+    this.mesh.scale.setScalar(Math.max(0.001, 1 - Math.pow(1 - e, 3) * Math.cos(e * 7)));
+    this.mesh.rotation.z = (1 - e) * 1.2 * Math.sin(this.popT * 14);
+    if (e >= 1) { this.popT = -1; this.mesh.scale.setScalar(1); this.mesh.rotation.z = 0; }
   }
 }
 

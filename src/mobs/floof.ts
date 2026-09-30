@@ -427,7 +427,7 @@ export class Floof implements Species {
     d.look.x += (lx - d.look.x) * e(10);
     d.look.y += (ly - d.look.y) * e(10);
     d.eye.set(d.look.x, d.look.y, lids, 0);
-    d.saddle.visible = m.state === 'tamed';
+    d.saddle.visible = m.stabled;
     d.root.updateMatrixWorld(true);
   }
 

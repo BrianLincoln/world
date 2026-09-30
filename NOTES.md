@@ -1538,3 +1538,87 @@ asked for as far as possible). Everything below is a first pass for review.
 - `scripts/pat.mjs <dir> [seed] [warmth] [camYaw]` presses E next to an
   idle spirit and steps through the pat frame by frame.
 
+
+## Phase 3: the stable (2026-09-30)
+- Owner ask: after the house and the first two towers, the spirit has you
+  build a stable with a big fenced pasture by the cabin (room for about 20
+  creatures). The lasso stops being there from the start: the spirit gives
+  it to you when the stable's done. A lassoed creature can be led but not
+  ridden until you bring it home to the pasture. After that it's saddled,
+  rideable, and always comes back there.
+- **Where (worldgen):** `findPasture` in `storySite.ts` puts a 34 × 24 m
+  rectangle 42-64 m from the cabin, all the way round, with its gate side
+  (+z) turned to the cabin. It has to be dry, thinly wooded, and clear of
+  the brook, the grove, the boulders, every story path, the start clearing
+  and the far light's sightline. The ground must lie within 2.2 m of a
+  least-squares plane that tilts at most 1 in 20. `WorldGen.height` eases the
+  ground onto that plane (full weight 2 m out from the fence, blended out
+  over 10 m), so the fence and stable sit on exactly the plane's heights.
+  `storyBlock` keeps trees, bushes and rocks out of it (and tufts out from
+  under the stable). The journey's A* route avoids it. A worn path runs from
+  the yard to the gate.
+  - The strict story-site pass now needs a pasture, which **moves the cabin
+    on seeds that had no room** (about half of 15 tested; `hilda` keeps its
+    cabin, so the owner's save survives). The owner okayed this. Site search
+    got ~50% slower (~0.5 s). The pasture search runs before the expensive
+    far-light search and is re-run only if it blocks the view.
+- **The build (`stable.ts`, `stableGeometry.ts`):** four parts on the shared
+  part mechanics that were pulled out of the cabin (`build.ts`: sketch,
+  slots, the snap-in pop; the cabin uses them too now). Footing is 6 stones
+  (a stone sill, post pads and the trough). The frame is 8 logs (posts,
+  plates, board walls, three stalls, hay racks, straw, the tally board). The
+  roof is 4 logs (deck, a thick turf with rounded edges, crossed bargeboards
+  and a few flowers). The fence is 8 logs (split rails with trunk posts, a
+  swinging gate). That's 20 logs and 6 stones. Walls use the brown board kind
+  (not the red cabin paint, which stays the one accent). The fence rises out
+  of the ground as it pops in (a stand-in pivot carries the pop, and only
+  the fence's y scale follows it), because scaling a 34 m fence about its
+  centre slid it sideways. Marker stakes with ribbons and a string show the
+  pasture from the start of the phase until the fence replaces them.
+  - Turf tufts made little "v" outlines that read as birds on the roof, so
+    they came out.
+- **Steps (`phase3.ts`):** plot (a `meet` that leads, with the stable in its
+  bubble), stones3, footing, logs3, raise, logs4, fence, lasso (a `pickup`,
+  item `lasso`), herd (the new `herd` kind: done when N creatures live
+  there), then ranch (rest). The director now runs a list of phase tables
+  (`Story.phases`, `phaseIndex`). Parts belong to the cabin or the stable
+  (`owner(id)`). Phase 3 never touches the clock (`startHour: null`).
+  The journey starts it (`startStable`) the first time you're home (within
+  35 m of the cabin, on the ground) after phase 2's `done`. Once phase 1
+  was over, gather hints fall back to the nearest world tree or rock round
+  where the spirit waits, because the grove is long gone by then.
+- **The lasso gift:** like the bike's. Once you're outside by the gate, the
+  camera takes a three-quarter view of the spirit and the gatepost. A spark
+  swells over its head, arcs to the post and bursts, and the coiled lasso
+  bounces in there. Take it (the hand badge). `Mobs.rules.lasso` follows
+  `story.hasLasso`, so before that there's no aim and no throw, only
+  spooking. The sandbox keeps the lasso from the start.
+- **Creatures (`herd.ts`):** `Mob.stabled` is the new flag. Saddles show
+  only on stabled creatures, and `mountable` only offers stabled ones. In
+  the story (`rules.stable`) a tamed creature is just on a rope. When it's
+  inside the fence (0.5 m in) it's welcomed: it hops, hearts float up, the
+  spirit celebrates, the saddle appears and the tally gets a mark. At most
+  20 (`TALLY`); past that nothing more is welcomed. Creatures that live
+  there pick a new spot every 14-44 s, sometimes a stall (more often after
+  dark), and are held inside the fence (`keepIn`). The fence doesn't block
+  creatures. Only the player collides with it, so a led stelk never snags
+  on the gatepost. Left anywhere else, one stays put until you're within
+  160 m of the pasture. Then, the first moment it's off screen or over 90 m
+  away, it's back in the pasture. Tamed ones you never brought home go wild
+  again once you're 500 m from them. The roster (species, tint) is saved as
+  `fjellheim.herd.<seed>` and adopted back into the pasture on load.
+- **Tally board:** on the stable's gate-side gable at eye height. There are
+  20 carved grooves (four fives, the fifth struck across) and a cream mark
+  is painted over each one per resident (a draw range over the painted
+  marks). The first place for it was over the middle stall, where the deep
+  eave hid it.
+- **The spirit** routes through the gate in and out of the fenced pasture,
+  and round its corners otherwise (`around`, now shared with the cabin).
+- Dev: `?stable=<step>` / `__ow.stableJump(step)` (also in the panel's
+  journey list), `__ow.bringHome(species, n)`, `__ow.spawnAt`.
+  `scripts/stable.mjs <dir> [shots]` frames each step.
+  `scripts/stablerun.mjs <dir>` plays phase 3 with real keys and checks the
+  save after a reload.
+- Next: a way to let a creature go (or trade one out when you're full),
+  creatures coming to the gate to greet you, a lantern on the stable at
+  night, and feel passes on the pasture size and the build zones.

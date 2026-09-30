@@ -5,8 +5,8 @@ import { U } from '../gfx/materials';
 import { SmokeColumn } from './smoke';
 import { siteLocal, siteToLocal, type StorySite } from '../world/storySite';
 import { buildRuin, CAB, roofSag, type CabinParts } from './geometry';
-import { bubbleCanvas, slotCanvas, tex, type IconName } from './icons';
-import { Billboard, Sketch } from './overlay';
+import { fillPart, makePart, setPartBuilt, setPartFilled, tickPart, type Buildable, type CabinPartId, type Part, type PartId } from './build';
+import { bubbleCanvas, tex, type IconName } from './icons';
 import { glintMat, propMesh } from './props';
 
 // The broken start cabin. Each repairable part goes broken -> sketched (a
@@ -15,39 +15,17 @@ import { glintMat, propMesh } from './props';
 // A dollhouse cutaway hides the roof and the walls between camera and
 // explorer when you're inside. Colliders keep you out of the walls.
 
-export type PartId = 'roof' | 'door' | 'chimney';
-export type PartState = 'broken' | 'sketch' | 'built';
+export type { PartId } from './build';
 
-interface Part {
-  id: PartId;
-  icon: IconName;
-  need: number;
-  filled: number;
-  state: PartState;
-  /** The repaired piece (hidden until built), under a pivot for the pop. */
-  pivot: THREE.Group;
-  /** What the repair replaces (fallen boards, the hanging door, rubble). */
-  broken: THREE.Object3D[];
-  sketch: Sketch;
-  slots: Billboard[];
-  slotPop: number[];
-  /** Local anchor for the slot row. */
-  slotAt: THREE.Vector3;
-  popT: number;
-  sketchA: number;
-  /** World centre (for effects and flying icons). */
-  centre: THREE.Vector3;
-}
+const PART_ICON: Record<CabinPartId, IconName> = { roof: 'log', door: 'log', chimney: 'stone' };
 
-const PART_ICON: Record<PartId, IconName> = { roof: 'log', door: 'log', chimney: 'stone' };
-
-export class RuinCabin {
+export class RuinCabin implements Buildable {
   readonly root = new THREE.Group();
   /** Overlay-scene objects (sketches, slots). */
   readonly overlay = new THREE.Group();
   readonly mat = glintMat({ toneVar: 0 });
   readonly hearthMat = glintMat({ toneVar: 0 });
-  readonly parts: Record<PartId, Part>;
+  readonly parts: Record<CabinPartId, Part>;
   private sides: Record<'front' | 'back' | 'left' | 'right' | 'roof' | 'chimney', THREE.Object3D[]>;
   private doorPivot = new THREE.Group();
   private doorOpen = 0;
@@ -104,35 +82,18 @@ export class RuinCabin {
     this.doorPivot.position.set(dr.x0 + 0.01, dr.y0 + 0.01, CAB.D / 2 - 0.03);
     add(g.door, this.doorPivot);
 
-    const mkPart = (id: PartId, need: number, solid: THREE.BufferGeometry, sketchGeo: THREE.BufferGeometry, centre: THREE.Vector3, slotAt: THREE.Vector3, broken: THREE.Object3D[], pivot?: THREE.Group, fillGeo = solid): Part => {
+    const mkPart = (id: CabinPartId, need: number, solid: THREE.BufferGeometry, sketchGeo: THREE.BufferGeometry, centre: THREE.Vector3, slotAt: THREE.Vector3, broken: THREE.Object3D[], pivot?: THREE.Group, fillGeo = solid): Part => {
       const pv = pivot ?? new THREE.Group();
       if (!pivot) {
         pv.position.copy(centre);
         const m = add(solid, pv);
         m.position.copy(centre).negate();
-        this.root.add(pv);
-      } else this.root.add(pv);
-      pv.visible = false;
-      const sk = new Sketch(fillGeo, sketchGeo, { threshold: 20 });
-      // Sketches live in the overlay scene; give them the cabin's transform.
-      const holder = new THREE.Group();
-      holder.matrixAutoUpdate = false;
-      if (pivot) {
-        holder.matrix.copy(this.root.matrixWorld).multiply(new THREE.Matrix4().makeTranslation(pv.position.x, pv.position.y, pv.position.z));
-      } else holder.matrix.copy(this.root.matrixWorld);
-      holder.add(sk.group);
-      this.overlay.add(holder);
-      const slots: Billboard[] = [];
-      for (let i = 0; i < need; i++) {
-        const b = new Billboard(tex(slotCanvas(PART_ICON[id], false)), 0.62, 36);
-        b.alpha = 0;
-        slots.push(b);
-        this.overlay.add(b.mesh);
       }
-      return {
-        id, icon: PART_ICON[id], need, filled: 0, state: 'broken', pivot: pv, broken, sketch: sk, slots, slotPop: slots.map(() => 0), slotAt,
-        popT: -1, sketchA: 0, centre: this.toWorld(centre.clone()),
-      };
+      this.root.add(pv);
+      // Sketches live in the overlay scene; give them the cabin's transform.
+      const mat = this.root.matrixWorld.clone();
+      if (pivot) mat.multiply(new THREE.Matrix4().makeTranslation(pv.position.x, pv.position.y, pv.position.z));
+      return makePart(id, PART_ICON[id], need, pv, broken, fillGeo, sketchGeo, mat, this.overlay, slotAt, this.toWorld(centre.clone()));
     };
 
     const doorCentre = new THREE.Vector3((dr.x0 + dr.x1) / 2, (dr.y0 + dr.y1) / 2, CAB.D / 2);
@@ -194,44 +155,31 @@ export class RuinCabin {
 
   /** Show a part's sketch and slots (it becomes a build target). */
   showSketch(id: PartId) {
-    const p = this.parts[id];
+    const p = this.parts[id as CabinPartId];
     if (p.state === 'broken') p.state = 'sketch';
   }
 
   /** Fill one slot; returns true when the part completes. */
   fill(id: PartId): boolean {
-    const p = this.parts[id];
-    if (p.state !== 'sketch' || p.filled >= p.need) return false;
-    p.slotPop[p.filled] = 1;
-    p.slots[p.filled].texture = tex(slotCanvas(p.icon, true));
-    p.filled++;
-    if (p.filled >= p.need) {
-      p.popT = 0;
-      return true;
-    }
-    return false;
+    return fillPart(this.parts[id as CabinPartId]);
   }
 
   /** Jump a part straight to built (restoring a save). */
   setBuilt(id: PartId) {
-    const p = this.parts[id];
-    p.filled = p.need;
-    p.state = 'built';
-    p.pivot.visible = true;
-    p.pivot.scale.setScalar(1);
-    for (const o of p.broken) o.visible = false;
-    p.sketch.set(0);
-    for (const s of p.slots) s.alpha = 0;
+    setPartBuilt(this.parts[id as CabinPartId]);
     if (id === 'door') this.doorOpen = this.doorTarget = 1;
     this.mat.uniforms.uWear.value = Object.values(this.parts).filter((q) => q.state !== 'built').length / 3;
   }
 
   setFilled(id: PartId, n: number) {
-    const p = this.parts[id];
-    for (let i = 0; i < n && p.filled < p.need - 1; i++) {
-      p.slots[p.filled].texture = tex(slotCanvas(p.icon, true));
-      p.filled++;
-    }
+    setPartFilled(this.parts[id as CabinPartId], n);
+  }
+
+  /** Close to the wall that carries one of these parts (the yard counts too, see the build step's zone). */
+  near(parts: PartId[], pos: THREE.Vector3) {
+    const l = siteToLocal(this.site, pos.x, pos.z);
+    if (parts.includes('chimney')) return l.x > CAB.W / 2 - 0.2 && l.x < CAB.W / 2 + 4 && Math.abs(l.z) < CAB.D / 2 + 2.5;
+    return l.z > CAB.D / 2 - 0.2 && l.z < CAB.D / 2 + 5 && Math.abs(l.x) < CAB.W / 2 + 2;
   }
 
   light(instant = false) {
@@ -244,7 +192,7 @@ export class RuinCabin {
   }
 
   remaining(id: PartId) {
-    const p = this.parts[id];
+    const p = this.parts[id as CabinPartId];
     return p.state === 'built' ? 0 : p.need - p.filled;
   }
 
@@ -265,36 +213,8 @@ export class RuinCabin {
     const e = (k: number) => 1 - Math.exp(-k * dt);
     // Parts: sketch fade, slot pops, build pop.
     for (const p of Object.values(this.parts)) {
-      const want = p.state === 'sketch' ? 1 : 0;
-      p.sketchA += (want - p.sketchA) * e(p.state === 'built' ? 7 : 3);
-      p.sketch.set(p.sketchA);
-      const tmp = new THREE.Vector3();
-      for (let i = 0; i < p.need; i++) {
-        const s = p.slots[i];
-        this.slotPos(p, i, s.pos);
-        s.pos.y += Math.sin(this.t * 2 + i * 0.7) * 0.04;
-        p.slotPop[i] = Math.max(0, p.slotPop[i] - dt * 3);
-        s.scale = 1 + Math.sin(p.slotPop[i] * Math.PI) * 0.45;
-        s.alpha = p.sketchA;
-        void tmp;
-      }
-      if (p.popT >= 0) {
-        p.popT += dt;
-        if (p.popT > 0.18 && p.state === 'sketch') {
-          // Snap: the solid piece appears with a squash-and-settle pop.
-          p.state = 'built';
-          p.pivot.visible = true;
-          for (const o of p.broken) o.visible = false;
-          this.burst(p);
-        }
-        if (p.state === 'built') {
-          const t = p.popT - 0.18;
-          const s = t < 0.12 ? 0.82 + (t / 0.12) * 0.3 : 1 + 0.12 * Math.exp(-t * 7) * Math.cos(t * 22);
-          p.pivot.scale.setScalar(s);
-          if (p.id === 'door' && t > 1.3) this.doorTarget = 1;
-          if (t > 2) { p.pivot.scale.setScalar(1); p.popT = -1; }
-        }
-      }
+      if (tickPart(p, dt, this.t, (i, out) => this.slotPos(p, i, out))) this.burst(p);
+      if (p.id === 'door' && p.state === 'built' && (p.popT < 0 || p.popT > 1.48)) this.doorTarget = 1;
     }
     // Each repair takes a third of the neglect off the paint and the moss.
     const wear = Object.values(this.parts).filter((p) => p.state !== 'built').length / 3;

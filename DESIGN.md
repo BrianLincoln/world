@@ -118,6 +118,27 @@ These apply to everything.
 - There's no starter bike. The bike is the home spirit's gift (Phase 2), and
   from then on it always reappears outside the home cabin.
 
+### The stable and creatures
+- The stable is small: an open-fronted timber shed with three stalls and a
+  turf roof. It stands across one end of a big fenced pasture (about
+  34 × 24 m) on flat open ground by the cabin, with a gate on the cabin
+  side. Every start area has room for one (worldgen guarantees it).
+- Building it takes about 20 logs and 6 stones: a stone footing and trough,
+  the frame, the roof, then the fence.
+- There's no lasso at the start. The spirit gives it to you when the stable
+  is done, pulling it out of its heart like the bike. Before that, creatures
+  are only ambient life (you can spook them).
+- A lassoed creature can be led on its rope but not ridden. Lead it into
+  the pasture and it lives there: it gets a saddle, can be ridden and led,
+  and wanders the pasture and the stalls.
+- Wherever you leave it, it comes home: the next time you're near the
+  stable and it's out of sight, it's back in the pasture. It never
+  disappears in front of you.
+- Up to 20 creatures, any kind (crows too: they could fly off but choose to
+  stay). A tally board on the stable wall shows how many live there: 20
+  carved notches, one painted per creature. Upgrades to hold more come
+  later.
+
 ## Player Sequence
 
 The objective sequence is built as data, like phase 1.
@@ -145,6 +166,18 @@ The objective sequence is built as data, like phase 1.
    you along a visible path to that tower. You light it the same way. Now you
    can travel home by ember flight.
 
+**Phase 3: the stable** (built, first pass)
+1. The first time you come home after lighting the second tower, the spirit
+   greets you and leads you to the pasture ground, where marker stakes show
+   where it will go.
+2. Break rocks for stones and build the footing and trough.
+3. Fell trees for logs and raise the frame and the turf roof.
+4. More logs, and build the fence and gate.
+5. The spirit pulls a lasso out of its heart and hangs it on the gatepost.
+   Take it.
+6. Lasso a creature and lead it in through the gate. It's home: saddled,
+   rideable, and it always comes back here.
+
 ## Open Questions
 
 - How do towers get lit in the long term? A resource, or a challenge, later.
@@ -155,6 +188,8 @@ The objective sequence is built as data, like phase 1.
   glow, and a small house carved over the brow that glows when lit. To be
   refined.
 - How far should the home tower be from the cabin? Needs a feel pass.
+- What happens when the stable is full (20)? Letting one go, trading, or
+  upgrades to hold more?
 
 ## Parking Lot
 
