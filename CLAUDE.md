@@ -4,9 +4,9 @@ A procedurally generated, browser-playable Nordic sandbox in the flat-shaded
 storybook style of *Hilda*. **Visual quality is the top priority, above feature
 count.** Keep this file lean. Depth lives in:
 
-- `DESIGN.md`: the owner's design doc (pillars, decisions, player sequence).
-  It is theirs, not a log. Never build anything from its Parking Lot unless
-  asked.
+- `DESIGN.md`: our shared design doc (pillars, decisions, player sequence).
+  Keep it current when a design decision changes; it's not a build log.
+  Never build anything from its Parking Lot unless asked.
 - `docs/BRIEF.md`: the original request, verbatim, plus how to read `/inspo`.
   Read it before any visual change.
 - `NOTES.md`: stack reasoning, architecture, every major decision, known

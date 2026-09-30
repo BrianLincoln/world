@@ -1,6 +1,6 @@
 # Fjellheim — notes
 
-> Decision log. The original brief is in `docs/BRIEF.md`; the working loop and gotchas are in `docs/WORKFLOW.md`; agent entry point is `CLAUDE.md`. The owner's design (pillars, decided features, player sequence, open questions, parking lot) is `DESIGN.md`.
+> Decision log. The original brief is in `docs/BRIEF.md`; the working loop and gotchas are in `docs/WORKFLOW.md`; agent entry point is `CLAUDE.md`. The shared design doc (pillars, decided features, player sequence, open questions, parking lot) is `DESIGN.md`.
 
 A browser-playable, procedurally generated Nordic sandbox in the flat-shaded
 storybook style of the `/inspo` references (Hilda backgrounds). No goals; the
@@ -900,7 +900,7 @@ Supersedes the hammer notes in the feel pass above.
   went from 17.5 s to 7 s including the walk.
 
 ## Phase 2, stage 1: beacon tower placement and the sight network (2026-09-29)
-The design is in `DESIGN.md` (the owner's doc); this is the how and why.
+The design is in `DESIGN.md` (our shared doc); this is the how and why.
 - **Phase 1 no longer ends at night.** The hearth step has no `easeTo` and
   `readyAt: 0`: you light it whenever the chimney is done (the clock drifts
   to ~16:00 by then). The rest step has no `easeTo` and `doneAt: 0`, so the
@@ -1357,3 +1357,28 @@ asked for as far as possible). Everything below is a first pass for review.
   journey's done). The ground shadow waits until a conjured bike has grown.
 - `scripts/gift.mjs`: the gift moment frame by frame, with bike counts
   near the cabin before and after.
+
+## Towers: no capstone, four builds (2026-09-29)
+- **The capstone brim is gone.** It was there as a standable ledge for the
+  old lift (you were set down on it) and for the spirit to climb over its
+  lip. Both are gone (the spirit's arms go straight to the eyehole, you ride
+  up inside), so it was just a hat. The head now sits right on the top
+  stone, set back only when that stone is wider than it. `Tower.slab` is
+  kept as "the top stone" (the arm clearing and `towerland.mjs` still use
+  it).
+- **Four builds** in `layout()` (`towers.ts`), picked per tower: cairn
+  (44%, 2-3 shrinking stones; the nominal `rnd = 0.5` tower), pillar (18%,
+  3-4 tall narrow stones, slightly smaller head), top-heavy (18%, a small
+  neck stone with a big one balanced on it, sometimes a small one under the
+  head) and squat (20%, 1-2 wide chunky stones under a 16% bigger head).
+  Squat stones started at 0.55-0.7 height/radius and read as the brim
+  again, so they're 0.7-0.82.
+- **Stacking is contact-based now**: each stone's flat bottom sits at 0.92
+  of the height of the one below (`below.cy + below.sy * 0.92 + sy * 0.5`).
+  The old "+0.7 below, +0.85 above" spacing left a big gap under a large
+  stone on a small one.
+- The perched stone on the capstone became 0-2 small stones wedged in the
+  joins up the stack, poking out to the side (never across the face).
+- Heights now run ~25-47 m to the head (fjord seed). The network still
+  grows from the nominal flame height, and parent links are forced, so the
+  graph always connects. A squat tower may see fewer of its neighbours.

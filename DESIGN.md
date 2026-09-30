@@ -1,6 +1,6 @@
 # Fjellheim: design
 
-The design owner's document: what the game is and what has been decided.
+Our shared design doc: what the game is and what has been decided.
 The build log (how things were made, tradeoffs, perf) lives in `NOTES.md`.
 
 Nothing in the **Parking Lot** gets built unless it's asked for.
@@ -50,9 +50,11 @@ These apply to everything.
   glow (head to head). Terrain blocks the line and trees don't.
 
 ### Towers and their spirits
-- Towers are big (about 50 m). No two are the same shape: each has its own
-  number of boulders, proportions, lean and capstone. The base sits into the
-  ground.
+- Towers are big (about 25-50 m). No two are the same shape: each has its
+  own build (a tapering cairn, a tall slim pillar, a top-heavy stack with a
+  big boulder balanced on a small one, or a squat stack under a big head),
+  number of boulders, proportions and lean. The head sits right on the top
+  stone; there's no flat capstone under it. The base sits into the ground.
 - The tower spirit is a glowy little ghost: a rounded dome over a wavy hem,
   floating, with the towers' tall dark eyes, a smile, and long stretchy arms
   that hang down to the ground. It climbs the tower hand over hand, ledge by
@@ -122,7 +124,7 @@ The objective sequence is built as data, like phase 1.
 4. Light the hearth (afternoon; no jump to night). The spirit settles by the
    fire.
 
-**Phase 2: the gift and the first journey** (built, first pass: stages 0-5 are all in, waiting on the owner's review)
+**Phase 2: the gift and the first journey** (built, first pass: stages 0-5 are all in, waiting on a review pass)
 1. After the hearth is lit, the home spirit gives you a bike.
    From then on, the bike always reappears outside the home cabin.
 2. The spirit rides alongside on its own small bike and leads you along a

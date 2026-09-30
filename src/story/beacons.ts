@@ -23,7 +23,7 @@ import { TowerView, type ViewTower } from './towerView';
 // lock with the pick (hold to keep swinging) and the door stone gives way.
 // Out tumbles the tower's spirit, a little glowing body with long stretchy
 // arms. It has a happy moment with you, then flings its arms up to the
-// capstone and hauls itself up the outside into the head, which blazes on
+// eyehole and hauls itself up the outside into the head, which blazes on
 // from inside. That's lighting a tower. From then on, walk into its
 // doorway and the spirit slurps you up the inside of the tower: up top you
 // *are* the head, looking out through its eyes (the explorer isn't drawn),

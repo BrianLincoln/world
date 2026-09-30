@@ -44,7 +44,7 @@ export interface Tower {
   head: TowerBoulder;
   /** Overall size (1 = the first draft's tower). */
   scale: number;
-  /** The capstone under the head. */
+  /** The top stone of the stack, the one the head sits on. */
   slab: TowerBoulder;
   /** Radius of the base boulder. */
   foot: number;
@@ -135,17 +135,26 @@ function siteScore(f: Field, c: Cand): number {
 
 /** Every tower is this much bigger than the first draft (the owner asked for bigger). */
 export const TOWER_SCALE = 1.45;
-/** Head boulder radius and height, and how far it's set back on the capstone, per unit scale. */
-const HEAD_R = 3.9, HEAD_Y = 3.8, HEAD_BACK = 2.9;
+/** Head boulder radius and height, per unit scale. */
+const HEAD_R = 3.9, HEAD_Y = 3.8;
 /** The glow (where sight lines meet) is this far above the head's centre, in head heights. */
 const GLOW_OVER = 0.2;
 
 /**
  * The stack's shape, from the ground up: a wide base half buried in the
  * hill; the big door boulder on it (you walk into its doorway once the lock
- * is off); 0-2 middles; a capstone; then the head. Every tower rolls its own
- * proportions. `rnd` = 0.5 always gives the nominal tower. Heights are
- * centre heights above the lowest ground under the base.
+ * is off); then the stones up to the head, in one of four builds:
+ *
+ * - cairn: two or three stones, each smaller than the last;
+ * - pillar: three or four tall, narrow stones of about one size;
+ * - top-heavy: a small neck stone with a big round one balanced on it
+ *   (and sometimes another small one under the head);
+ * - squat: one or two wide, flattish stones under a big head.
+ *
+ * The head sits right on the top stone. (There used to be a wide flat
+ * capstone under it, a ledge you were lifted onto; nothing stands up there
+ * any more.) `rnd` = 0.5 always gives the nominal tower, a two-stone cairn.
+ * Heights are centre heights above the lowest ground under the base.
  */
 function layout(scale: number, rnd: () => number) {
   const out: { r: number; sy: number; cy: number }[] = [];
@@ -157,29 +166,58 @@ function layout(scale: number, rnd: () => number) {
   const doorR = (8.6 + rnd() * 1.4) * scale;
   const doorSy = doorR * (0.8 + rnd() * 0.12);
   // The door boulder stands on the ground (its flattened bottom is at -0.55).
-  let cy = doorSy * 0.53;
-  out.push({ r: doorR, sy: doorSy, cy });
-  cy += doorSy * 0.72;
-  const mids = Math.floor(rnd() * 2.999);
-  const shrink = 0.66 + rnd() * 0.16;
-  let r = doorR;
-  for (let k = 0; k < mids; k++) {
-    r *= shrink;
-    const sy = r * (0.8 + rnd() * 0.25);
-    cy += sy * 0.85;
-    out.push({ r, sy, cy });
-    cy += sy * 0.7;
+  out.push({ r: doorR, sy: doorSy, cy: doorSy * 0.53 });
+  // The stones above it, as radius and height.
+  const build = rnd();
+  const stones: { r: number; sy: number }[] = [];
+  let hs = 0.92 + rnd() * 0.16;
+  if (build < 0.18) {
+    // Pillar.
+    const n = 3 + (rnd() < 0.5 ? 1 : 0);
+    let r = doorR * (0.52 + rnd() * 0.1);
+    for (let k = 0; k < n; k++) {
+      stones.push({ r: r * (0.9 + rnd() * 0.2), sy: r * (1.05 + rnd() * 0.25) });
+      r *= 0.94;
+    }
+    hs *= 0.94;
+  } else if (build < 0.36) {
+    // Top-heavy.
+    const neck = doorR * (0.4 + rnd() * 0.1);
+    stones.push({ r: neck, sy: neck * (0.85 + rnd() * 0.2) });
+    const big = doorR * (0.74 + rnd() * 0.14);
+    stones.push({ r: big, sy: big * (0.78 + rnd() * 0.16) });
+    if (rnd() < 0.5) {
+      const r = doorR * (0.38 + rnd() * 0.08);
+      stones.push({ r, sy: r * (0.75 + rnd() * 0.2) });
+    }
+  } else if (build < 0.8) {
+    // Cairn.
+    const n = 2 + (rnd() < 0.35 ? 1 : 0);
+    const shrink = 0.68 + rnd() * 0.12;
+    let r = doorR;
+    for (let k = 0; k < n; k++) {
+      r *= shrink;
+      stones.push({ r, sy: r * (0.8 + rnd() * 0.25) });
+    }
+  } else {
+    // Squat.
+    const n = 1 + (rnd() < 0.5 ? 1 : 0);
+    let r = doorR * (0.7 + rnd() * 0.1);
+    for (let k = 0; k < n; k++) {
+      stones.push({ r, sy: r * (0.7 + rnd() * 0.12) });
+      r *= 0.8;
+    }
+    hs *= 1.16;
   }
-  // The capstone: from a wide thin brim to a chunky block.
-  const chunky = rnd();
-  const capR = (5.2 + (1 - chunky) * 3.4 + rnd() * 0.8) * scale;
-  const capSy = capR * (0.26 + chunky * 0.24);
-  cy += capSy * 0.85;
-  out.push({ r: capR, sy: capSy, cy });
-  const slab = out[out.length - 1];
-  const hs = 0.92 + rnd() * 0.16;
+  // Each stone's flat bottom (at -0.55) rests just into the dome of the one
+  // below (whose top is at about +0.92), whatever their sizes.
+  for (const st of stones) {
+    const below = out[out.length - 1];
+    out.push({ r: st.r, sy: st.sy, cy: below.cy + below.sy * 0.92 + st.sy * 0.5 });
+  }
+  const top = out[out.length - 1];
   const hy = HEAD_Y * scale * hs;
-  const headY = slab.cy + slab.sy * 0.72 + hy * 0.58;
+  const headY = top.cy + top.sy * 0.72 + hy * 0.58;
   return { out, headY, hr: HEAD_R * scale * hs, hy, flameY: headY + hy * GLOW_OVER };
 }
 
@@ -271,19 +309,28 @@ function stack(seed: number, id: number, x: number, z: number, y: number, yaw: n
       boulders.push({ x: bx, y: f.base(bx, bz) + sy * 0.3, z: bz, sx: r, sy, rot: rnd() * Math.PI });
     }
   }
-  // The head sits toward the back of the capstone.
+  // The head sits on the top stone, toward its back when the stone is
+  // wider than it.
   const slabI = L.out.length - 1;
   const slab = boulders[slabI];
-  const back = HEAD_BACK * scale * 0.5;
+  const back = Math.max(0, slab.sx - L.hr) * 0.3;
   const head: TowerBoulder = { x: slab.x - fx * back, y: ground + L.headY, z: slab.z - fz * back, sx: L.hr, sy: L.hy, rot: yaw };
   const flame = { x: head.x, y: ground + L.flameY, z: head.z };
-  // Now and then a small stone perched on the capstone beside the head.
-  if (rnd() < 0.4) {
-    const side = rnd() < 0.5 ? -1 : 1;
-    const rx = fz * side, rz = -fx * side;
-    const r = (1.1 + rnd() * 0.7) * scale;
-    const bx = slab.x + rx * slab.sx * 0.62 - fx * slab.sx * 0.2, bz = slab.z + rz * slab.sx * 0.62 - fz * slab.sx * 0.2;
-    boulders.push({ x: bx, y: slab.y + slab.sy * 0.75 + r * 0.35, z: bz, sx: r, sy: r * 0.7, rot: rnd() * Math.PI });
+  // Now and then a small stone or two wedged in a join up the stack, poking
+  // out to one side (never across the face).
+  if (rnd() < 0.5) {
+    const n = 1 + (rnd() < 0.35 ? 1 : 0);
+    for (let k = 0; k < n; k++) {
+      const i = 1 + Math.floor(rnd() * (slabI - 1) * 0.999);
+      const lo = boulders[i], hi = boulders[i + 1];
+      let a = rnd() * Math.PI * 2;
+      if (Math.cos(a - (Math.PI / 2 - yaw)) > 0.3) a += Math.PI;
+      const w = Math.min(lo.sx, hi.sx);
+      const r = w * (0.22 + rnd() * 0.12);
+      const d = w * (0.85 + rnd() * 0.15);
+      const mx = (lo.x + hi.x) / 2, mz = (lo.z + hi.z) / 2;
+      boulders.push({ x: mx + Math.cos(a) * d, y: lo.y + lo.sy * 0.72 + r * 0.15, z: mz + Math.sin(a) * d, sx: r, sy: r * (0.6 + rnd() * 0.2), rot: rnd() * Math.PI });
+    }
   }
   // A few loose boulders round the foot, like rubble that rolled off
   // (kept clear of the doorway).
