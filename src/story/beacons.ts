@@ -1000,8 +1000,9 @@ export class Beacons {
     // further out until no part of the body would touch rock anywhere on it.
     let path: ClimbPlan['path'] = [foot, foot, mouth, mouth];
     for (let push = 5, tries = 0; tries < 10; tries++, push += 3) {
-      const c1 = foot.clone().addScaledVector(fwd, Math.max(0, out - along(foot)) + push).addScaledVector(up, (eye.y - foot.y) * 0.4);
-      const c2 = mouth.clone().addScaledVector(fwd, Math.max(0, out - along(mouth)) * 0.8 + push).addScaledVector(up, 3);
+      // Swinging out across the face as well (away from the camera's side), so the arc reads.
+      const c1 = foot.clone().addScaledVector(fwd, Math.max(0, out - along(foot)) + push).addScaledVector(up, (eye.y - foot.y) * 0.4).addScaledVector(right, -Math.sign(lat) * 7);
+      const c2 = mouth.clone().addScaledVector(fwd, Math.max(0, out - along(mouth)) * 0.8 + push).addScaledVector(up, 3).addScaledVector(right, -Math.sign(lat) * 4);
       path = [foot, c1, c2, mouth];
       let hit = false;
       const p = new THREE.Vector3();
@@ -1200,6 +1201,7 @@ export class Beacons {
       for (let i = 0; i < 60 && (this.solidAt(p) || this.solidAt(tmp.copy(p).addScaledVector(o, -0.35))); i++) p.addScaledVector(o, 0.2);
     };
     const along = (p: THREE.Vector3) => (p.x - t.x) * fwd.x + (p.z - t.z) * fwd.z;
+    const rightV = new THREE.Vector3(fwd.z, 0, -fwd.x);
     for (let k = 0; k < 2; k++) {
       const side = k === 0 ? -1 : 1;
       const sh = sp.shoulder(side, new THREE.Vector3());
@@ -1211,9 +1213,11 @@ export class Beacons {
         // Up to the eyehole: a big arc out in front of the stack and back in.
         // It bows less as it's pulled up (the arm is shorter by then).
         const g = P.grips[k];
-        const bow = 4 + 3 * (1 - pull);
-        const a1 = sh.clone().addScaledVector(fwd, Math.max(0, P.out - along(sh)) * (1 - pull) + bow).addScaledVector(up, (g.y - sh.y) * 0.45);
-        const a2 = g.clone().addScaledVector(fwd, Math.max(0, P.out - along(g)) * 0.6 * (1 - pull) + bow * 0.7).addScaledVector(up, 2.5 * (1 - pull));
+        const bow = 1 + 6 * (1 - pull);
+        // Out and round across the face (away from the camera's side), then in to the eye.
+        const swing = (-Math.sign(P.lat) * 10 + side * 2) * (1 - pull);
+        const a1 = sh.clone().addScaledVector(fwd, Math.max(0, P.out - along(sh)) * (1 - pull) + bow).addScaledVector(up, (g.y - sh.y) * 0.45).addScaledVector(rightV, swing);
+        const a2 = g.clone().addScaledVector(fwd, Math.max(0, P.out - along(g)) * 0.6 * (1 - pull) + bow * 0.7).addScaledVector(up, 2.5 * (1 - pull)).addScaledVector(rightV, swing * 0.6);
         if (dive > 0) {
           // Slipping in: the arms draw straight back in after it.
           const end = g.clone().lerp(sh, dive);

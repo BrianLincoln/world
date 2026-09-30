@@ -1309,7 +1309,9 @@ asked for as far as possible). Everything below is a first pass for review.
 - **The climb, again** (owner: "arms should arch out and around right up to
   the eyes and pull himself right in"). It now waits at the foot beside the
   doorway; both arms shoot up along big arcs out in front of the stack and
-  hook into the left eyehole's rims (1.2 s, drawn as the growing first part
+  swing out wide across the face (away from the camera's side, so the arc
+  reads on screen; out toward the camera it looked flat against the rock)
+  and hook into the left eyehole's rims (1.2 s, drawn as the growing first part
   of a cubic, any point near rock pushed out); a tug; then it's yanked up
   along an arc (2.2 s, slow start, snap, ease in), pushed out from the face
   until the whole body clears all rock (checked at 24 points × 9 body
