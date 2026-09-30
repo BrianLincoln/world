@@ -31,6 +31,8 @@ change goes through this loop:
   turntable via `__ow.inspect(i, yawRel, pitch, dist, species)`, which
   freezes brains and hides the explorer. Remember the orbit camera faces the
   explorer, so in scripted walks S moves *away* from the camera.
+- `scripts/pat.mjs <dir> [seed] [warmth] [camYaw]`: patting the home spirit,
+  stepped frame by frame (camYaw 1.7 = patting side, 3.3 = from behind).
 - `scripts/bike.mjs <dir> [parked,mount,ride,sprint,turn,hop,night,wild]`:
   bicycle shots. Scripted rides call `__ow.lockInput(yaw)`, because steering
   is camera-relative and re-aiming the camera for a side shot would turn the
@@ -41,7 +43,7 @@ change goes through this loop:
 - `ready()`, `stats()`, `setHour(h)`, `setPalette(name|null)`,
   `teleport(x,z)`, `view(yaw,pitch,dist)`, `setMode('walk'|'swim'|'fly', y?)`,
   `setSeed(s)`, `height(x,z)`, `gen()`.
-- `lookAtPoi(kind, dist, side?, hover?)` frames a `cabin|tor|circle|erratic`.
+- `lookAtPoi(kind, dist, side?, hover?)` frames a `cabin|circle|erratic|tower`.
 - `lookAtBike(dist, side, pitch)`, `mountBike()`, `dismountBike()`,
   `lockInput(yaw|null)` for bicycles.
 - `facePeak()` turns toward the tallest nearby ground.

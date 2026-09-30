@@ -107,37 +107,37 @@ const scen = {
     await K.press('Space'); await K.down('Space'); await W(1200); await K.up('Space'); await W(600); await shot('ride-crow-fly');
     await K.up('KeyA');
   },
-  /** An elk herd grazing, then startled into a gallop. */
-  async elk() {
+  /** A stelk herd grazing, then startled into a gallop. */
+  async stelk() {
     await go('seed=hilda&t=10');
-    await ev(() => window.__ow.spawnFlock('elk', 30, 4));
+    await ev(() => window.__ow.spawnFlock('stelk', 30, 4));
     const h = await heading();
-    await cam(h + Math.PI - 0.3, 0.05, 12); await W(2500); await shot('elk-herd');
+    await cam(h + Math.PI - 0.3, 0.05, 12); await W(2500); await shot('stelk-herd');
     // Close in on one of them, grazing.
-    await ev(() => { const o = window.__ow; const i = [...o.mobs.all()].findIndex((m) => m.species.name === 'elk'); o.inspect(i, 1.3, 0.08, 8, 'elk'); o.mobs.settings.freeze = false; });
-    await W(4000); await shot('elk-graze');
+    await ev(() => { const o = window.__ow; const i = [...o.mobs.all()].findIndex((m) => m.species.name === 'stelk'); o.inspect(i, 1.3, 0.08, 8, 'stelk'); o.mobs.settings.freeze = false; });
+    await W(4000); await shot('stelk-graze');
     await ev(() => { const o = window.__ow; o.mobs.settings.freeze = true; });
-    await cam(h + Math.PI + 1.2, 0.12, 16); await W(600); await shot('elk-herd-side');
+    await cam(h + Math.PI + 1.2, 0.12, 16); await W(600); await shot('stelk-herd-side');
     // Run at them (the camera faces the explorer, so S walks toward the herd).
     await K.down('ShiftLeft'); await K.down('KeyS'); await W(1600); await K.up('KeyS'); await K.up('ShiftLeft');
-    await cam(h + Math.PI + 0.4, 0.1, 18); await W(700); await shot('elk-flee'); await W(250); await shot('elk-flee2');
+    await cam(h + Math.PI + 0.4, 0.1, 18); await W(700); await shot('stelk-flee'); await W(250); await shot('stelk-flee2');
   },
-  /** Turntable of one tamed elk (saddled), and a wild one's face. */
-  async elkinspect() {
+  /** Turntable of one tamed stelk (saddled), and a wild one's face. */
+  async stelkinspect() {
     await go('seed=hilda&t=10');
-    await ev(() => window.__ow.spawnFlock('elk', 30, 1));
-    await ev(() => window.__ow.tameNearest('elk')); await W(3000);
+    await ev(() => window.__ow.spawnFlock('stelk', 30, 1));
+    await ev(() => window.__ow.tameNearest('stelk')); await W(3000);
     await ev(() => { for (const m of window.__ow.mobs.tamed) { m.leashed = false; m.species.reset(m); } });
     await W(1500);
     for (const [n, y, p, d] of [['front', 0.15, 0.05, 6.5], ['q', 0.8, 0.12, 7], ['side', 1.57, 0.05, 7.5], ['back', 2.6, 0.2, 7], ['face', 0.45, -0.25, 3.6]]) {
-      await ev(([a, b, dd]) => window.__ow.inspect(0, a, b, dd, 'elk'), [y, p, d]); await W(700); await shot(`elk-${n}`);
+      await ev(([a, b, dd]) => window.__ow.inspect(0, a, b, dd, 'stelk'), [y, p, d]); await W(700); await shot(`stelk-${n}`);
     }
   },
-  /** Ride an elk: idle, canter, full gallop, a leap, and a charge through the woods. */
-  async rideelk() {
+  /** Ride a stelk: idle, canter, full gallop, a leap, and a charge through the woods. */
+  async ridestelk() {
     await go('seed=hilda&t=10');
-    await ev(() => window.__ow.spawnFlock('elk', 12, 1));
-    await ev(() => window.__ow.tameNearest('elk')); await W(3500);
+    await ev(() => window.__ow.spawnFlock('stelk', 12, 1));
+    await ev(() => window.__ow.tameNearest('stelk')); await W(3500);
     await ev(() => window.__ow.mountNearest()); await W(600);
     // Point along the longest run of dry, open ground.
     const h = await ev(() => {
@@ -152,16 +152,16 @@ const scen = {
       return best;
     });
     await W(300);
-    await cam(h + Math.PI + 1.2, 0.08, 10); await W(500); await shot('ride-elk-idle');
+    await cam(h + Math.PI + 1.2, 0.08, 10); await W(500); await shot('ride-stelk-idle');
     await ev((y) => window.__ow.lockInput(y + Math.PI), h);
-    await K.down('KeyW'); await W(1500); await cam(h + Math.PI / 2, 0.1, 11); await W(300); await shot('ride-elk-canter');
-    await K.down('ShiftLeft'); await W(3000); await shot('ride-elk-gallop'); await W(160); await shot('ride-elk-gallop2');
-    await K.press('Space'); await W(280); await shot('ride-elk-leap');
+    await K.down('KeyW'); await W(1500); await cam(h + Math.PI / 2, 0.1, 11); await W(300); await shot('ride-stelk-canter');
+    await K.down('ShiftLeft'); await W(3000); await shot('ride-stelk-gallop'); await W(160); await shot('ride-stelk-gallop2');
+    await K.press('Space'); await W(280); await shot('ride-stelk-leap');
     await K.up('ShiftLeft'); await K.up('KeyW');
     await ev(() => window.__ow.lockInput(null));
   },
   /** Gallop into a forest: trees go down, logs fly into the pack. */
-  async elkcharge() {
+  async stelkcharge() {
     await go('seed=hilda&t=10&story=0');
     // Face the nearest thick woods.
     const aim = await ev(() => {
@@ -176,8 +176,8 @@ const scen = {
     });
     console.log('[mobs] forest bearing', aim);
     await ev((a) => { window.__ow.body.heading = a; }, aim ?? 0);
-    await ev(() => window.__ow.spawnFlock('elk', 6, 1));
-    await ev(() => window.__ow.tameNearest('elk')); await W(3000);
+    await ev(() => window.__ow.spawnFlock('stelk', 6, 1));
+    await ev(() => window.__ow.tameNearest('stelk')); await W(3000);
     await ev(() => window.__ow.mountNearest()); await W(400);
     await ev((a) => { const o = window.__ow; o.body.heading = a; o.lockInput(a + Math.PI); }, aim ?? 0);
     await K.down('KeyW'); await K.down('ShiftLeft');

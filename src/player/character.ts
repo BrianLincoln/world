@@ -377,6 +377,15 @@ export class CharacterRig {
     return this.elR.localToWorld(out.set(0, -0.27, 0.02));
   }
 
+  /**
+   * World point the left mitten pats (the spirit's head, bobbing with each
+   * pat): crouch, lean in and reach down to it. Null lets go.
+   */
+  patAt: THREE.Vector3 | null = null;
+  private patW = 0;
+  private patArm = [0, 0, 0];
+  private patLean = 0;
+
   /** Freeze idle head turns and blinks (for tuning the face). */
   holdStill = false;
 
@@ -1040,6 +1049,53 @@ export class CharacterRig {
       P.shLx = lerp(P.shLx, -1.25, w);
       P.elR = lerp(P.elR, -0.2, w);
       P.elL = lerp(P.elL, -0.2, w);
+    }
+
+    // Patting: a crouch and a lean in, head down, the left mitten on the
+    // pat point by two-bone IK (in the spine's frame, as on the bike).
+    this.patW += ((this.patAt && !seat ? 1 : 0) - this.patW) * e(this.patAt ? 7 : 5);
+    if (this.patW > 1e-3) {
+      const w = THREE.MathUtils.smoothstep(this.patW, 0, 1);
+      // Down on one knee: hips drop, feet stay planted (two-bone IK), the
+      // right foot forward and the left knee near the ground; the torso
+      // stays fairly upright so the big head doesn't bow into the spirit.
+      P.hipY = lerp(P.hipY, -0.33, w);
+      P.hipX = lerp(P.hipX, 0.12, w);
+      P.spX = lerp(P.spX, 0.1, w);
+      P.hdX = lerp(P.hdX, 0.28, w);
+      for (const side of [1, -1] as const) {
+        // Ankle targets in root space (x = side, z = forward).
+        const p = this.ik.set(side * HIP_X * 1.15, side === 1 ? 0.13 : 0.12, side === 1 ? -0.3 : 0.14);
+        unpitch(p.setY(p.y - HIP_Y + 0.33), 0.12).setX(p.x - side * HIP_X);
+        const [th, z, kn] = solveLimb(p, THIGH, SHIN, true);
+        // The back foot on its toes, the front one flat.
+        const an = (side === 1 ? 0.7 : 0) - (0.12 + th + kn);
+        if (side === 1) { P.thL = lerp(P.thL, th, w); P.thLz = lerp(P.thLz, z, w); P.knL = lerp(P.knL, kn, w); P.anL = lerp(P.anL, an, w); }
+        else { P.thR = lerp(P.thR, th, w); P.thRz = lerp(P.thRz, z, w); P.knR = lerp(P.knR, kn, w); P.anR = lerp(P.anR, an, w); }
+      }
+      if (this.patAt) {
+        this.root.updateMatrixWorld();
+        this.rootInv.copy(this.root.matrixWorld).invert();
+        // Lean further in until the pat point is within arm's length.
+        const toShoulder = (lean: number) => {
+          const p = this.ik.copy(this.patAt!).applyMatrix4(this.rootInv);
+          unpitch(p.setY(p.y - HIP_Y - P.hipY), P.hipX);
+          unpitch(p, P.spX + lean);
+          p.applyAxisAngle(THREE.Object3D.DEFAULT_UP, -P.spYaw);
+          p.x -= SHOULDER.x;
+          p.y -= SHOULDER.y;
+          return p;
+        };
+        let lean = 0;
+        while (lean < 0.35 && toShoulder(lean).length() > (UPPER_ARM + FOREARM) * 0.94) lean += 0.05;
+        this.patLean += (lean - this.patLean) * e(10);
+        const [sx, sz, el] = solveLimb(toShoulder(this.patLean), UPPER_ARM, FOREARM, false);
+        this.patArm[0] = sx; this.patArm[1] = sz; this.patArm[2] = el;
+      }
+      P.spX += this.patLean * w;
+      P.shLx = lerp(P.shLx, this.patArm[0], w);
+      P.shLz = lerp(P.shLz, this.patArm[1], w);
+      P.elL = lerp(P.elL, this.patArm[2], w);
     }
 
     // Apply.

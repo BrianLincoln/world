@@ -470,7 +470,7 @@ export class RideMode implements MovementMode {
 }
 
 /**
- * A ground-only mount (the elk): no sideways slip, the heading carves toward
+ * A ground-only mount (the stelk): no sideways slip, the heading carves toward
  * where you steer, tighter at a walk than at a full gallop, and the speed
  * builds over a couple of seconds. Space leaps; running off a ledge falls.
  * Deep water is swum, slowly, the body low in it. Sub-stepped collision so a

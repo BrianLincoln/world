@@ -14,7 +14,7 @@ import { TREE_HEIGHT } from '../gfx/geometry';
 // Bushes, tufts and flowers stay walk-through.
 
 const CELL = 64;
-/** Largest distance a collider reaches beyond its cell (erratics, tors). */
+/** Largest distance a collider reaches beyond its cell (erratics, towers). */
 const MARGIN = 10;
 /** How far above the feet a surface can be and still be stepped onto. */
 export const STEP = 0.5;

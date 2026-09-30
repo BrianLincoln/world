@@ -4,7 +4,7 @@ import { Puffs } from '../gfx/puffs';
 import { U } from '../gfx/materials';
 import { SmokeColumn } from './smoke';
 import { siteLocal, siteToLocal, type StorySite } from '../world/storySite';
-import { buildRuin, CAB, type CabinParts } from './geometry';
+import { buildRuin, CAB, roofSag, type CabinParts } from './geometry';
 import { bubbleCanvas, slotCanvas, tex, type IconName } from './icons';
 import { Billboard, Sketch } from './overlay';
 import { glintMat, propMesh } from './props';
@@ -89,6 +89,7 @@ export class RuinCabin {
     this.ash = add(g.coldAsh);
     const debris = add(g.debris);
     const rubble = add(g.rubble);
+    const wear = { front: add(g.wear.front), back: add(g.wear.back), left: add(g.wear.left), right: add(g.wear.right) };
 
     // Hanging door (broken): swung out and dropped off its lower hinge.
     const dr = CAB.door;
@@ -103,7 +104,7 @@ export class RuinCabin {
     this.doorPivot.position.set(dr.x0 + 0.01, dr.y0 + 0.01, CAB.D / 2 - 0.03);
     add(g.door, this.doorPivot);
 
-    const mkPart = (id: PartId, need: number, solid: THREE.BufferGeometry, sketchGeo: THREE.BufferGeometry, centre: THREE.Vector3, slotAt: THREE.Vector3, broken: THREE.Object3D[], pivot?: THREE.Group): Part => {
+    const mkPart = (id: PartId, need: number, solid: THREE.BufferGeometry, sketchGeo: THREE.BufferGeometry, centre: THREE.Vector3, slotAt: THREE.Vector3, broken: THREE.Object3D[], pivot?: THREE.Group, fillGeo = solid): Part => {
       const pv = pivot ?? new THREE.Group();
       if (!pivot) {
         pv.position.copy(centre);
@@ -112,7 +113,7 @@ export class RuinCabin {
         this.root.add(pv);
       } else this.root.add(pv);
       pv.visible = false;
-      const sk = new Sketch(solid, sketchGeo, { threshold: 20 });
+      const sk = new Sketch(fillGeo, sketchGeo, { threshold: 20 });
       // Sketches live in the overlay scene; give them the cabin's transform.
       const holder = new THREE.Group();
       holder.matrixAutoUpdate = false;
@@ -137,14 +138,16 @@ export class RuinCabin {
     const doorCentre = new THREE.Vector3((dr.x0 + dr.x1) / 2, (dr.y0 + dr.y1) / 2, CAB.D / 2);
     const ch = CAB.chimney;
     this.parts = {
-      roof: mkPart('roof', 4, g.roofPatch, g.roofSketch, new THREE.Vector3(-0.7, CAB.wallTop + 1.1, 1.3), new THREE.Vector3(-0.6, CAB.wallTop + 2.0, 2.35), [debris]),
-      door: mkPart('door', 2, g.door, g.doorSketch, doorCentre, new THREE.Vector3(-0.9, dr.y1 - 0.9, CAB.D / 2 + 1.0), [hang], this.doorPivot),
-      chimney: mkPart('chimney', 3, g.chimneyTop, g.chimneySketch, new THREE.Vector3(ch.x, 3.6, ch.z), new THREE.Vector3(ch.x + 1.1, 3.2, ch.z + 0.2), [rubble]),
+      // The whole roof is swapped (the ruin's sags), but the sketch shows only the missing boards.
+      roof: mkPart('roof', 4, g.roofFixed, g.roofSketch, new THREE.Vector3(-0.3, CAB.wallTop + 1.3, 0.6), new THREE.Vector3(-0.6, CAB.wallTop + 2.0, 2.35), [debris, roof, wear.back, wear.left], undefined, g.roofPatch),
+      door: mkPart('door', 2, g.door, g.doorSketch, doorCentre, new THREE.Vector3(-0.9, dr.y1 - 0.9, CAB.D / 2 + 1.0), [hang, wear.front], this.doorPivot),
+      chimney: mkPart('chimney', 3, g.chimneyTop, g.chimneySketch, new THREE.Vector3(ch.x, 3.6, ch.z), new THREE.Vector3(ch.x + 1.1, 3.2, ch.z + 0.2), [rubble, wear.right]),
     };
     this.sides = {
-      front: [front, hang], back: [back], left: [left], right: [right],
+      front: [front, hang, wear.front], back: [back, wear.back], left: [left, wear.left], right: [right, wear.right],
       roof: [roof, this.parts.roof.pivot], chimney: [chimneyBase, this.parts.chimney.pivot, rubble],
     };
+    this.mat.uniforms.uWear.value = 1;
 
     // Hearth fire: three nested flame tongues, unlit (emissive) so they bloom.
     const flameGeo = new THREE.LatheGeometry([
@@ -220,6 +223,7 @@ export class RuinCabin {
     p.sketch.set(0);
     for (const s of p.slots) s.alpha = 0;
     if (id === 'door') this.doorOpen = this.doorTarget = 1;
+    this.mat.uniforms.uWear.value = Object.values(this.parts).filter((q) => q.state !== 'built').length / 3;
   }
 
   setFilled(id: PartId, n: number) {
@@ -292,6 +296,10 @@ export class RuinCabin {
         }
       }
     }
+    // Each repair takes a third of the neglect off the paint and the moss.
+    const wear = Object.values(this.parts).filter((p) => p.state !== 'built').length / 3;
+    const uw = this.mat.uniforms.uWear;
+    uw.value += (wear - uw.value) * e(1.5);
     this.doorOpen += (this.doorTarget - this.doorOpen) * e(2.2);
     this.doorPivot.rotation.y = -1.85 * this.doorOpen;
 
@@ -386,11 +394,10 @@ export class RuinCabin {
       if (o === this.parts.roof.pivot || o === this.parts.chimney.pivot) {
         const part = o === this.parts.roof.pivot ? this.parts.roof : this.parts.chimney;
         o.visible = part.state === 'built' && !o.userData.cut;
-      } else if (this.parts.door.broken.includes(o)) {
-        o.visible = this.parts.door.state !== 'built' && !o.userData.cut;
-      } else if (this.parts.chimney.broken.includes(o)) {
-        o.visible = this.parts.chimney.state !== 'built' && !o.userData.cut;
-      } else o.visible = base && !o.userData.cut;
+      } else {
+        const part = Object.values(this.parts).find((p) => p.broken.includes(o));
+        o.visible = (part ? part.state !== 'built' : base) && !o.userData.cut;
+      }
     }
   }
 
@@ -423,7 +430,8 @@ export class RuinCabin {
     // Roof you can land on (ignoring the holes: it's a storybook).
     if (Math.abs(l.x) < W / 2 + 0.3 + r && Math.abs(l.z) < D / 2 + over + r && feetY > y0 + wallTop - 0.2) {
       const nz = Math.min(D / 2 + over, Math.max(0, Math.abs(l.z) - r));
-      const h = y0 + wallTop + rise * (1 - nz / (D / 2)) + 0.12;
+      let h = y0 + wallTop + rise * (1 - nz / (D / 2)) + 0.12;
+      if (this.parts.roof.state !== 'built') h -= roofSag(l.x, Math.sign(l.z) * nz);
       if (h > best) best = h;
     }
     // The stone step and hearth-slab-height props are low; walk onto them.

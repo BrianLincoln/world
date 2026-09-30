@@ -150,6 +150,7 @@ export const KIND_COLORS: THREE.Color[] = [
   col(BIOME.cabinRoof), col(BIOME.cabinTrim), col(BIOME.cabinWindow), col(BIOME.cabinDoor),
   col(BIOME.stone), col(BIOME.cabinWall2), col(BIOME.snow), col(BIOME.harebell),
   col(BIOME.buttercup), col(BIOME.cutWood), col(BIOME.steel), col(BIOME.soot), col(BIOME.ember), col(BIOME.cabinRoof),
+  col(BIOME.cabinBare), col(BIOME.moss), col(BIOME.cabinFaded),
 ];
 export const PROP_U = {
   uKind: { value: KIND_COLORS },
@@ -180,6 +181,7 @@ export function makePropMaterial(opts: { bend?: number; wind?: number; heightRef
     uGlint: { value: 0 },
     uWin: { value: -1 },
     uFire: { value: 0 },
+    uWear: { value: 0 },
   }, { side: opts.doubleSide ? THREE.DoubleSide : THREE.FrontSide });
 }
 

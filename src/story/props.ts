@@ -96,7 +96,7 @@ export class ChopTree {
 
   /**
    * One axe blow from `from` (the explorer's position); `power` blows at once
-   * (a charging elk fells it outright). Returns true on the felling blow.
+   * (a charging stelk fells it outright). Returns true on the felling blow.
    */
   hit(from: THREE.Vector3, power = 1): boolean {
     if (this.state !== 'standing') return false;

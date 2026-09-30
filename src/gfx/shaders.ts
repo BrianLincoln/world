@@ -361,7 +361,7 @@ in vec3 vLocal;
 in float vKind;
 in float vTone;
 in vec3 vWorld;
-uniform vec3 uKind[22];
+uniform vec3 uKind[25];
 uniform vec3 uGlow;
 /** Story interactable signal strength (0 = none). */
 uniform float uGlint;
@@ -370,6 +370,8 @@ uniform float uNearCut;
 uniform float uWin;
 /** Firelight on story interiors (0..1). */
 uniform float uFire;
+/** Neglect on the ruined cabin (0 = kept, 1 = abandoned): faded, peeling paint, moss. */
+uniform float uWear;
 uniform float uToneVar;
 uniform float uFlip;
 uniform float uCutaway;
@@ -377,7 +379,8 @@ uniform vec3 uFocus;
 // Kinds: 0 foliage, 1 trunk, 2 rock, 3 bush, 4 tuft, 5 flower petal, 6 flower core,
 // 7 wall, 8 roof, 9 trim, 10 window, 11 door, 12 stone, 13 wall alt, 14 snowcap(rock),
 // 15 harebell, 16 buttercup (petals of kind 5 with instance tone > 0.6),
-// 17 cut wood, 18 axe steel, 19 soot, 20 ember glow, 21 roof boards (real planks, no drawn lines)
+// 17 cut wood, 18 axe steel, 19 soot, 20 ember glow, 21 roof boards (real planks, no drawn lines),
+// 22 bare weathered wood, 23 moss, 24 faded paint (22-24 only via uWear or as moss props)
 void main() {
   int k = int(vKind + 0.5);
   if (uCutaway > 0.5) {
@@ -391,6 +394,32 @@ void main() {
   bool petal = k == 5 || k == 15;
   if (k == 5 && vTone > 0.6) base = uKind[16];
   base *= 1.0 - uToneVar * 0.5 + uToneVar * vTone;
+  if (uWear > 0.0) {
+    // One coordinate along whichever wall this is, one up it (cabin-local).
+    vec2 q = vec2(vLocal.x + vLocal.z, vLocal.y);
+    if (k == 7 || k == 11) {
+      // Sun-faded paint (streaks read as plaid against the clapboard lines).
+      base = mix(base, uKind[24], 0.5 * uWear);
+      // Peeled back to grey wood a clapboard at a time: ragged along the
+      // board, and worst low down where the snow sits.
+      float row = floor(q.y * 2.4);
+      float along = texture(uNoise, vec2(q.x * 0.11 + row * 0.137, row * 0.29)).r;
+      float chip = texture(uNoise, q * 0.6).g;
+      float rot = 1.0 - smoothstep(0.3, 1.2, q.y);
+      float peel = along + chip * 0.55 + rot * 0.22;
+      if (peel > 1.2 - 0.18 * uWear) base = uKind[22];
+    } else if (k == 9) {
+      // Cream trim flaking to bare wood.
+      float chip = texture(uNoise, q * 0.9 + 0.37).g + texture(uNoise, q * 0.25).a * 0.5;
+      if (chip > 1.02 - 0.12 * uWear) base = uKind[22];
+      else base = mix(base, uKind[22], 0.22 * uWear);
+    } else if (k == 21 && n.y > 0.3) {
+      // Moss creeping up the roof from the eaves.
+      float m = texture(uNoise, vLocal.xz * 0.28).a + texture(uNoise, vLocal.xz * 1.1).g * 0.4;
+      m += 0.25 * (1.0 - smoothstep(3.0, 4.0, vLocal.y));
+      if (m > 1.2 - 0.2 * uWear) base = uKind[23];
+    }
+  }
   float emissive = 0.0;
   if ((k == 7 || k == 13) && abs(n.y) > 0.9) {
     // floorboards
@@ -417,7 +446,7 @@ void main() {
     col = mix(col, base * vec3(1.25, 0.86, 0.55), uFire * 0.55 * fl);
   }
   // Negative alpha = partial opt-out of the monochrome grade (accent colours).
-  if (emissive == 0.0 && (k == 7 || k == 8 || k == 21)) emissive = -0.45;
+  if (emissive == 0.0 && (k == 7 || k == 8 || k == 21 || k == 23)) emissive = -0.45;
   if (emissive == 0.0 && (k == 17 || k == 18)) emissive = -0.3;
   if (petal) emissive = -0.35;
   if (uGlint > 0.0) {

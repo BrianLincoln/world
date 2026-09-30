@@ -106,11 +106,18 @@ class Leader {
     const { s: ps, off } = this.project(player);
     const ahead = this.s - ps;
     // Wait for you if you're well behind or off the path; else keep ~AHEAD m in front.
-    let want = hold || off > 40 || ahead > WAIT_AT ? 0 : THREE.MathUtils.clamp(playerSpeed * 1.05 + (AHEAD - ahead) * 0.45, 0, 11);
+    // Its top speed rises with yours, so however fast you come it pulls away.
+    const top = Math.max(11, playerSpeed * 1.3 + 4);
+    const lead = !hold && off <= 40;
+    let want = !lead || ahead > WAIT_AT ? 0 : THREE.MathUtils.clamp(playerSpeed * 1.05 + (AHEAD - ahead) * 0.45, 0, top);
     if (this.L - this.s < 12) want = Math.min(want, Math.max(1.2, (this.L - this.s) * 0.5));
     this.waitT = want < 0.2 && this.v < 0.3 ? this.waitT + dt : 0;
-    this.v += THREE.MathUtils.clamp(want - this.v, -5 * dt, 3 * dt);
+    // Pedal harder the closer you're catching up (and the faster you're going).
+    const accel = 3 + Math.max(0, AHEAD - ahead) * 1.5 + playerSpeed * 0.4;
+    this.v += THREE.MathUtils.clamp(want - this.v, -5 * dt, accel * dt);
     this.s = Math.min(this.L, this.s + this.v * dt);
+    // Never let you pass: it stays at least a couple of metres in front.
+    if (lead && this.s < ps + 2) { this.s = Math.min(this.L, ps + 2); this.v = Math.max(this.v, playerSpeed); }
     const h = this.dirAt(this.s);
     this.heading += Math.atan2(Math.sin(h - this.heading), Math.cos(h - this.heading)) * (1 - Math.exp(-4 * dt));
     return this.s >= this.L - 0.5;
@@ -124,6 +131,8 @@ class Leader {
  */
 interface Conjure { bike: Bike; t: number; to: THREE.Vector3; heading: number; size: number }
 const CONJURE = 2.7;
+/** The gift shot: the camera settles on the spirit this long before it conjures, and holds on the bike this long after (s). */
+const SHOT_LEAD = 1.2, SHOT_HOLD = 1.6;
 
 export class Journey {
   /** Its sparkles and the ball of light (add to the scene). */
@@ -131,6 +140,8 @@ export class Journey {
   private sparks = new Puffs('#ffe7a0', 50, 0.8, 0.9);
   private ball = new THREE.Mesh(new THREE.IcosahedronGeometry(1, 3), makeSolidMaterial('#ffcf73', 0.8));
   private conj: Conjure | null = null;
+  /** Seconds into the gift shot (the camera on the spirit and the bike); < 0 = not running. */
+  private shot = -1;
   stage: Stage = 'wait';
   private t = 0;
   private leader: Leader | null = null;
@@ -203,6 +214,7 @@ export class Journey {
     this.t += dt;
     this.sparks.update(dt);
     this.updateConjure(dt);
+    if (this.shot >= 0) this.shot = this.stage === 'gift' && this.shot < SHOT_LEAD + CONJURE + SHOT_HOLD ? this.shot + dt : -1;
     // A saved journey never outlives the story it belongs to (a fresh start).
     if (!story.done && this.stage !== 'wait') {
       this.stage = 'wait';
@@ -237,8 +249,14 @@ export class Journey {
         const k = this.d.bikes.bikes.get('gift');
         if (!k) {
           this.want(at, b.pos, 'stand', null);
-          // ...and once you're watching, pulls it out of its heart.
-          if (!this.conj && this.spirit.arrived && (b.pos.distanceTo(at) < 16 || this.t > 25)) {
+          // ...and once you're out in the yard with it (never through a
+          // wall or from the sky), takes the camera and, once it's looking,
+          // pulls the bike out of its heart.
+          if (this.shot < 0) {
+            const outside = !this.d.story.cabin.inside(b.pos.x, b.pos.z, -0.6) && this.d.body.grounded;
+            const near = b.pos.distanceTo(at) < 16 || (this.t > 25 && b.pos.distanceTo(at) < 40);
+            if (this.spirit.arrived && outside && near) this.shot = 0;
+          } else if (!this.conj && this.shot >= SHOT_LEAD) {
             const nk = this.d.bikes.place('gift', g.x, g.z, g.heading, 0);
             this.conjure(nk, 1);
           }
@@ -301,6 +319,36 @@ export class Journey {
       }
     }
     if (this.sBike && this.stage !== 'ride1' && this.stage !== 'ride2') this.parkSpiritBike(dt);
+  }
+
+  /** The gift shot is running: hands off, the camera is the spirit's. */
+  get busy() { return this.shot >= 0; }
+
+  /**
+   * The gift shot: side on to the spirit and where the bike will stand, from
+   * the yard side (the cabin behind them, not in the way), rising a little
+   * with the ball of light and settling on the bike.
+   */
+  cinematic(): { pos: THREE.Vector3; at: THREE.Vector3 } | null {
+    if (this.shot < 0) return null;
+    const g = this.giftSpot(), st = this.d.gen.story, sp = this.spirit.pos;
+    const gy = this.d.gen.height(g.x, g.z);
+    const ax = g.x - sp.x, az = g.z - sp.z, al = Math.hypot(ax, az) || 1;
+    let nx = az / al, nz = -ax / al;
+    const mx = (sp.x + g.x) / 2, mz = (sp.z + g.z) / 2;
+    if (nx * (mx - st.x) + nz * (mz - st.z) < 0) { nx = -nx; nz = -nz; }
+    // A three-quarter view, the spirit a touch nearer.
+    const yaw = Math.atan2(nx, nz) - 0.3 * Math.sign(nx * az - nz * ax || 1);
+    const u = this.shot - SHOT_LEAD;
+    const up = THREE.MathUtils.smootherstep(u, 0.3, 1.3) * (1 - THREE.MathUtils.smootherstep(u, 1.7, 2.6));
+    const onBike = THREE.MathUtils.smootherstep(u, 1.6, 2.8);
+    const at = new THREE.Vector3(mx, (sp.y + gy) / 2 + 0.9 + up * 0.9, mz);
+    at.x += (g.x - mx) * 0.4 * onBike;
+    at.z += (g.z - mz) * 0.4 * onBike;
+    const pitch = 0.2, dist = 7.5 - 1 * onBike;
+    const pos = at.clone().add(new THREE.Vector3(Math.sin(yaw) * Math.cos(pitch), Math.sin(pitch), Math.cos(yaw) * Math.cos(pitch)).multiplyScalar(dist));
+    pos.y = Math.max(pos.y, this.d.gen.height(pos.x, pos.z) + 0.8);
+    return { pos, at };
   }
 
   private want(at: THREE.Vector3, face: THREE.Vector3 | null, pose: 'point' | 'stand', icon: 'bike' | 'pick' | 'up' | null) {
@@ -604,6 +652,7 @@ export class Journey {
     const j = this.d.gen.journey;
     const front = (t: Tower, d: number) => [t.door.ground.x + Math.sin(t.yaw) * d, t.door.ground.z + Math.cos(t.yaw) * d] as const;
     this.conj = null;
+    this.shot = -1;
     this.ball.visible = false;
     if (s === 'wait' || s === 'gift') this.d.bikes.bikes.delete('gift');
     const gift = s === 'wait' || s === 'gift' ? null! : this.gift();

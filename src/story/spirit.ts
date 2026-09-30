@@ -21,6 +21,13 @@ const WARM = new THREE.Color('#f0924c');
 const HEART_COLD = new THREE.Color('#6d6874');
 const HEART_WARM = new THREE.Color('#ffb24a');
 
+/**
+ * A pat on the head (seconds into the act): the explorer's hand comes down
+ * on each beat (story.ts drives it from `patTime`), stays for a little
+ * stroke until `end`, then the spirit has `joy` seconds of delight.
+ */
+export const PAT = { beats: [0.6, 1.1, 1.6], end: 2.1, joy: 1.3 };
+
 export type Pose = 'stand' | 'sit' | 'shiver' | 'warm' | 'point';
 
 export interface Want {
@@ -40,6 +47,7 @@ type Act =
   | { kind: 'celebrate'; t: number }
   | { kind: 'greet'; t: number }
   /** Hurry to `to` (e.g. out of the cabin), then carry on with the queue. */
+  | { kind: 'pat'; t: number }
   | { kind: 'emerge'; t: number; to: THREE.Vector3 }
   | { kind: 'hint'; t: number; phase: 'go' | 'tug' | 'back' | 'hop'; target: THREE.Vector3; face: THREE.Vector3 | null; hops: number };
 
@@ -47,7 +55,7 @@ export interface SpiritHooks {
   ground(x: number, z: number): number;
   /** Waypoints from a to b (around the cabin, through its door). */
   route(from: THREE.Vector3, to: THREE.Vector3): THREE.Vector3[];
-  sound(name: 'chirp' | 'excited' | 'whimper' | 'call' | 'tug'): void;
+  sound(name: 'chirp' | 'coo' | 'excited' | 'whimper' | 'call' | 'tug'): void;
   sparkle(at: THREE.Vector3, n: number): void;
 }
 
@@ -134,6 +142,8 @@ export class Spirit {
   private glanceT = 4;
   private beckonT = 0;
   private spin = 0;
+  /** 0..1: the warm flush of being patted (glow, blush, heart). */
+  private patGlow = 0;
   private tint = new THREE.Color();
   private heartTint = new THREE.Color();
   player = new THREE.Vector3();
@@ -200,6 +210,26 @@ export class Spirit {
 
   get busy() { return this.acts.length > 0; }
   get arrived() { return !this.moving && !this.acts.length && this.pos.distanceTo(this.want.at) < 0.6; }
+  /** At its spot with nothing on: free to be patted. */
+  get idle() { return !this.riding && !this.waiting && this.arrived; }
+  /** Seconds into a pat (-1 when not being patted). */
+  get patTime() { const a = this.acts[0]; return a?.kind === 'pat' ? a.t : -1; }
+
+  /** Lean up for a pat on the head; false if it's busy with something. */
+  pat(): boolean {
+    if (!this.idle) return false;
+    this.acts.push({ kind: 'pat', t: 0 });
+    return true;
+  }
+  /** The hand went away early: skip straight to being pleased about it. */
+  endPat() {
+    const a = this.acts[0];
+    if (a?.kind === 'pat' && a.t < PAT.end) { this.acts.shift(); this.happyT = 1.5; }
+  }
+  /** The top of its head, world space (where a patting hand lands). */
+  headTop(out: THREE.Vector3) {
+    return this.body.localToWorld(out.set(0, 0.98 * R, 0.2 * R));
+  }
 
   teleport(p: THREE.Vector3) {
     this.pos.copy(p);
@@ -269,6 +299,7 @@ export class Spirit {
     let speed = 3.1;
     let happy = false;
     let bounce = 0;
+    let patted = 0;
     const ride = this.riding;
     const act = ride ? undefined : this.acts[0];
     this.moving = false;
@@ -285,6 +316,30 @@ export class Spirit {
         bounce = 1;
         this.spin = act.t > 0.45 && act.t < 1.05 ? (act.t - 0.45) / 0.6 : 0;
         if (act.t > 1.8) { this.acts.shift(); this.happyT = 1.5; this.spin = 0; }
+      } else if (act.kind === 'pat') {
+        // Eyes shut, pressing up into the hand, a squish and a coo on every
+        // pat; once the hand lifts, a bounce and a spin of pure delight.
+        this.vel.multiplyScalar(Math.exp(-10 * dt));
+        happy = true;
+        if (act.t < PAT.end) {
+          patted = 1;
+          for (const b of PAT.beats) {
+            if (act.t - dt < b && act.t >= b) {
+              this.squash.v -= 2.4;
+              this.hooks.sound('coo');
+              this.hooks.sparkle(this.headTop(tv2).setY(tv2.y + 0.12), 2);
+            }
+          }
+        } else {
+          armsUp = 1;
+          bounce = 1;
+          this.spin = act.t > PAT.end + 0.25 && act.t < PAT.end + 0.85 ? (act.t - PAT.end - 0.25) / 0.6 : 0;
+          if (act.t - dt < PAT.end) {
+            this.hooks.sound('excited');
+            this.hooks.sparkle(tv2.set(this.pos.x, this.pos.y + R * 2.4, this.pos.z), 6);
+          }
+          if (act.t > PAT.end + PAT.joy) { this.acts.shift(); this.happyT = 2.5; this.spin = 0; }
+        }
       } else if (act.kind === 'greet') {
         this.vel.multiplyScalar(Math.exp(-8 * dt));
         beckon = act.t < 1.4 ? 1 : 0;
@@ -381,7 +436,7 @@ export class Spirit {
     if (ride) this.pos.copy(ride.seat).setY(ride.seat.y - 0.05);
     else this.pos.y += (gy - this.pos.y) * e(20);
     const rest = w.settled && !act && !this.moving;
-    this.face(this.moving ? null : act?.kind === 'hint' && act.phase === 'tug' ? this.player : (pointAt ?? (pose === 'warm' || rest ? w.face : lookAt)), dt);
+    this.face(this.moving ? null : (act?.kind === 'hint' && act.phase === 'tug') || act?.kind === 'pat' ? this.player : (pointAt ?? (pose === 'warm' || rest ? w.face : lookAt)), dt);
     if (ride) this.heading = ride.heading;
     if (this.hold !== null) this.heading = this.hold;
 
@@ -409,8 +464,11 @@ export class Spirit {
     const sy = 1 + sq + breathe - this.sit * 0.08;
     this.body.scale.set(1 / Math.sqrt(sy), sy, 1 / Math.sqrt(sy));
     this.body.position.y = R * 0.86 * sy + lift - this.sit * 0.07;
-    const lean = this.tilt.step(THREE.MathUtils.clamp(hs * 0.05, 0, 0.25) - this.sit * 0.12 + (reach ? -0.2 : 0) + (pose === 'warm' ? 0.1 : 0), 90, 12, dt);
-    this.body.rotation.set(lean, 0, Math.sin(this.t * 42) * 0.03 * shiver + (walking ? Math.sin(this.hop * Math.PI * 2) * 0.06 : 0) + (rest ? Math.sin(this.t * 0.9) * 0.045 * this.sit : 0));
+    this.patGlow += ((patted || act?.kind === 'pat' ? 1 : 0) - this.patGlow) * e(patted ? 3 : 0.8);
+    const lean = this.tilt.step(THREE.MathUtils.clamp(hs * 0.05, 0, 0.25) - this.sit * 0.12 + (reach ? -0.2 : 0) + (pose === 'warm' ? 0.1 : 0) - patted * 0.16, 90, 12, dt);
+    // Patted: a slow contented wiggle under the hand.
+    const wiggle = Math.sin(this.t * 6.5) * 0.08 * patted;
+    this.body.rotation.set(lean, 0, Math.sin(this.t * 42) * 0.03 * shiver + (walking ? Math.sin(this.hop * Math.PI * 2) * 0.06 : 0) + (rest ? Math.sin(this.t * 0.9) * 0.045 * this.sit : 0) + wiggle);
 
     // Feet: little alternating steps, tucked forward when sitting.
     for (let k = 0; k < 2; k++) {
@@ -442,12 +500,14 @@ export class Spirit {
       if (k === pointArm && !armsUp && !reach) { x = -1.5; z = 0.25; }
       if (this.sit > 0.5 && !pointAt) { x = -0.5; z = s * 0.45; }
       if (this.sit > 0.5 && rest) { x = -1.05 + Math.sin(this.t * 1.3 + k * 1.7) * 0.08; z = s * 0.3; }
+      if (patted) { x = -0.95 + Math.sin(this.t * 13 + k * 2) * 0.12; z = -s * 0.28; }
       if (ride) { x = -1.25; z = s * 0.32; }
       this.arms[k].rotation.set(this.armX[k].step(x, 120, 12, dt), 0, this.armZ[k].step(z, 120, 12, dt));
     }
 
     const wm = this.warmth;
-    this.heart.scale.setScalar(0.85 + wm * 0.35 + Math.sin(this.t * 3) * 0.06 * wm);
+    const pg = this.patGlow;
+    this.heart.scale.setScalar(0.85 + wm * 0.35 + Math.sin(this.t * 3) * 0.06 * wm + pg * (0.3 + Math.sin(this.t * 7) * 0.08));
 
     // Eyes: blink; sad half-lids when cold; happy arcs after good things.
     this.happyT = Math.max(0, this.happyT - dt);
@@ -471,16 +531,19 @@ export class Spirit {
     // Colour: ash-blue -> apricot -> amber, and a growing glow.
     if (wm < 0.5) this.tint.copy(COLD).lerp(MID, wm * 2);
     else this.tint.copy(MID).lerp(WARM, (wm - 0.5) * 2);
-    this.heartTint.copy(HEART_COLD).lerp(HEART_WARM, THREE.MathUtils.smoothstep(wm, 0.05, 0.6));
-    this.bodyB.material.uniforms.uEmber.value = THREE.MathUtils.smoothstep(wm, 0.55, 1) * 0.62;
-    this.heartB.material.uniforms.uEmber.value = THREE.MathUtils.smoothstep(wm, 0.05, 0.5) * 0.85;
+    // Being patted warms it through a little, however cold it is.
+    if (wm < 0.75) this.tint.lerp(wm < 0.5 ? MID : WARM, pg * 0.35);
+    this.heartTint.copy(HEART_COLD).lerp(HEART_WARM, Math.max(pg, THREE.MathUtils.smoothstep(wm, 0.05, 0.6)));
+    this.bodyB.material.uniforms.uEmber.value = Math.min(0.8, THREE.MathUtils.smoothstep(wm, 0.55, 1) * 0.62 + pg * 0.18);
+    this.heartB.material.uniforms.uEmber.value = Math.max(pg, THREE.MathUtils.smoothstep(wm, 0.05, 0.5)) * 0.85;
     this.armB.material.uniforms.uEmber.value = this.footB.material.uniforms.uEmber.value = this.bodyB.material.uniforms.uEmber.value;
     // Mouth: a little frown when cold, a "w" smile when warm or happy.
     const mw = this.bodyB.material.uniforms.uMouthW.value as THREE.Vector3;
     mw.z = happy || this.happyT > 0 || wm > 0.35 ? 7 : shiver > 0.5 ? -5 : 3;
     const bl = this.bodyB.material.uniforms.uBlush.value as THREE.Vector4;
-    bl.z = 0.14 * THREE.MathUtils.smoothstep(wm, 0.3, 0.8);
-    bl.w = 0.08 * THREE.MathUtils.smoothstep(wm, 0.3, 0.8);
+    const blush = Math.max(THREE.MathUtils.smoothstep(wm, 0.3, 0.8), pg) * (1 + pg * 0.25);
+    bl.z = 0.14 * blush;
+    bl.w = 0.08 * blush;
 
     this.root.updateMatrixWorld(true);
     for (const b of this.batches) b.begin();
@@ -493,7 +556,7 @@ export class Spirit {
     // Thought bubble with what it wants next (hidden while travelling).
     // Only up close: from across the yard the pantomime does the talking.
     const close = toPlayer < 5.5;
-    const icon = !close ? null : act?.kind === 'celebrate' ? 'heart' : this.moving || this.waiting ? null : w.icon;
+    const icon = !close ? null : act?.kind === 'celebrate' || (act?.kind === 'pat' && act.t > PAT.end) ? 'heart' : this.moving || this.waiting ? null : w.icon;
     if (icon !== this.bubbleIcon && this.bubbleA < 0.05) {
       this.bubbleIcon = icon;
       if (icon) { this.bubble.texture = tex(bubbleCanvas(icon)); this.bubblePop = 1; }

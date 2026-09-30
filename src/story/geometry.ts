@@ -9,7 +9,7 @@ import { RUIN_D, RUIN_W } from '../world/storySite';
 // swapped between broken / sketched / repaired, and the small props (axe,
 // logs, stumps, stones). All geometry is local, y = 0 on the cabin pad.
 
-export const K = { foliage: 0, trunk: 1, rock: 2, wall: 7, roof: 8, trim: 9, glass: 10, door: 11, stone: 12, wood: 13, cut: 17, steel: 18, soot: 19, ember: 20, boards: 21 } as const;
+export const K = { foliage: 0, trunk: 1, rock: 2, wall: 7, roof: 8, trim: 9, glass: 10, door: 11, stone: 12, wood: 13, cut: 17, steel: 18, soot: 19, ember: 20, boards: 21, bare: 22, moss: 23 } as const;
 
 /** Cabin measurements (local): floor, wall top, ridge rise, eave overhangs. */
 export const CAB = {
@@ -18,6 +18,28 @@ export const CAB = {
   chimney: { x: RUIN_W / 2 + 0.62, z: -0.3, size: 0.9, top: 6.2, course: 0.28, broken: 5 },
   hearth: { x: RUIN_W / 2 - 0.16, z: -0.3 },
 } as const;
+
+/**
+ * How far the ruined roof has sunk at cabin-local (x, z): a swayback along
+ * the ridge (held up at the gables and on the eave walls) and a deep dip
+ * round the hole in the front slope, where a rafter has given way.
+ */
+export function roofSag(x: number, z: number): number {
+  const hw = CAB.W / 2, hd = CAB.D / 2;
+  const ax = Math.max(0, 1 - (x / hw) ** 2);
+  const az = Math.max(0, 1 - Math.abs(z) / hd);
+  const dx = (x + 0.35) / 1.5, dz = (z - 1.55) / 1.05;
+  const sink = 0.75 * Math.exp(-(dx * dx + dz * dz)) * Math.min(1, az * 2.6) * Math.min(1, ax * 3);
+  return 0.24 * ax * Math.min(1, az * 1.6) + sink;
+}
+
+function sagged(g: THREE.BufferGeometry): THREE.BufferGeometry {
+  const p = g.attributes.position as THREE.BufferAttribute;
+  for (let i = 0; i < p.count; i++) p.setY(i, p.getY(i) - roofSag(p.getX(i), p.getZ(i)));
+  g.computeVertexNormals();
+  g.computeBoundingSphere();
+  return g;
+}
 
 function core(g: THREE.BufferGeometry, kind: number): THREE.BufferGeometry {
   const out = g.index ? g.toNonIndexed() : g;
@@ -37,8 +59,8 @@ export function merge(parts: THREE.BufferGeometry[]): THREE.BufferGeometry {
 const e = new THREE.Euler();
 const m4 = new THREE.Matrix4();
 /** Box of `kind` centred at (x, y, z), rotated (rx, ry, rz). */
-export function kbox(w: number, h: number, d: number, x: number, y: number, z: number, kind: number, rx = 0, ry = 0, rz = 0) {
-  const g = new THREE.BoxGeometry(w, h, d);
+export function kbox(w: number, h: number, d: number, x: number, y: number, z: number, kind: number, rx = 0, ry = 0, rz = 0, seg: readonly [number, number, number] = [1, 1, 1]) {
+  const g = new THREE.BoxGeometry(w, h, d, ...seg);
   if (rx || ry || rz) g.applyMatrix4(m4.makeRotationFromEuler(e.set(rx, ry, rz)));
   g.translate(x, y, z);
   return core(g, kind);
@@ -122,10 +144,14 @@ export interface CabinParts {
   left: THREE.BufferGeometry;
   right: THREE.BufferGeometry;
   floor: THREE.BufferGeometry;
-  /** Roof boards that survived, rafters, ridge, bargeboards. */
+  /** The ruined roof: sagging, holed, mossy. */
   roof: THREE.BufferGeometry;
-  /** The missing boards (the roof repair). */
+  /** The mended roof, straight and whole (the roof repair). */
+  roofFixed: THREE.BufferGeometry;
+  /** The missing boards alone, where the sketch hangs. */
   roofPatch: THREE.BufferGeometry;
+  /** Neglect by side (loose clapboards, a boarded window, weeds at the footings), cleared by the repairs. */
+  wear: Record<'front' | 'back' | 'left' | 'right', THREE.BufferGeometry>;
   /** Chimney: the crumbled stump, the missing stack (repair) and rubble on the ground. */
   chimneyBase: THREE.BufferGeometry;
   chimneyTop: THREE.BufferGeometry;
@@ -191,18 +217,29 @@ export function buildRuin(): CabinParts {
   // The floor is its own mesh: it must never go with a wall in the cutaway.
   const floorGeo = kbox(W - 0.1, 0.08, D - 0.1, 0, floor - 0.04, 0, K.wood);
 
-  // --- roof: board courses parallel to the ridge on both slopes
+  // --- roof: board courses parallel to the ridge on both slopes. Built twice:
+  // the broken roof (swaybacked and sunk in round the hole, boards missing or
+  // hanging into the room, moss, a sapling) and the mended one (straight).
   const theta = Math.atan2(rise, D / 2);
   const ct = Math.cos(theta), st = Math.sin(theta);
   const Ls = (D / 2 + over) / ct;
   const bw = 0.42;
   const courses = Math.ceil(Ls / bw);
   const x0 = -W / 2 - overXL, x1 = W / 2 + overXR;
-  const roof: THREE.BufferGeometry[] = [];
+  const roofBroken: THREE.BufferGeometry[] = [];
+  const roofFixed: THREE.BufferGeometry[] = [];
   const patch: THREE.BufferGeometry[] = [];
   const sketch: THREE.BufferGeometry[] = [];
+  /** Both versions of a roof piece: bent by the sag for the ruin, straight when mended. */
+  const both = (make: () => THREE.BufferGeometry) => {
+    roofFixed.push(make());
+    roofBroken.push(sagged(make()));
+  };
   // Missing boards: [slope (+1 front / -1 back), course from the eave, segment].
-  const holes = new Set(['1:2:1', '1:3:1', '1:4:1', '1:3:2', '1:5:1', '1:4:0', '-1:3:0', '-1:4:0', '-1:5:0']);
+  const holes = new Set(['1:2:1', '1:3:1', '1:4:1', '1:3:2', '1:5:1', '1:4:0', '1:6:1', '-1:3:0', '-1:4:0', '-1:5:0']);
+  // These hang from their top edge down into the room instead of being gone.
+  const hanging = new Map([['1:3:1', 1.05], ['1:5:1', 0.55], ['-1:4:0', 0.8]]);
+  const along = (l: number) => [Math.max(2, Math.ceil(l / 0.3)), 1, 3] as const;
   for (const sg of [1, -1]) {
     for (let c = 0; c < courses; c++) {
       const s = Ls - (c + 0.5) * bw; // along-slope distance from the ridge
@@ -217,24 +254,73 @@ export function buildRuin(): CabinParts {
         const mx = (cuts[k] + cuts[k + 1]) / 2;
         const tilt = (rnd() - 0.5) * 0.02;
         const lift = (rnd() - 0.5) * 0.012;
-        const board = kbox(l, 0.075, bw + 0.05, mx, cy + lift, cz, K.boards, sg * theta, 0, tilt);
-        if (holes.has(`${sg}:${c}:${k}`)) {
-          patch.push(board);
-          sketch.push(kbox(l, 0.075, bw + 0.02, mx, cy + 0.02, cz, K.boards, sg * theta));
-        } else roof.push(board);
+        const key = `${sg}:${c}:${k}`;
+        const board = () => kbox(l, 0.075, bw + 0.05, mx, cy + lift, cz, K.boards, sg * theta, 0, tilt, along(l));
+        roofFixed.push(board());
+        if (!holes.has(key)) { roofBroken.push(sagged(board())); continue; }
+        patch.push(board());
+        sketch.push(kbox(l, 0.075, bw + 0.02, mx, cy + 0.02, cz, K.boards, sg * theta));
+        const droop = hanging.get(key);
+        if (droop) {
+          // Hinged on its top edge (the ridge side), swung down into the room.
+          const hz = cz - sg * (bw / 2) * ct, hy = cy + (bw / 2) * st;
+          const g = kbox(l * 0.8, 0.075, bw + 0.05, 0, 0, sg * (bw / 2) * ct, K.boards, sg * theta, 0, tilt);
+          g.translate(0, -(bw / 2) * st, 0);
+          g.rotateX(sg * droop);
+          g.rotateZ((rnd() - 0.5) * 0.3);
+          g.translate(mx + (rnd() - 0.5) * 0.3, hy - roofSag(mx, hz), hz);
+          roofBroken.push(g);
+        }
       }
     }
     // Rafters under the boards (seen through the holes and from inside).
     for (const rx of [-W / 2 + 0.25, -W / 6, W / 6, W / 2 - 0.25]) {
-      roof.push(kbox(0.1, 0.15, Ls, rx, wallTop + rise - (Ls / 2) * st - ct * 0.09, sg * (Ls / 2) * ct - st * 0.09 * sg, K.wood, sg * theta));
+      both(() => kbox(0.1, 0.15, Ls, rx, wallTop + rise - (Ls / 2) * st - ct * 0.09, sg * (Ls / 2) * ct - st * 0.09 * sg, K.wood, sg * theta, 0, 0, [1, 1, 12]));
     }
     // Bargeboards along the gable edges.
     for (const bx of [x0 - 0.02, x1 + 0.02]) {
-      roof.push(kbox(0.06, 0.22, Ls + 0.05, bx, wallTop + rise - (Ls / 2) * st + 0.03, sg * (Ls / 2) * ct, K.trim, sg * theta));
+      both(() => kbox(0.06, 0.22, Ls + 0.05, bx, wallTop + rise - (Ls / 2) * st + 0.03, sg * (Ls / 2) * ct, K.trim, sg * theta));
     }
   }
-  roof.push(kbox(x1 - x0 + 0.1, 0.13, 0.3, (x0 + x1) / 2, wallTop + rise + 0.1, 0, K.boards));
-  roof.push(kbox(W - 0.3, 0.14, 0.14, 0, wallTop + rise - 0.12, 0, K.wood)); // ridge beam
+  both(() => kbox(x1 - x0 + 0.1, 0.13, 0.3, (x0 + x1) / 2, wallTop + rise + 0.1, 0, K.boards, 0, 0, 0, [16, 1, 1]));
+  both(() => kbox(W - 0.3, 0.14, 0.14, 0, wallTop + rise - 0.12, 0, K.wood, 0, 0, 0, [14, 1, 1])); // ridge beam
+  // Moss cushions on the ruin's boards, thickest low on the slopes and in the dip.
+  const onRoof = (x: number, sg: number, s: number) => {
+    const z = sg * s * ct, y = wallTop + rise - s * st + ct * 0.1;
+    return [x, y - roofSag(x, z), z] as const;
+  };
+  for (let i = 0; i < 22; i++) {
+    const sg = i % 3 === 2 ? -1 : 1;
+    const s = Ls * (0.35 + 0.62 * Math.sqrt(rnd()));
+    const x = x0 + 0.3 + rnd() * (x1 - x0 - 0.6);
+    const key = `${sg}:${Math.floor((Ls - s) / bw)}`;
+    if ([...holes].some((h) => h.startsWith(key + ':'))) continue;
+    const [px, py, pz] = onRoof(x, sg, s);
+    const r = 0.09 + rnd() * 0.13;
+    const g = new THREE.IcosahedronGeometry(1, 1);
+    g.scale(r * (1.2 + rnd() * 0.5), r * 0.5, r);
+    g.rotateX(sg * theta);
+    g.translate(px, py, pz);
+    roofBroken.push(core(g, K.moss));
+  }
+  // A birch sapling that seeded itself by the ridge.
+  {
+    const [px, py, pz] = onRoof(W * 0.22, -1, 0.5);
+    const trunk = new THREE.CylinderGeometry(0.025, 0.04, 0.9, 6);
+    trunk.rotateZ(0.12);
+    trunk.translate(px - 0.05, py + 0.42, pz);
+    roofBroken.push(core(trunk, K.trunk));
+    for (const [dx, dy, r] of [[-0.12, 0.85, 0.26], [0.05, 1.08, 0.2], [-0.02, 0.66, 0.2]]) {
+      const g = new THREE.IcosahedronGeometry(r, 1);
+      g.scale(1, 0.8, 1);
+      g.translate(px + dx, py + dy, pz);
+      roofBroken.push(core(g, K.foliage));
+    }
+    const tuft = new THREE.IcosahedronGeometry(0.16, 1);
+    tuft.scale(1.4, 0.4, 1);
+    tuft.translate(px, py + 0.02, pz);
+    roofBroken.push(core(tuft, K.moss));
+  }
 
   // --- chimney: courses of rounded stones on the +x gable, outside
   const ch = CAB.chimney;
@@ -339,10 +425,77 @@ export function buildRuin(): CabinParts {
 
   return {
     front: merge(front), back: merge(back), left: merge(left), right: merge(right), floor: merge([floorGeo]),
-    roof: merge(roof), roofPatch: merge(patch), roofSketch: merge(sketch),
+    roof: merge(roofBroken), roofFixed: merge(roofFixed), roofPatch: merge(patch), wear: buildWear(rnd), roofSketch: merge(sketch),
     chimneyBase: merge(base), chimneyTop: merge(top), chimneySketch: merge(csk), rubble: merge(rubble),
     hearth: merge(hearth), coldAsh: merge(ash), door: merge(door), doorSketch, debris: merge(debris),
   };
+}
+
+/** A clapboard that has sprung a nail and swung down from the other one, with the dark gap it left. */
+function looseBoard(out: THREE.BufferGeometry[], len: number, hx: number, hy: number, dir: number, droop: number) {
+  // Built on a wall facing +z at z = 0; the caller places it.
+  out.push(kbox(len, 0.36, 0.012, hx - dir * len / 2, hy, 0.004, K.wood));
+  const g = kbox(len, 0.38, 0.045, -dir * len / 2, 0, 0, K.wall, 0, 0, 0);
+  g.rotateZ(dir * droop);
+  g.rotateX(-0.06);
+  g.translate(hx, hy + 0.02, 0.035);
+  out.push(g);
+  out.push(kbox(0.05, 0.05, 0.05, hx, hy + 0.04, 0.07, K.soot));
+}
+
+/** Weeds and moss along the footing of a wall facing +z at z = 0, `len` long. */
+function weeds(out: THREE.BufferGeometry[], rnd: () => number, len: number, n: number) {
+  for (let i = 0; i < n; i++) {
+    const x = (rnd() - 0.5) * (len - 0.4);
+    const z = 0.12 + rnd() * 0.18;
+    if (rnd() < 0.45) {
+      const g = new THREE.IcosahedronGeometry(1, 1);
+      const r = 0.12 + rnd() * 0.12;
+      g.scale(r * 1.6, r * 0.55, r);
+      g.translate(x, 0.28 + rnd() * 0.04, z - 0.08);
+      out.push(core(g, K.moss));
+      continue;
+    }
+    // A clump of three grass blades.
+    const h = 0.28 + rnd() * 0.3;
+    for (let b = 0; b < 3; b++) {
+      const g = new THREE.ConeGeometry(0.045, h * (0.7 + b * 0.18), 4);
+      g.translate(0, h * 0.4, 0);
+      g.rotateZ((b - 1) * 0.35 + (rnd() - 0.5) * 0.2);
+      g.rotateX(0.15 + rnd() * 0.15);
+      g.translate(x + (b - 1) * 0.05, 0.02, z);
+      out.push(core(g, rnd() < 0.5 ? K.foliage : K.moss));
+    }
+  }
+}
+
+function buildWear(rnd: () => number): Record<'front' | 'back' | 'left' | 'right', THREE.BufferGeometry> {
+  const { W, D, floor } = CAB;
+  const gl = D - CAB.thick * 2;
+  const front: THREE.BufferGeometry[] = [], back: THREE.BufferGeometry[] = [];
+  const left: THREE.BufferGeometry[] = [], right: THREE.BufferGeometry[] = [];
+  // Front: a board sprung beside the window and one low by the door.
+  looseBoard(front, 1.15, 3.35, floor + 0.62, 1, 0.42);
+  looseBoard(front, 0.95, -1.7, floor + 1.45, 1, 0.3);
+  weeds(front, rnd, W, 16);
+  place(front, 0, 0, 0, D / 2 + 0.01);
+  // Back: one sprung board low in the corner, weeds.
+  looseBoard(back, 1.2, 3.1, floor + 0.62, 1, 0.38);
+  weeds(back, rnd, W, 14);
+  place(back, Math.PI, 0, 0, -D / 2 - 0.01);
+  // Left gable: the window boarded over with two crossed planks.
+  for (const [a, dy] of [[0.5, 0.04], [-0.55, -0.03]]) {
+    left.push(kbox(1.45, 0.17, 0.045, 0, 1.625 + dy, 0.2, K.bare, 0, 0, a));
+    for (const sx of [-1, 1]) left.push(kbox(0.05, 0.05, 0.05, sx * 0.55 * Math.cos(a), 1.625 + dy + sx * 0.55 * Math.sin(a), 0.24, K.soot));
+  }
+  looseBoard(left, 0.9, -1.75, floor + 0.55, -1, 0.35);
+  weeds(left, rnd, gl, 12);
+  place(left, -Math.PI / 2, -W / 2 - 0.01, 0, 0);
+  // Right: weeds round the chimney foot, a sprung board by the front corner.
+  looseBoard(right, 0.8, -2.0, floor + 1.2, 1, 0.4);
+  weeds(right, rnd, gl, 12);
+  place(right, Math.PI / 2, W / 2 + 0.01, 0, 0);
+  return { front: merge(front), back: merge(back), left: merge(left), right: merge(right) };
 }
 
 // ---------------------------------------------------------------- props

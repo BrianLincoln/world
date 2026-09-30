@@ -182,6 +182,9 @@ export const BIOME = {
   cabinWindow: '#3b3440',
   windowGlow: '#ffd27a',
   cabinDoor: '#5a3c30',
+  cabinFaded: '#b77f6c',   // sun-bleached falu red on the ruin
+  cabinBare: '#a39a90',    // silver-grey wood where the paint has peeled
+  moss: '#727048',
   stone: '#9d918a',
   cutWood: '#e9cf9c',  // fresh-cut log ends, the axe handle
   steel: '#8e9cab',

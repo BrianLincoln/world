@@ -17,7 +17,7 @@ export interface Mob {
   pos: THREE.Vector3;
   vel: THREE.Vector3;
   heading: number;
-  /** On the ground (crows, elk). Floofs are always airborne. */
+  /** On the ground (crows, stelks). Floofs are always airborne. */
   grounded: boolean;
   state: MobState;
   leashed: boolean;
@@ -72,7 +72,7 @@ export interface MobCtx {
 }
 
 export interface Species {
-  readonly name: 'floof' | 'crow' | 'elk';
+  readonly name: 'floof' | 'crow' | 'stelk';
   /** Body radius (m), for collision, rope and targeting. */
   readonly radius: number;
   /** Height of the body centre above the feet. */

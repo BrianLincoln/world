@@ -125,6 +125,15 @@ export class Sfx {
     });
   }
 
+  /** Content: a soft warbling coo (a pat on the head). */
+  coo() {
+    if (!this.ok) return;
+    const t = this.ctx!.currentTime + 0.01;
+    const f = 600 * (0.94 + Math.random() * 0.12);
+    this.tone('sine', f, f * 1.4, t, { a: 0.05, d: 0.32, peak: 0.2 }, { vib: 16, vibHz: 12, echo: true });
+    this.tone('triangle', f * 2, f * 2.7, t, { a: 0.05, d: 0.24, peak: 0.025 }, { vib: 28, vibHz: 12 });
+  }
+
   /** Sad: a small falling glide with a wobble. */
   whimper() {
     if (!this.ok) return;

@@ -85,9 +85,8 @@ scripts/     shots.mjs (screenshots + perf), probe.mjs, sheet.mjs
 - **Cabins:** on flat ground, off the shore, not in deep forest. They
   flatten a pad into the height field and clear a ring of trees. 30% get a
   neighbour (a hamlet).
-- **Tors** (stacked boulder cairns) take the best of several candidates by
-  height minus forest, so they stand on open hilltops and read as landmarks.
-  There are also stone circles on open meadow and lone glacial erratics.
+- **Landmarks:** stone circles on open meadow and lone glacial erratics.
+  (Tors, smaller stacked-boulder cairns, were removed; see below.)
 - **Paths** join each cabin to its two nearest cabins or landmarks. They
   meander, avoid water and high moor, and are traced canonically so A→B and
   B→A are identical. Trees avoid them.
@@ -734,7 +733,7 @@ camera.
   over them). The pieces tumble out and are smashed like any small rock for
   stones. They are story `SmashRock`s (a handful of draws); which ones are
   smashed is a bitmask on the boulder's entry, and they vanish when it
-  comes back. Landmark boulders (tors, stone circles, erratics, the spring)
+  comes back. Landmark boulders (stone circles, erratics, the spring)
   still can't be broken.
   `node scripts/regrow.mjs <dir>` checks all of it headless: break, rubble,
   a piece, reload, fell, fast-forward (sprout only when away), grown, back.
@@ -863,8 +862,8 @@ Supersedes the hammer notes in the feel pass above.
   in (`stepIn`, which sets `body.vel` so the gait animates and collides,
   1.2 s cap), then swings from arm's length.
 
-## Elk (stag mount)
-- `src/mobs/elk.ts`: a ground-only mob. Herds of 2–5 graze in meadows and at
+## Stelk (stag mount; was "elk")
+- `src/mobs/stelk.ts`: a ground-only mob. Herds of 2–5 graze in meadows and at
   forest edges, look up, and gallop away if you run at them (or within ~10 m
   on foot). It can be lassoed, led and ridden like the others, but never flies.
   The body is sculpted: each sphere direction is mapped through a shape
@@ -879,7 +878,7 @@ Supersedes the hammer notes in the feel pass above.
 - Riding uses `gallopUpdate` in movement.ts (a MountSpec without `fly`). It
   carves instead of strafing, takes `gather` seconds to reach a 34 m/s
   gallop, leaps on Space, swims deep water, and sub-steps its collision.
-- Trees: above 13 m/s, a tree in the elk's path is knocked flat (`Story.
+- Trees: above 13 m/s, a tree in the stelk's path is knocked flat (`Story.
   knockTree`, called before the move). Harvest's `knocked` flag drops its
   collider at once. Slower, a click or the badge butts the tree ahead down.
   Either way it gives 2 logs, which hop up to the rider (`Story.packLift`).
@@ -1189,7 +1188,7 @@ ledge, the standing stone and lighting on top.
   three heaves (2.6 s) hanging just outside the rock, over the lip (0.7 s),
   a look up (0.5 s), and it slips into an eyehole (0.65 s). The whole
   freeing takes about 12 s.
-- **Crows and elk keep off towers**: `nearBase` in `crow.ts`/`elk.ts` also
+- **Crows and stelks keep off towers**: `nearBase` in `crow.ts`/`stelk.ts` also
   rejects anywhere within `TOWER_CLEAR` (55 m) of a tower. All their landing
   and spawn spots go through it. Crows had settled in a doorway's room.
 
@@ -1436,3 +1435,103 @@ asked for as far as possible). Everything below is a first pass for review.
 - Heights now run ~25-47 m to the head (fjord seed). The network still
   grows from the nominal flame height, and parent links are forced, so the
   graph always connects. A squat tower may see fewer of its neighbours.
+
+## Elk renamed to stelks (2026-09-29)
+- Owner call: the stag mount is a **stelk** (plural stelks), made up like the
+  floof. Species name `'stelk'`, class `Stelk`, `src/mobs/stelk.ts`, debug
+  `spawnFlock('stelk')` and `settings.stelkHerds`. No save data keyed on it.
+- Checked while at it: they still spawn, but sparsely and far off. Herds land
+  70–300 m out at load and 150–320 m later, never within 80 m of the cabin or
+  55 m of a tower, and always out of view. In a check on the default seed
+  there was one herd of 2 about 250 m from the cabin after 30 s, which is easy
+  to never see. If they should be more visible, bring the ranges in or raise
+  `stelkHerds`.
+
+## The gift shot (2026-09-29)
+- Owner call: you must be outside and watching when the spirit conjures your
+  bike, so it takes the camera. `Journey.shot` starts once the spirit is in
+  place and you're on the ground outside the cabin (`cabin.inside`, 0.6 m
+  margin) within 16 m (40 m after 25 s). There's a 1.2 s lead-in so the
+  camera has settled before the spark comes out, then the conjure (2.7 s),
+  then a 1.6 s hold on the bike.
+- `Journey.cinematic()` goes into the same camera slot as the tower
+  cinematic in `main.ts` (`beacons.cinematic() ?? journey.cinematic()`),
+  so it gets the same eased blend in and out. `Journey.busy` freezes movement
+  and the E and F keys, as `beacons.busy` does.
+- The shot is side on to the spirit and the bike spot, from whichever side
+  faces away from the cabin, so the cabin never sits between the camera and
+  them. `scripts/giftshot.mjs` frame-steps it and checks that it waits while
+  you're indoors.
+
+## A more run-down cabin (2026-09-29)
+- Owner ask: the start cabin should look much more neglected before you fix
+  it. There's a sunken roof, not just a hole, plus peeling paint and patina.
+- **Roof:** `roofSag(x, z)` in `story/geometry.ts` bends the ruined roof down.
+  The ridge swaybacks between the gables, and there's a deep dip round the
+  front-slope hole, held up at the gables and on the eave walls. The roof is
+  now built twice. `roof` is the ruin: sagged, with holes, three boards
+  hanging into the room, moss cushions and a birch sapling by the ridge.
+  `roofFixed` is straight and whole. The roof repair swaps the whole roof
+  (`mkPart` takes a separate fill geometry, so the sketch still ghosts only
+  the missing boards). `cabin.surface()` subtracts the sag until the roof is
+  built. Boards and rafters are segmented boxes (`kbox(..., seg)`) so they
+  can bend.
+- **Paint:** a `uWear` uniform on the prop material (0 everywhere except the
+  story cabin). In `PROP_FRAG` it fades the falu red toward `cabinFaded` and
+  peels whole clapboard runs back to grey `cabinBare` wood, worst near the
+  ground. It chips the cream trim and spreads moss (kind 23) up the roof
+  boards from the eaves. Each built part takes off a third
+  (`RuinCabin.update` eases it). I tried vertical grime streaks, but they
+  read as plaid against the clapboard lines, so they're out.
+- **Wear props** (`buildWear`, by side, so the cutaway still works): sprung
+  clapboards with the gap showing, the left window boarded with crossed
+  planks, and moss and weeds along the footings. Front goes with the door
+  repair, back and left with the roof, right with the chimney. The cutaway
+  now treats anything in a part's `broken` list the same way.
+- `scripts/cabin.mjs <dir> [tag=x]` shoots the cabin from five sides, broken
+  and then fully mended.
+
+## No more tors (2026-09-29)
+- Owner ask: the small stacked-boulder tors read like far-off beacon towers,
+  so you couldn't tell which stacks mattered. They're gone from `poisInCell`;
+  the only boulder stacks in the world are now the towers. Stone circles and
+  erratics stay. This shifts the POI rng stream, so circles, erratics and
+  paths move for a given seed. The `tor` shot is gone from `scripts/shots.mjs`.
+
+## Patting the spirit (2026-09-29)
+- Owner ask: a way to gently pat the house spirit, only while it's idle, with
+  a prompt when you're near and a reaction that shows it loves it.
+- **Offer:** `Story.findAction` gives a `pat` verb (new `pat` icon: a mitten
+  on a happy dome) when you're within `PAT_NEAR` (1.7 m) of the spirit and
+  `spirit.idle` holds: arrived at its want, no acts queued, not riding or
+  waiting to lead. Trees, rocks, pickups and repairs take priority over it.
+  It stays wordless, so the badge is the prompt.
+- **Timeline:** `spirit.pat()` queues a `pat` act. `PAT` in `spirit.ts`
+  holds the beats (0.6/1.1/1.6 s), the end of the hand (2.1 s) and the joy
+  (1.3 s). The story reads `spirit.patTime` to drive the explorer, so the
+  hand and the squish stay in step. Moving, jumping or leaving the walk mode
+  lets go (`endPat`).
+- **Explorer:** the story walks the body to `PAT_STAND` (0.7 m), turned so
+  the spirit sits in front of the left mitten. The left hand does the
+  patting because the right one may hold a tool or a rope. `rig.patAt` is
+  the mitten target (the crown from `spirit.headTop`, lifting between
+  beats, then a short stroke back). The rig drops onto one knee with leg
+  IK (feet planted, left knee down) and a fairly upright torso. The first
+  try was a bow from the waist, and the big head landed on the spirit. The
+  arm is two-bone IK in the spine frame. The spine leans in only as far as
+  it has to to bring the crown within reach (`patLean`, at most 0.35).
+- **Spirit:** its eyes shut in happy arcs, it leans up into the hand and
+  wiggles, and its arms clasp at its chest. Each beat gives it a squash
+  impulse, a `coo` (a new warbling sine in `audio.ts`) and two sparkles.
+  `patGlow` warms its tint (even when cold), brightens the ember and the
+  heart, and deepens the blush. When the hand lifts, it throws its arms up,
+  bounces, spins, gives an excited chirp and shows the heart bubble. The
+  bubble stays hidden during the pat because it covered the explorer's
+  face.
+- **Camera:** from straight behind, the explorer's back hides everything.
+  So when the mouse is idle and the camera is within ~80° of behind, it
+  eases toward `story.patCamYaw` (heading + 1.8, three-quarters from the
+  patting side), the same way it drifts behind the bike.
+- `scripts/pat.mjs <dir> [seed] [warmth] [camYaw]` presses E next to an
+  idle spirit and steps through the pat frame by frame.
+

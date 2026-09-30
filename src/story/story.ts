@@ -19,7 +19,7 @@ import type { Colliders, PropHit } from '../world/colliders';
 import { BIG_ROCK, Harvest, rubbleOf, type RegrowCtx, type Taken } from '../world/harvest';
 import { hash01 } from '../core/rng';
 import { segDist } from '../world/worldgen';
-import { Spirit } from './spirit';
+import { PAT, Spirit } from './spirit';
 
 // The story director. It runs a phase table (phase1.ts) over the story set:
 // the broken cabin, the axe, the grove, the brook stones and the spirit. It
@@ -44,6 +44,9 @@ const MAX_CANOPY = 4.6;
 const SMASH_REACH = 2.15;
 /** Resources come out as you work: every other blow, ending on the last (3 blows: 1st and 3rd). */
 const yields = (hit: number, hp: number) => (hp - hit) % 2 === 0;
+/** How close to the idle spirit the pat is offered, and where you stand to do it (m). */
+const PAT_NEAR = 1.7;
+const PAT_STAND = 0.7;
 
 interface Target {
   tag: TargetTag;
@@ -153,6 +156,8 @@ export class Story {
   private heldFromTake = false;
   private swingCd = 0;
   private swingOn: { tree?: ChopTree; rock?: SmashRock } = {};
+  /** Where the patting mitten goes (the spirit's head, lifting between pats). */
+  private patAt = new THREE.Vector3();
   /** How far above the body's feet the pack is (riding: up on the mount). */
   packLift = 0;
   /** A mount could butt a tree right now (the badge shows antlers). */
@@ -734,14 +739,17 @@ export class Story {
     if (!input.pressed('KeyE') && !input.pressed('Mouse0')) return false;
     if (a.verb === 'other') return false;
     if (a.verb === 'repair') this.depositing = true;
+    else if (a.verb === 'pat') this.spirit.pat();
     else if (a.target) this.act(a.target, true);
     return true;
   }
 
   /** What the action would do right now (the badge), from the last frame. */
-  private action: { verb: 'take' | 'chop' | 'smash' | 'repair' | 'light' | 'other'; icon: IconName; target?: Target } | null = null;
+  private action: { verb: 'take' | 'chop' | 'smash' | 'repair' | 'light' | 'pat' | 'other'; icon: IconName; target?: Target } | null = null;
   /** An action offered by something outside the story (a beacon tower to light): shown on the badge, handled by its owner. */
   external: IconName | null = null;
+  /** Something else has the scene (a tower, a journey cutscene): the spirit can't be patted. */
+  noPat = false;
   private depositing = false;
 
   private findAction(walking: boolean): typeof this.action {
@@ -755,7 +763,54 @@ export class Story {
     }
     const st = this.step;
     if (st.kind === 'build' && !this.depositing && this.inBuildZone() && this.inv[st.resource] > 0 && this.remainingFor(st.parts) > 0) return { verb: 'repair', icon: 'hammer' };
+    if (this.canPat()) return { verb: 'pat', icon: 'pat' };
     return this.external ? { verb: 'other', icon: this.external } : null;
+  }
+
+  /** Right by the spirit while it's idling (and not already being patted). */
+  private canPat(): boolean {
+    const sp = this.spirit, p = this.d.body.pos;
+    if (this.noPat || !sp.idle || !sp.group.visible || this.swingT >= 0 || this.stepIn >= 0) return false;
+    return Math.hypot(p.x - sp.pos.x, p.z - sp.pos.z) < PAT_NEAR && Math.abs(p.y - sp.pos.y) < 1;
+  }
+
+  /**
+   * A pat in progress (the spirit's `patTime` is the clock): step to arm's
+   * length and square up, then the mitten comes down on each beat, lingers
+   * for a stroke and lifts away. Walking off lets go.
+   */
+  private patting(dt: number, input: Input, walking: boolean) {
+    const sp = this.spirit, body = this.d.body, rig = this.d.rig;
+    const t = sp.patTime;
+    if (t < 0 || t >= PAT.end) { rig.patAt = null; return; }
+    const i = input.state();
+    if (!walking || Math.hypot(i.x, i.y) > 0.2 || i.jumpPressed) { sp.endPat(); rig.patAt = null; return; }
+    const dx = sp.pos.x - body.pos.x, dz = sp.pos.z - body.pos.z, dl = Math.hypot(dx, dz) || 1;
+    const gap = dl - PAT_STAND;
+    const step = Math.sign(gap) * Math.min(Math.abs(gap), 2.2 * dt);
+    body.pos.x += (dx / dl) * step;
+    body.pos.z += (dz / dl) * step;
+    body.vel.x = body.vel.z = 0;
+    // Turned a touch right, so the spirit sits in front of the left mitten.
+    this.face(this.patAt.set(sp.pos.x + dz / dl * 0.3, 0, sp.pos.z - dx / dl * 0.3), dt);
+    const b = PAT.beats, beat = b[1] - b[0], last = b[b.length - 1];
+    let lift = 0.13, stroke = 0;
+    if (t >= b[0] - 0.22 && t < b[0]) lift = 0.13 * (b[0] - t) / 0.22;
+    else if (t >= b[0] && t < last) lift = 0.12 * Math.sin(Math.PI * (((t - b[0]) / beat) % 1));
+    else if (t >= last) { lift = 0; stroke = (t - last) / (PAT.end - last); }
+    sp.headTop(this.patAt);
+    // (The mitten's centre, so a little below it presses into the crown.)
+    this.patAt.y += lift + 0.01;
+    // The last pat stays for a slow stroke back over the crown.
+    this.patAt.x -= (dx / dl) * 0.1 * stroke;
+    this.patAt.z -= (dz / dl) * 0.1 * stroke;
+    rig.patAt = this.patAt;
+  }
+
+  /** While patting: a camera yaw that shows it (three-quarters from the patting side). */
+  get patCamYaw(): number | null {
+    const t = this.spirit.patTime;
+    return t >= 0 && t < PAT.end ? this.d.body.heading + 1.8 : null;
   }
 
   private inBuildZone(): boolean {
@@ -1067,6 +1122,7 @@ export class Story {
     if (this.cabin.lit) this.spirit.warmthTarget = 1;
     this.spirit.player.copy(body.pos);
     this.spirit.update(dt);
+    this.patting(dt, input, walking);
 
     // Glint only what's usable now; brighter while a hint is running.
     this.boostT = Math.max(0, this.boostT - dt);

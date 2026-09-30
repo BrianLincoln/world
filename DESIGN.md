@@ -33,10 +33,14 @@ These apply to everything.
   ordinary rock broken, and they regrow.
 - Walking, running, parachuting, biking, riding creatures and dev-mode flying
   all keep working.
+- You can pat the home spirit whenever it's idle (at its spot, not leading,
+  riding or hinting). Walk up close and the action badge shows a mitten on
+  its head. You kneel and pat it three times. It shuts its eyes, blushes,
+  glows warmer and coos at each pat, then hops and spins with a heart.
 
 ### Beacon towers
-- A beacon tower is a much larger version of the stacked-boulder landscape
-  feature (the tor).
+- A beacon tower is a huge stack of boulders. Nothing else in the landscape
+  is a stacked-boulder cairn, so any stack you see far off is a tower.
 - Towers are placed procedurally from the seed:
   - on high points;
   - spaced out so they don't cluster;
@@ -125,7 +129,9 @@ The objective sequence is built as data, like phase 1.
    fire.
 
 **Phase 2: the gift and the first journey** (built, first pass: stages 0-5 are all in, waiting on a review pass)
-1. After the hearth is lit, the home spirit gives you a bike.
+1. After the hearth is lit, the home spirit gives you a bike. It waits until
+   you're outside in the yard with it, then takes the camera for a short
+   shot of it pulling the bike out of its heart, so you can't miss it.
    From then on, the bike always reappears outside the home cabin.
 2. The spirit rides alongside on its own small bike and leads you along a
    visible path from the cabin to the home tower.

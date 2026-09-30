@@ -16,7 +16,7 @@ import { Crow, crowStyle } from './mobs/crow';
 import { Mobs } from './mobs/manager';
 import type { Mob, MobCtx } from './mobs/types';
 import { Floof } from './mobs/floof';
-import { Elk } from './mobs/elk';
+import { Stelk } from './mobs/stelk';
 import { OrbitCamera } from './player/orbitCamera';
 import { DebugUI } from './ui/debug';
 import { StoryHost } from './story/host';
@@ -87,8 +87,8 @@ rig.onPuff = (at, n, size, spread) => puffs.emit(at, n, size, spread);
 
 // Creatures: wild flocks, the lasso, leads and riding.
 const crow = new Crow();
-const elk = new Elk();
-const mobs = new Mobs(gen, [new Floof(), crow, elk]);
+const stelk = new Stelk();
+const mobs = new Mobs(gen, [new Floof(), crow, stelk]);
 // ?mobs=0 = no wild spawns (shots place their own), or a density multiplier.
 if (params.has('mobs')) mobs.settings.density = parseFloat(params.get('mobs')!);
 scene.add(mobs.group);
@@ -532,11 +532,11 @@ function frame(ts?: number) {
     resize();
   }
 
-  if (input.pressed('KeyF') && !riding && !cycling && !beacons.busy) player.set(player.current.name === 'fly' ? 'walk' : 'fly', ctx);
+  if (input.pressed('KeyF') && !riding && !cycling && !beacons.busy && !journey?.busy) player.set(player.current.name === 'fly' ? 'walk' : 'fly', ctx);
   // Only take the press (pressed() consumes it) when a tower is on offer.
   const beaconUsed = !!beacons.action(player.current.name) && (input.pressed('KeyE') || input.pressed('Mouse0')) && beacons.act(player.current.name);
   if (!beaconUsed) storyHost?.story?.handleAction(input);
-  if (input.pressed('KeyE') && !beaconUsed) {
+  if (input.pressed('KeyE') && !beaconUsed && !journey?.busy) {
     // Something else in reach? Climb straight across; otherwise E hops off.
     const next = nextMount();
     if (next && (riding || cycling)) switchTo(next);
@@ -559,11 +559,11 @@ function frame(ts?: number) {
 
   ctx.input = input.state();
   // Watching a tower's spirit (or being carried in and out): hands off.
-  if (beacons.busy) ctx.input = { ...ctx.input, x: 0, y: 0, run: false, jump: false, jumpPressed: false, up: false, down: false };
+  if (beacons.busy || journey?.busy) ctx.input = { ...ctx.input, x: 0, y: 0, run: false, jump: false, jumpPressed: false, up: false, down: false };
   ctx.camYaw = inputYaw ?? orbit.yaw;
   ctx.camPitch = orbit.pitch;
   ctx.dt = dt;
-  elkWork(dt);
+  stelkWork(dt);
   if (player.current.name !== 'fly') colliders.prefetch(player.body.pos.x, player.body.pos.z);
   player.update(ctx);
   input.endFrame();
@@ -629,7 +629,7 @@ function frame(ts?: number) {
     }
     // A gallop kicks up dust behind.
     const gs = rideMode.gallopState;
-    if (riding.species.name === 'elk' && body.grounded && gs.wet < 0.5 && gs.speed > 12) {
+    if (riding.species.name === 'stelk' && body.grounded && gs.wet < 0.5 && gs.speed > 12) {
       hoofT -= dt;
       if (hoofT <= 0) {
         hoofT = 0.11 - Math.min(0.06, (gs.speed - 12) * 0.003);
@@ -660,9 +660,20 @@ function frame(ts?: number) {
   rig.hand(hand);
   mobs.updateRopes(mobCtx, hand);
   puffs.update(dt);
-  if (storyHost?.story) storyHost.story.external = beacons.action(mode);
+  if (storyHost?.story) {
+    storyHost.story.external = beacons.action(mode);
+    // No pats in the middle of a cutscene.
+    storyHost.story.noPat = beacons.busy || !!journey?.busy;
+  }
   storyHost?.story?.update(dt, input, mode);
   journey?.update(dt);
+  // Patting the spirit: from behind, the explorer's back hides it all, so
+  // with the mouse idle the camera eases round to the patting side.
+  const patYaw = storyHost?.story?.patCamYaw ?? null;
+  if (patYaw !== null && lookIdle > 0.3) {
+    const behind = Math.atan2(Math.sin(body.heading + Math.PI - orbit.yaw), Math.cos(body.heading + Math.PI - orbit.yaw));
+    if (Math.abs(behind) < 1.4) orbit.yaw += Math.atan2(Math.sin(patYaw - orbit.yaw), Math.cos(patYaw - orbit.yaw)) * (1 - Math.exp(-1.6 * dt));
+  }
   towerDebug.update(body.pos, body.heading, orbit.yaw);
   for (const ev of body.events) if (ev.type === 'land' && ev.impact > 6) orbit.bump(Math.min(2.2, (ev.impact - 6) * 0.14));
   const focus = body.pos.clone();
@@ -702,7 +713,8 @@ function frame(ts?: number) {
   // You are the tower's head: the camera looks out through its eyes.
   // A tower's spirit being freed: the camera watches it, not you, easing
   // in from where it was and back to you after (never a cut).
-  const cine = beacons.cinematic();
+  // Or the hearth spirit pulling your bike out of its heart.
+  const cine = beacons.cinematic() ?? journey?.cinematic() ?? null;
   if (cine) {
     if (!hadCine) { camBlendPos.copy(camera.position); camBlendQ.copy(camera.quaternion); camBlend = 0; }
     camera.position.copy(cine.pos);
@@ -773,46 +785,46 @@ let skidT = 0;
 let hoofT = 0;
 /** Seconds until a butt of the antlers lands (-1 = none under way). */
 let buttAt = -1;
-const elkDir = new THREE.Vector3();
+const stelkDir = new THREE.Vector3();
 /** A full gallop (m/s along the heading) bowls trees over. */
 const CHARGE_SPEED = 13;
 
 /**
- * Riding an elk: at a full gallop, trees in its path are knocked flat as it
+ * Riding a stelk: at a full gallop, trees in its path are knocked flat as it
  * runs through them (it hardly checks its stride); slower, a click (or the
  * badge) butts the tree in front down with the antlers. The logs hop into
  * your pack either way. Runs before the move, so the trunk is out of the way
  * before the gallop would hit it.
  */
-function elkWork(dt: number) {
+function stelkWork(dt: number) {
   const story = storyHost?.story;
   if (!story) return;
   const m = riding;
-  if (!m || m.species.name !== 'elk') {
+  if (!m || m.species.name !== 'stelk') {
     story.ramReady = false;
     buttAt = -1;
     return;
   }
   const b = player.body;
   const gs = rideMode.gallopState;
-  elkDir.set(Math.sin(b.heading), 0, Math.cos(b.heading));
+  stelkDir.set(Math.sin(b.heading), 0, Math.cos(b.heading));
   const nose = m.species.radius + 0.4;
   if (b.grounded && gs.wet < 0.5 && gs.speed > CHARGE_SPEED) {
     const reach = nose + gs.speed * dt * 1.6 + 0.4;
-    if (story.knockTree(b.pos, elkDir, reach, 0.5)) {
-      elk.butt(m);
+    if (story.knockTree(b.pos, stelkDir, reach, 0.5)) {
+      stelk.butt(m);
       gs.speed *= 0.85;
       orbit.bump(0.8);
     }
   }
-  story.ramReady = b.grounded && gs.wet < 0.5 && gs.speed <= CHARGE_SPEED && !!story.treeAhead(b.pos, elkDir, nose + 2.2, 0.8);
+  story.ramReady = b.grounded && gs.wet < 0.5 && gs.speed <= CHARGE_SPEED && !!story.treeAhead(b.pos, stelkDir, nose + 2.2, 0.8);
   if (buttAt < 0 && story.ramReady && input.pressed('Mouse0')) {
-    elk.butt(m);
+    stelk.butt(m);
     buttAt = 0.26;
   }
   if (buttAt >= 0) {
     buttAt -= dt;
-    if (buttAt < 0 && story.knockTree(b.pos, elkDir, nose + 2.6, 0.9)) orbit.bump(0.6);
+    if (buttAt < 0 && story.knockTree(b.pos, stelkDir, nose + 2.6, 0.9)) orbit.bump(0.6);
   }
 }
 /** Seconds of dust trail left after a timed kick. */
@@ -958,7 +970,7 @@ window.__ow = {
   _body: player.body,
   _cam: camera,
   mobs,
-  /** Drop a flock (floof|crow|elk) `d` m in front of the explorer. */
+  /** Drop a flock (floof|crow|stelk) `d` m in front of the explorer. */
   spawnFlock: (name: string, d = 14, n?: number) => {
     const b = player.body;
     mobs.spawnFlockAt(name, b.pos.x + Math.sin(b.heading) * d, b.pos.z + Math.cos(b.heading) * d, mobCtx, n);

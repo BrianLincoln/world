@@ -5,7 +5,7 @@ import * as THREE from 'three';
 // canvases feed the HUD (as data URLs) and the in-world billboards (as
 // textures), so an icon always looks the same wherever it appears.
 
-export type IconName = 'axe' | 'log' | 'stone' | 'flame' | 'heart' | 'home' | 'check' | 'hand' | 'hammer' | 'pick' | 'smash' | 'antlers' | 'up' | 'down' | 'ember' | 'bike' | 'finger' | 'mouse' | 'mouseDown' | 'fingerDown';
+export type IconName = 'axe' | 'log' | 'stone' | 'flame' | 'heart' | 'home' | 'check' | 'hand' | 'hammer' | 'pick' | 'smash' | 'antlers' | 'up' | 'down' | 'ember' | 'bike' | 'finger' | 'mouse' | 'mouseDown' | 'fingerDown' | 'pat';
 
 const INK = '#4a2e36';
 const SIZE = 128;
@@ -381,7 +381,7 @@ function drawMouse(g: CanvasRenderingContext2D, down: boolean) {
   }
 }
 
-/** A pair of elk antlers (riding an elk: knock the tree down). */
+/** A pair of stelk antlers (riding a stelk: knock the tree down). */
 function drawAntlers(g: CanvasRenderingContext2D) {
   const beam = (s: number) => {
     g.save();
@@ -496,9 +496,61 @@ function drawBike(g: CanvasRenderingContext2D) {
   g.stroke();
 }
 
+/** "Pat it": a mitten resting on a small round head that's shut its eyes happily. */
+function drawPat(g: CanvasRenderingContext2D) {
+  // The head: a warm dome with happy-arc eyes and a blush.
+  g.beginPath();
+  g.moveTo(20, 116);
+  g.bezierCurveTo(18, 70, 40, 52, 64, 52);
+  g.bezierCurveTo(88, 52, 110, 70, 108, 116);
+  g.closePath();
+  g.fillStyle = '#f0a868';
+  g.fill();
+  ink(g);
+  for (const x of [48, 80]) {
+    g.beginPath();
+    g.arc(x, 90, 7, Math.PI * 1.1, Math.PI * 1.9);
+    ink(g, 5);
+    g.beginPath();
+    g.ellipse(x + (x < 64 ? -10 : 10), 102, 7, 4, 0, 0, Math.PI * 2);
+    g.fillStyle = '#e8837a';
+    g.fill();
+  }
+  // The mitten, palm down on top.
+  g.save();
+  g.translate(62, 40);
+  g.rotate(-0.12);
+  g.beginPath();
+  g.moveTo(-36, 10);
+  g.bezierCurveTo(-36, -12, -10, -18, 14, -16);
+  g.bezierCurveTo(34, -14, 40, 0, 36, 10);
+  g.closePath();
+  g.fillStyle = '#b8473a';
+  g.fill();
+  ink(g);
+  g.beginPath();
+  g.moveTo(-18, 10);
+  g.bezierCurveTo(-24, 20, -8, 26, -2, 12);
+  g.fillStyle = '#b8473a';
+  g.fill();
+  ink(g);
+  // Cuff.
+  g.beginPath();
+  g.roundRect(34, -16, 16, 26, 6);
+  g.fillStyle = '#efe5d4';
+  g.fill();
+  ink(g);
+  g.restore();
+  // Two little pat ticks.
+  g.beginPath();
+  g.moveTo(16, 30); g.lineTo(8, 24);
+  g.moveTo(14, 44); g.lineTo(5, 44);
+  ink(g, 5);
+}
+
 const DRAW: Record<IconName, (g: CanvasRenderingContext2D) => void> = {
   up: drawUp, down: drawDown, ember: drawEmber, bike: drawBike,
-  antlers: drawAntlers,
+  antlers: drawAntlers, pat: drawPat,
   axe: drawAxe, log: drawLog, stone: drawStone, flame: drawFlame, heart: drawHeart, home: drawHome, check: drawCheck, hand: drawHand, hammer: drawHammer, pick: drawPick, smash: drawSmash,
   finger: (g) => drawFinger(g, false), fingerDown: (g) => drawFinger(g, true), mouse: (g) => drawMouse(g, false), mouseDown: (g) => drawMouse(g, true),
 };

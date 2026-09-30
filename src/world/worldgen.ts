@@ -19,7 +19,7 @@ export interface Boulder {
 }
 
 export interface Poi {
-  kind: 'cabin' | 'tor' | 'circle' | 'erratic' | 'tower';
+  kind: 'cabin' | 'circle' | 'erratic' | 'tower';
   x: number; z: number; y: number;
   rot: number;
   /** Clearing radius: trees and bushes keep out of this. */
@@ -529,42 +529,6 @@ export class WorldGen {
       }
     }
 
-    // Tors: stacked rounded boulders; landmarks on hills and moors.
-    if (rnd() < 0.34) {
-      // Best of a few candidates: prefer high, open ground (visible from afar).
-      let x = 0, z = 0, h = -1, score = -Infinity;
-      for (let k = 0; k < 4; k++) {
-        const [cx2, cz2] = inCell();
-        const ch = this.baseHeight(cx2, cz2);
-        const sc = ch - 400 * this.forestDensity(cx2, cz2, ch);
-        if (sc > score) { score = sc; x = cx2; z = cz2; h = ch; }
-      }
-      if (h > 6 && this.forestDensity(x, z, h) < 0.3) {
-        const boulders: Boulder[] = [];
-        const stacks = 1 + Math.floor(rnd() * 3);
-        for (let s = 0; s < stacks; s++) {
-          const sx = x + (s === 0 ? 0 : (rnd() - 0.5) * 26);
-          const sz = z + (s === 0 ? 0 : (rnd() - 0.5) * 26);
-          const base = this.baseHeight(sx, sz);
-          let y = base - 1.2;
-          let r = (s === 0 ? 8 : 4.5) + rnd() * 4;
-          const n = 2 + Math.floor(rnd() * (s === 0 ? 4 : 3));
-          let ox = 0;
-          let oz = 0;
-          for (let k = 0; k < n; k++) {
-            const sy = r * (0.55 + rnd() * 0.25);
-            y += sy * 0.85;
-            boulders.push({ x: sx + ox, y, z: sz + oz, sx: r, sy, rot: rnd() * Math.PI });
-            y += sy * 0.7;
-            r *= 0.68 + rnd() * 0.2;
-            ox += (rnd() - 0.5) * r * 0.5;
-            oz += (rnd() - 0.5) * r * 0.5;
-          }
-        }
-        out.push({ kind: 'tor', x, z, y: h, rot: 0, clear: 26, boulders });
-      }
-    }
-
     // Standing stone circles on open meadow.
     if (rnd() < 0.08) {
       const [x, z] = inCell();
@@ -658,7 +622,7 @@ export class WorldGen {
       const cands: Poi[] = [];
       for (let dz = -2; dz <= 2; dz++) for (let dx = -2; dx <= 2; dx++) {
         for (const p of this.poisInCell(cx + dx, cz + dz)) {
-          if (p !== a && p.story !== 'ruin' && (p.kind === 'cabin' || p.kind === 'circle' || p.kind === 'tor' || p.kind === 'tower')) cands.push(p);
+          if (p !== a && p.story !== 'ruin' && (p.kind === 'cabin' || p.kind === 'circle' || p.kind === 'tower')) cands.push(p);
         }
       }
       cands.sort((p, q) => Math.hypot(p.x - a.x, p.z - a.z) - Math.hypot(q.x - a.x, q.z - a.z));

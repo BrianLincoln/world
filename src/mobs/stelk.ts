@@ -4,7 +4,7 @@ import type { WorldGen } from '../world/worldgen';
 import { colored, furBall, lathe, merge, mirrorX, PartBatch, Spring } from './parts';
 import type { Flock, Mob, MobCtx, Species } from './types';
 
-// The elk: the big one. A storybook stag, long-legged and deep-chested, with
+// The stelk: the big one. A storybook stag, long-legged and deep-chested, with
 // a dark shaggy ruff, a cream rump and a great sweep of pale antlers. Herds
 // of 2-5 graze in meadows and along forest edges, heads down in the grass,
 // looking up now and then; get too close and they wheel away at a gallop.
@@ -299,7 +299,7 @@ function collarGeometry() {
 
 type Act = 'graze' | 'look' | 'step';
 
-interface ElkData {
+interface StelkData {
   root: THREE.Object3D;
   body: THREE.Object3D;
   neck: THREE.Object3D;
@@ -363,13 +363,13 @@ const WALK = [0.25, 0.75, 0, 0.5];
 const TROT = [0, 0.5, 0.5, 0];
 const GALLOP = [0.48, 0.6, 0.0, 0.1];
 
-export class Elk implements Species {
-  readonly name = 'elk' as const;
+export class Stelk implements Species {
+  readonly name = 'stelk' as const;
   readonly radius = 0.75;
   readonly centreY = BODY_Y;
   readonly flockSize: [number, number] = [2, 5];
   readonly mount: MountSpec = {
-    name: 'elk',
+    name: 'stelk',
     radius: 0.6,
     // Faster than anything else on legs: a canter, and a flat-out gallop
     // that takes a few seconds to build.
@@ -466,7 +466,7 @@ export class Elk implements Species {
   initMob(m: Mob, i: number, f: Flock, ctx: MobCtx) {
     const r = m.rnd;
     const o = () => new THREE.Object3D();
-    const d: ElkData = {
+    const d: StelkData = {
       root: o(), body: o(), neck: o(), head: o(), ears: [o(), o()], upper: [o(), o(), o(), o()], lower: [o(), o(), o(), o()], saddle: o(), collar: o(), seat: o(),
       act: 'graze', idle: r() * 4, goal: null, slot: new THREE.Vector2(), face: null, speed: 0,
       t: r() * 10, stride: r(), gait: new Spring(0), tilt: new Spring(TILT_GRAZE), headX: new Spring(-0.9), pitch: new Spring(), bank: new Spring(),
@@ -562,7 +562,7 @@ export class Elk implements Species {
         fd.spot.copy(f.centre);
         f.target.copy(f.centre);
         fd.relocate = 30 + rnd() * 60;
-        for (const m of M) (m.data as ElkData).idle = 0.5 + rnd() * 2;
+        for (const m of M) (m.data as StelkData).idle = 0.5 + rnd() * 2;
       }
       return;
     }
@@ -586,7 +586,7 @@ export class Elk implements Species {
   }
 
   think(m: Mob, ctx: MobCtx, leashIndex: number) {
-    const d = m.data as ElkData;
+    const d = m.data as StelkData;
     if (m.ridden) return;
     const { dt, player } = ctx;
     d.lookAt = null;
@@ -645,7 +645,7 @@ export class Elk implements Species {
 
   /** Grazing: head down a while, a few steps on, a look round. */
   private forage(m: Mob, spot: THREE.Vector3, player: THREE.Vector3, dt: number) {
-    const d = m.data as ElkData;
+    const d = m.data as StelkData;
     const r = m.rnd;
     d.idle -= dt;
     if (d.goal && Math.hypot(d.goal.x - m.pos.x, d.goal.z - m.pos.z) < 0.5) { d.goal = null; d.idle = Math.min(d.idle, 0.3); }
@@ -676,7 +676,7 @@ export class Elk implements Species {
 
   /** Walk / run toward a goal: the heading carves round, the body follows it (no sidestepping). */
   private move(m: Mob, ctx: MobCtx, goal: THREE.Vector3, speed: number, face: number | null) {
-    const d = m.data as ElkData;
+    const d = m.data as StelkData;
     const { dt } = ctx;
     const dx = goal.x - m.pos.x, dz = goal.z - m.pos.z;
     const dist = Math.hypot(dx, dz);
@@ -715,12 +715,12 @@ export class Elk implements Species {
 
   /** Lower the antlers and drive forward (ridden: knocking a tree down). */
   butt(m: Mob) {
-    const d = m.data as ElkData;
+    const d = m.data as StelkData;
     if (d.butt < 0 || d.butt > 0.5) d.butt = 0;
   }
 
   animate(m: Mob, ctx: MobCtx) {
-    const d = m.data as ElkData;
+    const d = m.data as StelkData;
     const dt = Math.max(ctx.dt, 1e-4);
     d.t += dt;
     const t = d.t;
@@ -908,7 +908,7 @@ export class Elk implements Species {
   }
 
   emit(m: Mob, _dist: number) {
-    const d = m.data as ElkData;
+    const d = m.data as StelkData;
     this.bodyB.push(d.body.matrixWorld, m.tint);
     this.neckB.push(d.neck.matrixWorld, m.tint);
     this.headB.push(d.head.matrixWorld, m.tint, d.eye);
@@ -926,7 +926,7 @@ export class Elk implements Species {
   }
 
   attach(m: Mob, toward: THREE.Vector3, out: THREE.Vector3) {
-    const d = m.data as ElkData;
+    const d = m.data as StelkData;
     d.collar.getWorldPosition(out);
     tv.subVectors(toward, out).setY(0);
     if (tv.lengthSq() < 1e-4) tv.set(0, 0, 1);
@@ -934,14 +934,14 @@ export class Elk implements Species {
   }
 
   seat(m: Mob) {
-    const d = m.data as ElkData;
+    const d = m.data as StelkData;
     d.seat.getWorldPosition(seatPos);
     d.seat.getWorldQuaternion(seatQuat);
     return { pos: seatPos, quat: seatQuat, spread: 0.78 };
   }
 
   reset(m: Mob) {
-    const d = m.data as ElkData;
+    const d = m.data as StelkData;
     d.goal = null;
     d.act = 'look';
     d.idle = 1 + m.rnd() * 2;

@@ -53,9 +53,9 @@ export class Mobs {
     /** Floof flocks at once, and seconds between arrivals. */
     floofFlocks: 2,
     floofEvery: [25, 80] as [number, number],
-    /** Elk herds grazing within range, and seconds between newcomers. */
-    elkHerds: 2,
-    elkEvery: [20, 60] as [number, number],
+    /** Stelk herds grazing within range, and seconds between newcomers. */
+    stelkHerds: 2,
+    stelkEvery: [20, 60] as [number, number],
     /** Seconds between crow fly-overs (a flock crossing over your head). */
     crowPassEvery: [45, 80] as [number, number],
     /** Debug: brains paused, animation runs. */
@@ -109,7 +109,7 @@ export class Mobs {
   private resetClock() {
     this.age = 0;
     // The first floofs drift in shortly after you arrive.
-    this.cooldown = { crow: 0, floof: 3 + this.rnd() * 12, elk: 0, crowPass: 20 + this.rnd() * 20 };
+    this.cooldown = { crow: 0, floof: 3 + this.rnd() * 12, stelk: 0, crowPass: 20 + this.rnd() * 20 };
   }
 
   *all(): Generator<Mob> {
@@ -132,7 +132,7 @@ export class Mobs {
     for (const sp of this.species) {
       this.cooldown[sp.name] = (this.cooldown[sp.name] ?? 0) - dt;
       if (this.cooldown[sp.name] > 0) continue;
-      const per = sp.name === 'crow' ? this.settings.crowFlocks : sp.name === 'elk' ? this.settings.elkHerds : this.settings.floofFlocks;
+      const per = sp.name === 'crow' ? this.settings.crowFlocks : sp.name === 'stelk' ? this.settings.stelkHerds : this.settings.floofFlocks;
       const want = Math.round(per * this.settings.density);
       let have = 0;
       for (const f of this.flocks.values()) if (f.species === sp && !f.data.debug && !f.data.passing) have++;
@@ -142,11 +142,11 @@ export class Mobs {
         this.cooldown[sp.name] = 1.5;
         continue;
       }
-      if (sp.name === 'floof' || (sp.name === 'elk' && !initial)) {
-        const [lo, hi] = sp.name === 'floof' ? this.settings.floofEvery : this.settings.elkEvery;
+      if (sp.name === 'floof' || (sp.name === 'stelk' && !initial)) {
+        const [lo, hi] = sp.name === 'floof' ? this.settings.floofEvery : this.settings.stelkEvery;
         this.cooldown[sp.name] = lo + this.rnd() * (hi - lo);
-      } else if (sp.name === 'elk') {
-        this.cooldown.elk = 0;
+      } else if (sp.name === 'stelk') {
+        this.cooldown.stelk = 0;
       } else {
         // Crows trickle in, except at the start when the world fills at once.
         this.cooldown.crow = initial ? 0 : 5 + this.rnd() * 15;
@@ -181,9 +181,9 @@ export class Mobs {
       sp.launch(f, ctx, rnd, true);
       f.centre.copy(at);
       f.target.copy(at);
-      // Crows settle on the spot for a while; floofs barely drift; elk graze.
+      // Crows settle on the spot for a while; floofs barely drift; stelks graze.
       if (sp.name === 'crow') Object.assign(f.data, { mode: 'ground', spot: at.clone(), relocate: 60 + rnd() * 60 });
-      if (sp.name === 'elk') Object.assign(f.data, { mode: 'graze', spot: at.clone(), relocate: 90 + rnd() * 60 });
+      if (sp.name === 'stelk') Object.assign(f.data, { mode: 'graze', spot: at.clone(), relocate: 90 + rnd() * 60 });
       if (f.data.speed) f.data.speed = 0.4;
     } else if (!sp.launch(f, ctx, rnd, initial)) return null;
     f.home.copy(f.centre);
@@ -204,7 +204,7 @@ export class Mobs {
     };
   }
 
-  /** Debug: drop a fresh flock of a species right here (crows land, floofs hover, elk graze). */
+  /** Debug: drop a fresh flock of a species right here (crows land, floofs hover, stelks graze). */
   spawnFlockAt(name: string, x: number, z: number, ctx: MobCtx, n?: number) {
     const sp = this.species.find((s) => s.name === name);
     if (sp) this.launch(sp, ctx, true, new THREE.Vector3(x, this.gen.height(x, z), z), n);

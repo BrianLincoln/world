@@ -20,7 +20,7 @@ export interface DebugHooks {
   colliders: { enabled: boolean };
   /** Camera close-up on the face, and the explorer holds still. */
   faceCam(on: boolean): void;
-  mobs: { settings: { enabled: boolean; density: number; freeze: boolean; elkHerds: number } };
+  mobs: { settings: { enabled: boolean; density: number; freeze: boolean; stelkHerds: number } };
   bikes: { settings: { enabled: boolean } };
   /** Drop a flock of `species` in front of the explorer. */
   spawnFlock(species: string): void;
@@ -118,8 +118,8 @@ export class DebugUI {
     fc.add(h.mobs.settings, 'freeze').name('freeze brains');
     fc.add({ w: () => h.spawnFlock('floof') }, 'w').name('spawn floofs here');
     fc.add({ c: () => h.spawnFlock('crow') }, 'c').name('spawn crows here');
-    fc.add({ e: () => h.spawnFlock('elk') }, 'e').name('spawn elk here');
-    fc.add(h.mobs.settings, 'elkHerds', 0, 6, 1).name('elk herds');
+    fc.add({ e: () => h.spawnFlock('stelk') }, 'e').name('spawn stelk here');
+    fc.add(h.mobs.settings, 'stelkHerds', 0, 6, 1).name('stelk herds');
     const plump = { plump: h.crowPlump.get() };
     fc.add(plump, 'plump', 0, 1, 0.01).name('crow roundness').onFinishChange((v: number) => h.crowPlump.set(v));
     fc.add(h.bikes.settings, 'enabled').name('bicycles');
