@@ -33,8 +33,9 @@ These apply to everything.
   ordinary rock broken, and they regrow.
 - Walking, running, parachuting, biking, riding creatures and dev-mode flying
   all keep working.
-- You can pat the home spirit whenever it's idle (at its spot, not leading,
-  riding or hinting). Walk up close and the action badge shows a mitten on
+- You can pat the home spirit only when it's idle at the cabin: settled
+  (sitting by the fire or pottering round the yard), never while it's asking
+  you to do something, pointing, leading or riding. Walk up close and the action badge shows a mitten on
   its head. You kneel and pat it three times. It shuts its eyes, blushes,
   glows warmer and coos at each pat, then hops and spins with a heart.
 

@@ -22,8 +22,11 @@ const yaw = Number(process.argv[5] ?? 1.7);
 await page.goto(`http://localhost:${server.address().port}/?seed=${seed}&story=1&fresh=1&mobs=0&capture=1&ui=1&t=11`);
 for (let i = 0; i < 160; i++) { if (await page.evaluate(() => window.__ow?.ready())) break; await page.waitForTimeout(250); }
 await page.waitForTimeout(1500);
+await page.waitForTimeout(1500);
 await page.evaluate(([w, yaw]) => {
   const o = window.__ow; const s = o.story(); s.debugJump('axe');
+  // In the yard: it can only be patted at home.
+  const y = s.anchor('yard'); o.teleport(y.x + 1.5, y.z + 1.5);
   const b = o.body.pos; const sp = s.spirit;
   const h = o.body.heading;
   const p = b.clone(); p.x += Math.sin(h) * 1.2; p.z += Math.cos(h) * 1.2; p.y = o.height(p.x, p.z);

@@ -210,8 +210,15 @@ export class Spirit {
 
   get busy() { return this.acts.length > 0; }
   get arrived() { return !this.moving && !this.acts.length && this.pos.distanceTo(this.want.at) < 0.6; }
-  /** At its spot with nothing on: free to be patted. */
-  get idle() { return !this.riding && !this.waiting && this.arrived; }
+  /**
+   * Idle at home with nothing to ask of you (settled: sitting by the fire or
+   * pottering round the yard), at its spot: free to be patted. Never while
+   * it's pointing, hinting, leading or riding.
+   */
+  get idle() {
+    const home = !this.home || Math.hypot(this.pos.x - this.home.x, this.pos.z - this.home.z) < this.range;
+    return !!this.want.settled && !this.want.icon && home && !this.riding && !this.waiting && this.arrived;
+  }
   /** Seconds into a pat (-1 when not being patted). */
   get patTime() { const a = this.acts[0]; return a?.kind === 'pat' ? a.t : -1; }
 

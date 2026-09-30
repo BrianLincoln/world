@@ -1503,8 +1503,11 @@ asked for as far as possible). Everything below is a first pass for review.
   a prompt when you're near and a reaction that shows it loves it.
 - **Offer:** `Story.findAction` gives a `pat` verb (new `pat` icon: a mitten
   on a happy dome) when you're within `PAT_NEAR` (1.7 m) of the spirit and
-  `spirit.idle` holds: arrived at its want, no acts queued, not riding or
-  waiting to lead. Trees, rocks, pickups and repairs take priority over it.
+  `spirit.idle` holds: its want is `settled` (the rest step's sit by the fire
+  and pottering, or phase 2's sit at the hearth) with no icon, it's inside its
+  yard, arrived, with no acts queued, not riding or waiting to lead. (At
+  first any arrived spirit could be patted, including while it pointed at
+  the next job. The owner wants it only when idle at the cabin.) Trees, rocks, pickups and repairs take priority over it.
   It stays wordless, so the badge is the prompt.
 - **Timeline:** `spirit.pat()` queues a `pat` act. `PAT` in `spirit.ts`
   holds the beats (0.6/1.1/1.6 s), the end of the hand (2.1 s) and the joy
