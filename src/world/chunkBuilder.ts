@@ -284,6 +284,8 @@ export function buildChunk(gen: WorldGen, req: ChunkRequest): ChunkResult {
         const lx = x - x0, lz = z - z0;
         if (lx < 0 || lz < 0 || lx >= size || lz >= size) continue;
         const h = meshHeight(lx, lz);
+        // Paths stay clear of everything below: grass, flowers, reeds, glowcaps.
+        if (paths.length && pathDist(x, z) < 1.4) continue;
         // Bogs: reeds in the shallows and round the pools, instead of grass.
         if (h < 1.7 && h > -0.5) {
           const bg = gen.bog(x, z);
@@ -305,8 +307,6 @@ export function buildChunk(gen: WorldGen, req: ChunkRequest): ChunkResult {
             continue;
           }
         }
-        const pd = paths.length ? pathDist(x, z) : 30;
-        if (pd < 1.4) continue;
         if (gen.storyBlock(x, z, 0, 'tuft')) continue;
         if (r < 0.32) {
           tufts.push(lx, h - 0.05, lz, 0.7 + 0.7 * hash01(gi, gj, seed, 47), hash01(gi, gj, seed, 48) * 6.283,
