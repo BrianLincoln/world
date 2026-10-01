@@ -24,6 +24,7 @@ import { BIG_ROCK, Harvest, rubbleOf, type RegrowCtx, type Taken } from '../worl
 import { hash01 } from '../core/rng';
 import { segDist } from '../world/worldgen';
 import { PAT, Spirit } from './spirit';
+import { Village } from './village';
 
 // The story director. It runs the phase tables (phase1.ts, phase3.ts) over
 // the story set: the broken cabin, the axe, the grove, the brook stones, the
@@ -91,6 +92,8 @@ interface SaveData {
   lasso?: boolean;
   done: boolean;
   hour: number;
+  /** The giant has been and gone (giant/visit.ts). */
+  giant?: boolean;
 }
 
 /** Where the next task is, and how close counts as there (the pointer hides). */
@@ -116,6 +119,8 @@ export interface StoryDeps {
   saveKey: string;
   /** false = the sandbox only: the set is there, but nothing runs. */
   active: boolean;
+  /** What the giant's footprints add to the ground height here (negative in one; world/prints.ts). */
+  dent?(x: number, z: number): number;
 }
 
 export class Story {
@@ -212,6 +217,10 @@ export class Story {
   get silent() { return this.d.active && !this.done; }
   /** Phase 2 (story/journey.ts) has the spirit: the house leaves it alone. */
   lent = false;
+  /** The giant has come, smashed the other houses and gone off with their spirits (giant/visit.ts runs it). */
+  giantGone = false;
+  /** The other spirits' houses, down the lane. */
+  village: Village | null = null;
 
   constructor(private d: StoryDeps) {
     const gen = d.gen;
@@ -220,6 +229,10 @@ export class Story {
     this.cabin = new RuinCabin(site, d.puffs);
     this.group.add(this.cabin.root, this.cabin.embers.group, this.cabin.smoke.group, this.cabin.column.batch.mesh, this.sparkles.group, this.chipPuffs.group);
     this.overlayGroup.add(this.cabin.overlay);
+    if (site.village) {
+      this.village = new Village(site.village, { seed: gen.seed, ground });
+      this.group.add(this.village.group);
+    }
     if (site.pasture) {
       const st = (this.stable = new Stable(site, d.puffs));
       this.group.add(st.root);
@@ -389,7 +402,7 @@ export class Story {
 
   /** Ground or cabin floor. */
   floorAt(x: number, z: number) {
-    const g = this.d.gen.height(x, z);
+    const g = this.d.gen.height(x, z) + (this.d.dent?.(x, z) ?? 0);
     return this.cabin.inside(x, z, -0.2) ? Math.max(g, this.site.y + CAB.floor) : g;
   }
 
@@ -554,6 +567,7 @@ export class Story {
   collide(pos: THREE.Vector3, vel: THREE.Vector3, r: number, mob = false) {
     this.cabin.push(pos, vel, r);
     this.stable?.push(pos, vel, r, mob);
+    this.village?.push(pos, vel, r);
     const l = siteToLocal(this.site, pos.x, pos.z);
     if (Math.abs(l.x) > 130 || Math.abs(l.z) > 130) return;
     for (const t of this.woods.trees) {
@@ -788,7 +802,7 @@ export class Story {
   }
 
   surface(x: number, z: number, feetY: number, r: number, step: number) {
-    let best = this.cabin.surface(x, z, feetY, r, step);
+    let best = Math.max(this.cabin.surface(x, z, feetY, r, step), this.village?.surface(x, z, feetY, r, step) ?? -Infinity);
     // Rubble: low domes (all within a step), walked over like small world rocks.
     for (const { rock } of this.rubble.values()) {
       if (rock.broken) continue;
@@ -1228,6 +1242,7 @@ export class Story {
     this.worldBreaks = this.worldBreaks.filter((w) => { if (w.rock.broken && !w.rock.group.visible) { this.group.remove(w.rock.group); return false; } return true; });
     this.regrowth(dt);
     this.cabin.update(dt, d.camera.position, body.pos);
+    this.village?.update(dt, body.pos);
     this.stable?.update(dt, d.camera.position, [body.pos, ...this.gateFor, ...(this.spirit.travelling ? [this.spirit.pos] : [])]);
     this.lasso?.update(dt);
     this.updateGift(dt);
@@ -1726,6 +1741,7 @@ export class Story {
       lasso: this.hasLasso,
       done: this.done,
       hour: this.d.env.hour,
+      giant: this.giantGone,
     };
     try { localStorage.setItem(this.key(), JSON.stringify(data)); } catch { /* private mode: progress lasts the session */ }
   }
@@ -1766,6 +1782,7 @@ export class Story {
     if (data.lasso && this.lasso) { this.lasso.show(true); this.lasso.take(); this.hasLasso = true; }
     if (data.lit) this.cabin.light(true);
     this.done = data.done;
+    this.giantGone = !!data.giant;
     if (this.d.active) this.d.env.hour = data.hour;
     if (this.done && this.phaseIndex === 0) this.spirit.want = { at: this.anchor('hearthSeat').clone(), face: this.anchor('hearth'), pose: 'sit', icon: null, lead: false, settled: true };
   }

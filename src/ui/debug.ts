@@ -9,6 +9,7 @@ import type { Terrain } from '../world/terrain';
 
 export interface DebugHooks {
   env: Environment;
+  ambience: { gains: Record<'master' | 'bed' | 'air' | 'layer' | 'pluck', number> };
   terrain: Terrain;
   getSeed(): string;
   setSeed(s: string): void;
@@ -57,6 +58,14 @@ export class DebugUI {
     const opts: Record<string, string> = { 'Auto (time of day)': 'auto' };
     for (const [k, v] of Object.entries(SKY_PRESETS)) opts[v.name] = k;
     ft.add(pal, 'palette', opts).name('palette').onChange((v: string) => (h.env.paletteOverride = v === 'auto' ? null : v));
+
+    const fs = this.gui.addFolder('Ambient sound');
+    fs.add(h.ambience.gains, 'master', 0, 1, 0.01);
+    fs.add(h.ambience.gains, 'bed', 0, 1, 0.01).name('tonal bed');
+    fs.add(h.ambience.gains, 'air', 0, 1, 0.01).name('air (day / night)');
+    fs.add(h.ambience.gains, 'layer', 0, 1, 0.01).name('night layer');
+    fs.add(h.ambience.gains, 'pluck', 0, 1, 0.01).name('plucks');
+    fs.close();
 
     const fp = this.gui.addFolder('Palette');
     fp.add(postSettings, 'gradeScale', 0, 1.6, 0.01).name('mono grade');

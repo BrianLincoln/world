@@ -107,6 +107,11 @@ function wingGeometry(outer: boolean) {
   return merge(g);
 }
 
+/** The crow's shapes and frame, for other birds built on it (the giant's flock: giant/birds.ts). */
+export function crowParts(plump = crowStyle.plump) {
+  return { body: bodyGeometry(plump), head: headGeometry(plump), wing: wingGeometry(false), hand: wingGeometry(true), neck: NECK, shoulder: SHOULDER, plump };
+}
+
 function legGeometry() {
   const g: THREE.BufferGeometry[] = [];
   g.push(colored(new THREE.CylinderGeometry(0.035, 0.03, 0.46, 8).translate(0, -0.23, 0), LEG));

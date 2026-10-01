@@ -20,8 +20,11 @@ These apply to everything.
   experience. The game teaches through the spirits' behaviour, gestures,
   emotes, pictogram bubbles, visual cues and sound.
 - **No combat.**
-- **Nothing scary.** It's for the owner and their kids. The giant is big,
-  not frightening; dark places are blue, not black.
+- **Spooky, not horrible.** It's for the owner and their kids, but don't
+  over-soften it (owner, 2026-09-30): the giant's crows are black and
+  spooky on purpose. Nobody is hurt, nothing is gory or cruel, the giant
+  itself is big rather than frightening, and dark places are blue, not
+  black.
 - **Fucking beautiful.** Everything matches the art direction in `/inspo`
   and the existing style. The giant, its smashing, the taking of the spirits
   and its footprint trail are the game's showpieces and get the most visual
@@ -64,7 +67,8 @@ to stay inside the art direction (`docs/BRIEF.md`) and "nothing scary".
   front of* a far one, by clouds at its shoulders, and by crows wheeling
   round its head. Never by darkness or detail.
 - **Cold, read at a glance.** Its palette is the cold spirit's ash blue. It
-  hunches, hugs itself, and shivers now and then. Its breath comes out as
+  hunches. (It doesn't walk about hugging itself, and it doesn't shiver:
+  neither read well. Arms swing.) Its breath comes out as
   big flat-bottomed toon clouds. Frost rimes its shoulders. Same language as
   the cold hearth spirit in phase 1, so kids have already learned it.
 - **The face** is the towers' and spirits' face: two tall, rounded-rectangle
@@ -103,8 +107,14 @@ to stay inside the art direction (`docs/BRIEF.md`) and "nothing scary".
      thump a little quieter, the warm glow at its chest shrinking with
      distance. Its first footprints are left steaming across the yard.
   Short: under about 40 s, camera taken as in the gift shots, input off.
-- **The footprints.** Each is the size of the pasture gate to the cabin
-  (roughly 12 × 7 m), pressed a metre or more into the ground: a real
+- **It smashes what's in its path, always.** Not only in the village: any
+  time it walks, trees under its feet go flat and rocks crack. (Owner,
+  2026-09-30. Not built.)
+- **The footprints are permanent** *(built: prints, warmth, night glow,
+  steam, flattened trees; not the puddles, the blooms or the creatures)*.
+  Each is the size of its sole as built
+  (roughly 21 × 14 m: the owner asked for bigger feet), pressed a metre or
+  more into the ground: a real
   hollow you walk down into, with a raised squashed rim, flattened trees
   fanned outward, cracked boulders, and a puddle if the ground is wet.
   - **Warm.** The pressed earth holds heat: a rose-amber floor against the
@@ -113,7 +123,7 @@ to stay inside the art direction (`docs/BRIEF.md`) and "nothing scary".
     glow at night so the trail reads as a string of warm lights going over
     the hills. Fresh prints (near the giant) are warmer and steamier, old
     ones cooled and already grassed. Warmth tells you which way it went.
-  - **Readable from far.** Stride is about 45 m, left-right-left, so from
+  - **Readable from far.** Stride is about 42 m, left-right-left, so from
     any rise you see the next three or four. From a tower head they're a
     dotted line to the horizon.
   - **A place, not a decal.** Creatures gather in the warm ones. Kids
@@ -122,6 +132,38 @@ to stay inside the art direction (`docs/BRIEF.md`) and "nothing scary".
   free a spirit from where it's wedged, the giant's hand comes down to take
   it back, misses or lets it go, and it lumbers away. Gentle, slow, a
   different beat each time so it never turns into a boss.
+
+### Decided 2026-10-01 (owner)
+- **Order of the opening:** repair the house and light the hearth, the
+  bike gift and the ride to the first (home) tower, then the giant comes
+  (ideally you watch it from the tower's head, the first time you're up
+  there), then the world is open: explore, or follow the prints. The
+  second guided tower ride is scrapped. *(Built.)*
+- **The trail** is about 1.5 km, bikeable, never over mountains or through
+  water, and goes by a tower where it can. *(Built: see NOTES.md.)*
+- **The giant at the end of it** gives up and settles into the ground: a
+  boulder hill with its trees on top and its crows roosting in them with
+  their lights. *(Built.)*
+- **Dungeons are rings of standing stones,** dotted about the world as
+  the towers are. The giant frees a **dark spirit** at one, and that
+  spirit becomes its way in: a forcefield on the ground inside the ring,
+  and (once you ask) black arms that pull you *down*, as a tower's glowing
+  spirit pulls you up. The dark spirits are the towers' opposites. *(Built:
+  walk on to the field on foot and two black arms come up once, take hold
+  and pull you down; the same arms let you down inside and lift you back
+  out.)*
+- **You go into a dungeon without a mount and find the one it needs
+  inside** (owner, 2026-10-01). Leaning, not final: this replaces the lasso
+  as how you get mounts, and the lasso becomes an end-game prize. Phase 3
+  (stable, lasso lesson) is built the old way and untouched.
+- **The warm light at a dungeon's end:** maybe a gift for the giant, one
+  gift for one crow flying a spirit home. Owner: "just ok", undecided.
+- **Dungeon 1's interior is a first shot, awaiting the owner:** a violet
+  cave under the ring (the stones go on down as columns round a well; a
+  winding passage, a glowcap grotto, a cavern with a still pool, one warm
+  light at the far end). First mechanic, built: a rockhopper shut in by a
+  rockfall, freed with the pick, whose bound is the only way up the ledge
+  to the light. Theme and mechanic are proposals: see NOTES.md.
 
 ### The trail and the core loop (decided, not built)
 - **Loop:** follow the trail → catch the right creature → solve the
@@ -154,6 +196,19 @@ to stay inside the art direction (`docs/BRIEF.md`) and "nothing scary".
   | Small-gap | none | Needs a small creature, or the glimmer's phase stands in |
   | Glowing | Lantern hare, glimmer, moonmoth eyespots | No dark places exist yet |
 
+### The village (built: the houses and the lane; nothing is smashed yet)
+- The other spirits live down a **lane** that leaves the guide's yard, about
+  120 m long, a house every giant's footfall on alternate sides.
+- **Five houses** for now, each about 4 m to the ridge (well under the
+  guide's cabin, with a spirit-sized door), each with its spirit on the
+  doorstep, a lit window and smoke.
+- **Room to grow:** a free, level plot faces each house where the ground
+  allows, kept clear for more houses or whatever else the village gets.
+- Every start site has room for the village (a requirement of the site).
+- Only the guide starts cold; the other spirits are warm from the start.
+- The houses stand 14.5 m off the lane, where the giant's feet fall when it
+  walks down the middle.
+
 ### Village and building (decided, not built)
 - The guide keeps directing repairs and building all game, so **locked
   placement is the game's voice** (the sketch-and-slots building that the
@@ -182,7 +237,7 @@ None of it is required.
   arrowhead fades in. It rides the screen edge pointing toward the task, or
   hangs over it when it's in view. It fades out once you're close. The task
   is the spirit (it always waits at, or leads you to, the next job), a
-  tower's door at a lock, or home when the stable is waiting. It shows
+  tower's door at a lock. It doesn't call you home for the stable. It shows
   nothing while you're gathering (trees and rocks are anywhere) or out
   catching a creature.
 - The spirit's calls, chirps and whimpers fade with distance (full volume
@@ -393,11 +448,11 @@ it is Conflict 2; this is the shape once that's settled.
 **Giant slice 1: the smash, the taking, the trail** (next to build). The
 first piece of the main path. It ends at a dungeon entrance you can't get
 into yet; the dungeon itself is a later slice.
-1. The village: the guide's ruined house (today's cabin) among a few other
-   spirit houses that are whole and lived in.
+1. The village: the guide's ruined house (today's cabin) at the head of a
+   lane of five other spirit houses that are whole and lived in. *(built)*
 2. You repair the guide's house and light the hearth (phase 1, as built).
 3. The giant comes. It smashes the other houses, not yours, and carries
-   off their spirits. The guide is left with you.
+   off their spirits. The guide is left with you. *(built, first pass)*
 4. Its footprints lead away from the village.
 5. You follow them to a dungeon entrance sealed by a forcefield. The guide
    tries it and can't open it. The slice ends here.
@@ -426,9 +481,12 @@ into yet; the dungeon itself is a later slice.
    can travel home by ember flight.
 
 **Phase 3: the stable** (built, first pass)
-1. The first time you come home after lighting the second tower, the spirit
-   greets you and leads you to the pasture ground, where marker stakes show
-   where it will go.
+1. After the giant, when you come down from the home tower, the spirit
+   walks home on its own, slow and downcast, its bike forgotten at the
+   tower. In the village it keeps to itself for a few minutes among the
+   wrecked houses. Only after that, and only once you're in the village,
+   it greets you and leads you to the pasture ground, where marker stakes
+   show where the stable will go.
 2. Break rocks for stones and build the footing and trough.
 3. Fell trees for logs and raise the frame and the turf roof.
 4. More logs, and build the fence and gate.
@@ -469,12 +527,15 @@ into yet; the dungeon itself is a later slice.
   upgrades to hold more?
 
 ### The giant (new direction)
-- Does the village heal behind the giant, or stay wrecked?
+- The village stays wrecked. A freed spirit starts mending its own house,
+  which takes wood and stone; you probably help. How exactly?
 - Do rescued spirits tag along, or go home?
 - How long between the giant's first hit and the first dungeon?
 - How big should optional side content be?
-- How does the giant carry the spirits: cupped to its chest, a lantern, a
-  sack? (It decides the silhouette and the glow you follow.)
+- (Settled: the giant's own birds, big black crows that roost in the
+  trees on its shoulders, snatch the spirits up and keep them: they wheel
+  round its head, each carrying one as a warm light. A jar was tried and
+  dropped. Built, first pass.)
 - How many dungeons, and so how many spirits and village houses?
 
 ### Conflicts to settle

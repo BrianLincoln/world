@@ -85,6 +85,12 @@ export class Mobs {
   private pm = new THREE.Matrix4();
   private sphere = new THREE.Sphere();
   aim: Aim | null = null;
+  /**
+   * Set while you're down in a dungeon, to the context its creatures live by
+   * (its floor, its walls). Then only they (`m.below`) think and are drawn,
+   * and the world's creatures wait as they are; otherwise the dungeon's wait.
+   */
+  under: MobCtx | null = null;
   stats = { mobs: 0, drawn: 0, flocks: 0 };
   /** Mob that just became tamed this frame (for UI / sound hooks). */
   onTamed?: (m: Mob) => void;
@@ -316,7 +322,7 @@ export class Mobs {
     let best: Mob | null = null;
     let bd = range;
     for (const m of this.tamed) {
-      if (m.ridden) continue;
+      if (m.ridden || !!m.below !== !!this.under) continue;
       const d = Math.hypot(m.pos.x - p.x, m.pos.z - p.z);
       if (d < bd + m.species.radius && m.pos.y - p.y < 4.5 && p.y - m.pos.y < 2.5) { bd = d; best = m; }
     }
@@ -378,13 +384,16 @@ export class Mobs {
     }
     this.age += ctx.dt;
     this.spawnT -= ctx.dt;
-    if (this.spawnT <= 0 && !this.settings.freeze) {
+    const under = this.under;
+    const live = (m: Mob) => !!m.below === !!under;
+    if (under) ctx = under;
+    if (this.spawnT <= 0 && !this.settings.freeze && !under) {
       this.populate(p, ctx, 0.5 - this.spawnT);
       this.spawnT = 0.5;
       // Tamed but never brought home, and left far behind: it wanders off wild again.
       for (let i = this.tamed.length - 1; i >= 0; i--) {
         const m = this.tamed[i];
-        if (m.stabled || m.leashed || m.ridden || Math.hypot(m.pos.x - p.x, m.pos.z - p.z) < DESPAWN_R) continue;
+        if (m.below || m.stabled || m.leashed || m.ridden || Math.hypot(m.pos.x - p.x, m.pos.z - p.z) < DESPAWN_R) continue;
         const r = this.ropes.get(m);
         if (r) { this.dropRope(r); this.ropes.delete(m); }
         this.tamed.splice(i, 1);
@@ -392,13 +401,14 @@ export class Mobs {
     }
 
     // Brains.
-    if (!this.settings.freeze) for (const f of this.flocks.values()) {
+    if (!this.settings.freeze && !under) for (const f of this.flocks.values()) {
       f.t += ctx.dt;
       f.species.thinkFlock(f, ctx);
     }
     let lead = 0;
     for (const m of this.all()) {
       if (this.settings.freeze) break;
+      if (!live(m)) continue;
       m.stateT += ctx.dt;
       m.happy = Math.max(0, m.happy - ctx.dt);
       m.species.think(m, ctx, m.leashed ? lead++ : 0);
@@ -415,6 +425,7 @@ export class Mobs {
     const shadows: { m: Mob; d: number }[] = [];
     for (const m of this.all()) {
       n++;
+      if (!live(m)) continue;
       const d = m.pos.distanceTo(camera.position);
       if (d > DRAW_R && !m.ridden) continue;
       centre(m, this.sphere.center);
@@ -439,7 +450,7 @@ export class Mobs {
     shadows.sort((a, b) => a.d - b.d);
     const U = TERRAIN_U.uMobShadow.value;
     for (let i = 0; i < U.length; i++) {
-      const s = shadows[i];
+      const s = under ? null : shadows[i];
       if (!s) { U[i].set(0, -1e4, 0, 0); continue; }
       const m = s.m;
       const g = this.gen.height(m.pos.x, m.pos.z);
@@ -467,7 +478,7 @@ export class Mobs {
     const pr = mount ? mount.species.radius : pl.mode === 'bike' ? 0.6 : PLAYER_R;
     const top = pl.pos.y + (mount ? mount.species.centreY + mount.species.radius + 1.2 : PLAYER_H);
     for (const m of this.all()) {
-      if (m.ridden) continue;
+      if (m.ridden || !!m.below !== !!this.under) continue;
       const r = m.species.radius;
       const cy = m.pos.y + m.species.centreY;
       if (cy - r > top || cy + r < pl.pos.y) continue;

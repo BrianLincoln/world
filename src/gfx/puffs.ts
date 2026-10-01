@@ -24,8 +24,14 @@ export class Puffs {
   private pool: Puff[] = [];
   private next = 0;
 
-  constructor(hex = '#efe4d2', private readonly POOL = 40, emissive = 0, keep = 0.35) {
+  /** `flat` = flat-bottomed, like the clouds (the giant's breath). */
+  constructor(hex = '#efe4d2', private readonly POOL = 40, emissive = 0, keep = 0.35, flat = false) {
     const geo = new THREE.IcosahedronGeometry(1, 3);
+    if (flat) {
+      const p = geo.getAttribute('position');
+      for (let i = 0; i < p.count; i++) if (p.getY(i) < -0.3) p.setY(i, -0.3);
+      geo.computeVertexNormals();
+    }
     const mat = makeSolidMaterial(hex, emissive, { keep });
     for (let i = 0; i < POOL; i++) {
       const mesh = new THREE.Mesh(geo, mat);

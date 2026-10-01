@@ -210,6 +210,31 @@ export class Spirit {
    */
   riding: { seat: THREE.Vector3; heading: number; look: THREE.Vector3 | null } | null = null;
 
+  /**
+   * Something dreadful is happening (the giant): 'scared' trembles, wide-eyed,
+   * arms pulled in; 'sad' reaches both arms up after what's been taken, mouth
+   * turned right down, eyes heavy. 'down' is what's left afterwards: heavy
+   * eyes and a frown, but it gets on with things (and still brightens when
+   * something good happens).
+   */
+  mood: 'scared' | 'sad' | 'down' | null = null;
+
+  /**
+   * Heavy-hearted (the walk home after the giant, story/journey.ts): it
+   * trudges instead of trotting, bent forward, arms hanging, eyes on the
+   * ground, and isn't cheered by seeing you.
+   */
+  sullen = false;
+
+  /** Snatched up by one of the giant's crows: it hangs at this point (which moves), arms up, legs going. */
+  carried: THREE.Vector3 | null = null;
+
+  /** In a hurry (the village running from the giant): how fast it goes to where it's wanted, m/s. */
+  haste: number | null = null;
+  private flinchT = 0;
+  /** A start: one sharp hop where it stands. */
+  flinch() { this.flinchT = 0.38; }
+
   /** Debug: pin the heading (close-up shots). */
   hold: number | null = null;
   /** Debug: pin the warmth. */
@@ -406,7 +431,7 @@ export class Spirit {
     /** The lasso lesson: whirling overhead (0..1), and the throw's arm (0..1). */
     let twirl = 0, fling = 0;
     let faceAt: THREE.Vector3 | null = null;
-    let speed = 3.1;
+    let speed = this.haste ?? 3.1;
     let happy = false;
     let bounce = 0;
     let patted = 0;
@@ -557,7 +582,7 @@ export class Spirit {
           this.glanceT -= dt;
           if (this.glanceT <= 0) this.glanceT = near ? 5 + Math.random() * 6 : 2;
           const glancing = near && this.glanceT < 1.8;
-          if (glancing && this.glanceT + dt >= 1.8) this.happyT = Math.max(this.happyT, 1.4);
+          if (glancing && this.glanceT + dt >= 1.8 && !this.sullen) this.happyT = Math.max(this.happyT, 1.4);
           lookAt = glancing ? this.player : w.face;
         } else if (w.usher && toPlayer < 30) {
           // Ushering: turned between you and the doorway, it holds a hand
@@ -631,6 +656,7 @@ export class Spirit {
     this.pos.addScaledVector(this.vel, dt);
     const gy = this.hooks.ground(this.pos.x, this.pos.z);
     if (ride) this.pos.copy(ride.seat).setY(ride.seat.y - 0.05);
+    else if (this.carried) { this.pos.copy(this.carried); this.vel.set(0, 0, 0); }
     else this.pos.y += (gy - this.pos.y) * e(20);
     const rest = w.settled && !act && !this.moving;
     this.face(this.moving ? null : (act?.kind === 'hint' && act.phase === 'tug') || act?.kind === 'pat' ? this.player : (faceAt ?? pointAt ?? (pose === 'warm' || rest ? w.face : lookAt)), dt, faceAt ? 3 : 6);
@@ -640,21 +666,26 @@ export class Spirit {
     if (ride) this.heading = ride.heading;
     if (this.hold !== null) this.heading = this.hold;
 
+    if (this.flinchT > 0) { this.flinchT -= dt; bounce = Math.max(bounce, 1.3); }
+
     // ---- body animation
     const hs = Math.hypot(this.vel.x, this.vel.z);
     const walking = hs > 0.3;
-    // Trotting hops; celebration and hints bounce higher.
-    const hopRate = walking ? 3.4 + hs * 0.5 : bounce > 0 ? 2.6 : 0;
+    // Trotting hops; celebration and hints bounce higher. Sullen, it barely
+    // lifts its feet.
+    const low = this.sullen && !act && !this.riding;
+    const hopRate = walking ? (low ? 2.1 + hs * 0.35 : 3.4 + hs * 0.5) : bounce > 0 ? 2.6 : 0;
     if (hopRate > 0) this.hop += dt * hopRate;
     else this.hop = Math.round(this.hop);
     const ph = this.hop % 1;
     const air = hopRate > 0 ? Math.sin(ph * Math.PI) : 0;
-    const hopTarget = walking ? 0.1 + hs * 0.018 : bounce * 0.42;
+    const hopTarget = walking ? (low ? 0.025 : 0.1 + hs * 0.018) : bounce * 0.42;
     this.hopH += (hopTarget - this.hopH) * e(8);
     const lift = air * this.hopH;
     const landing = hopRate > 0 && ph < 0.12 ? 1 - ph / 0.12 : 0;
     const sq = this.squash.step(-landing * (walking ? 0.12 : 0.22) * (hopRate > 0 ? 1 : 0) + air * 0.08, 180, 14, dt);
-    const shiver = pose === 'shiver' && !walking && !act ? 1 : pose === 'warm' && this.warmth < 0.9 && !walking && !act ? 0.4 : 0;
+    const mood = this.mood;
+    const shiver = mood === 'scared' ? 1 : mood === 'sad' ? 0.3 : pose === 'shiver' && !walking && !act ? 1 : pose === 'warm' && this.warmth < 0.9 && !walking && !act ? 0.4 : 0;
     this.sit += ((pose === 'sit' && !walking && !act ? 1 : 0) - this.sit) * e(5);
 
     this.root.position.copy(this.pos);
@@ -664,10 +695,17 @@ export class Spirit {
     const sy = 1 + sq + breathe - this.sit * 0.08;
     this.body.scale.set(1 / Math.sqrt(sy), sy, 1 / Math.sqrt(sy));
     this.body.position.y = R * 0.86 * sy + lift - this.sit * 0.07;
+    // On a slope the flat seat would cut into the hill ahead (a trot's hop hides it; a trudge doesn't).
+    if (low && walking) {
+      const fx = Math.sin(this.heading) * R, fz = Math.cos(this.heading) * R;
+      this.body.position.y += Math.max(0, this.hooks.ground(this.pos.x + fx, this.pos.z + fz) - this.pos.y, this.hooks.ground(this.pos.x - fx, this.pos.z - fz) - this.pos.y);
+    }
     this.patGlow += ((patted || act?.kind === 'pat' ? 1 : 0) - this.patGlow) * e(patted ? 3 : 0.8);
-    const lean = this.tilt.step(THREE.MathUtils.clamp(hs * 0.05, 0, 0.25) - this.sit * 0.12 + (reach ? -0.2 : 0) + (pose === 'warm' ? 0.1 : 0) - patted * 0.16, 90, 12, dt);
+    const lean = this.tilt.step(THREE.MathUtils.clamp(hs * 0.05, 0, 0.25) - this.sit * 0.12 + (reach ? -0.2 : 0) + (pose === 'warm' ? 0.1 : 0) - patted * 0.16 + (low ? 0.2 * (1 - this.sit) : 0), 90, 12, dt);
     // Patted: a slow contented wiggle under the hand.
     const wiggle = Math.sin(this.t * 6.5) * 0.08 * patted;
+    // Bent forward, the seat's front edge drops: lift it clear.
+    this.body.position.y += Math.max(0, Math.sin(lean)) * R * 0.8 * (low ? 1 : 0);
     this.body.rotation.set(lean, 0, Math.sin(this.t * 42) * 0.03 * shiver + (walking ? Math.sin(this.hop * Math.PI * 2) * 0.06 : 0) + (rest ? Math.sin(this.t * 0.9) * 0.045 * this.sit : 0) + wiggle);
 
     // Feet: little alternating steps, tucked forward when sitting.
@@ -706,6 +744,8 @@ export class Spirit {
       if (shiver > 0.5) { x = -1.1; z = -s * 0.5; }
       if (pose === 'warm' && !walking && !act) { x = -1.35; z = s * 0.1; }
       if (walking) { x = Math.sin(this.hop * Math.PI * 2 + k * Math.PI) * 0.5; z = s * 0.5; }
+      // Hanging at its sides, hardly swinging.
+      if (low && shiver < 0.5) { x = 0.22 + (walking ? Math.sin(this.hop * Math.PI * 2 + k * Math.PI) * 0.1 : 0); z = s * 0.1; }
       if (armsUp) { x = -0.4 + Math.sin(this.t * 14 + k) * 0.25; z = s * (2.5 + Math.sin(this.t * 10 + k * 2) * 0.2); }
       if (reach) { x = -1.45 + Math.sin(this.t * 14) * 0.15; z = s * 0.15; }
       if (beckon && k === 0) { x = -1.2; z = 2.0 + Math.sin(this.t * 10) * 0.55; }
@@ -723,9 +763,12 @@ export class Spirit {
       if (k === usherArm && !reach) { x = -1.25 - usher * 0.4; z = usherZ; }
       else if (usherArm >= 0 && !reach) { x = 0.1; z = s * 0.3; }
       if (this.sit > 0.5 && !pointAt) { x = -0.5; z = s * 0.45; }
-      if (this.sit > 0.5 && rest) { x = -1.05 + Math.sin(this.t * 1.3 + k * 1.7) * 0.08; z = s * 0.3; }
+      if (this.sit > 0.5 && rest && !low) { x = -1.05 + Math.sin(this.t * 1.3 + k * 1.7) * 0.08; z = s * 0.3; }
       if (patted) { x = -0.95 + Math.sin(this.t * 13 + k * 2) * 0.12; z = -s * 0.28; }
       if (ride) { x = -1.25; z = s * 0.32; }
+      // Reaching up after them, straining, hands opening and closing.
+      if (mood === 'sad' && !walking) { x = -0.3 + Math.sin(this.t * 2.6 + k * 1.4) * 0.1; z = s * (2.6 + Math.sin(this.t * 3.4 + k) * 0.12); }
+      if (this.carried) { x = -0.3 + Math.sin(this.t * 15 + k * 2) * 0.3; z = s * (2.7 + Math.sin(this.t * 11 + k) * 0.2); }
       this.arms[k].rotation.set(this.armX[k].step(x, 120, 12, dt), 0, this.armZ[k].step(z, 120, 12, dt));
     }
 
@@ -739,6 +782,8 @@ export class Spirit {
     let lids = this.t > this.blinkAt ? 0.05 : 1;
     if (shiver > 0.5 && lids > 0.5) lids = 0.55;
     if (happy || this.happyT > 0) lids = -1;
+    if (mood === 'scared' && lids > 0.5) lids = 1;
+    if ((mood === 'sad' || mood === 'down') && lids > 0.5) lids = 0.62;
     let lx = 0, ly = 0;
     if (lookAt) {
       tv.subVectors(lookAt, this.pos);
@@ -748,7 +793,10 @@ export class Spirit {
       lx = THREE.MathUtils.clamp(Math.atan2(lxw, Math.max(lz, 0.1)) / 0.8, -1, 1);
       ly = THREE.MathUtils.clamp(Math.atan2(tv.y, Math.hypot(lxw, lz)) / 0.7, -1, 1);
     }
-    this.look.x += (lx - this.look.x) * e(10);
+    // Eyes down, unless it's looking round at you.
+    if (low && lookAt !== this.player) { ly = Math.min(ly, -0.75); if (walking) lx = 0; }
+    if (low && lids > 0.5) lids = 0.5;
+    this.look.x += (lx - this.look.x) * e(low ? 4 : 10);
     this.look.y += (ly - this.look.y) * e(10);
     this.eye.set(this.look.x, this.look.y, lids, 0);
 
@@ -763,7 +811,7 @@ export class Spirit {
     this.armB.material.uniforms.uEmber.value = this.footB.material.uniforms.uEmber.value = this.bodyB.material.uniforms.uEmber.value;
     // Mouth: a little frown when cold, a "w" smile when warm or happy.
     const mw = this.bodyB.material.uniforms.uMouthW.value as THREE.Vector3;
-    mw.z = happy || this.happyT > 0 || wm > 0.35 ? 7 : shiver > 0.5 ? -5 : 3;
+    mw.z = mood === 'sad' ? -8 : mood === 'scared' ? -5 : happy || this.happyT > 0 ? 7 : mood === 'down' ? -6 : wm > 0.35 ? 7 : shiver > 0.5 ? -5 : 3;
     const bl = this.bodyB.material.uniforms.uBlush.value as THREE.Vector4;
     const blush = Math.max(THREE.MathUtils.smoothstep(wm, 0.3, 0.8), pg) * (1 + pg * 0.25);
     bl.z = 0.14 * blush;
@@ -786,7 +834,8 @@ export class Spirit {
     // A tally that's reached 0 has nothing left to ask for (the last of it
     // is flying in; the heart comes next).
     const want = w.count === 0 ? null : w.icon;
-    const icon = !this.bubbleNear ? null : act?.kind === 'celebrate' || (act?.kind === 'pat' && act.t > PAT.end) ? 'heart' : this.moving || this.waiting ? null : want;
+    // (Frightened or grieving, it isn't asking for anything.)
+    const icon = !this.bubbleNear || (this.mood && this.mood !== 'down') ? null : act?.kind === 'celebrate' || (act?.kind === 'pat' && act.t > PAT.end) ? 'heart' : this.moving || this.waiting ? null : want;
     const count = icon === w.icon ? w.total ?? w.count ?? 0 : 0;
     if (icon !== this.bubbleIcon && this.bubbleA < 0.05) {
       this.bubbleIcon = icon;

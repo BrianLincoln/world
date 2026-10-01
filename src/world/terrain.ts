@@ -1,3 +1,4 @@
+import type { DungeonSite } from './worldgen';
 import * as THREE from 'three';
 import { CHUNK_RES, INST_STRIDE, type ChunkRequest, type ChunkResult } from './chunkBuilder';
 import ChunkWorker from './chunk.worker.ts?worker';
@@ -135,35 +136,35 @@ export class Terrain {
       trees: {
         name: 'trees',
         geos: [...treeLods, ...treeLods2],
-        material: makePropMaterial({ bend: 0.24, wind: 0.012, heightRef: TREE_HEIGHT, toneVar: 0.22, doubleSide: true, cutaway: 'occluders', harvest: { grid: TREE_CELL, chan: 0 } }),
+        material: makePropMaterial({ prints: true, bend: 0.24, wind: 0.012, heightRef: TREE_HEIGHT, toneVar: 0.22, doubleSide: true, cutaway: 'occluders', harvest: { grid: TREE_CELL, chan: 0 } }),
         lodFor: (s) => (s <= 64 ? 0 : s <= 128 ? 1 : 2),
-        caster: { material: makeCasterMaterial({ bend: 0.24, wind: 0.012, heightRef: TREE_HEIGHT, harvest: { grid: TREE_CELL, chan: 0 } }), lod: 2 },
+        caster: { material: makeCasterMaterial({ prints: true, bend: 0.24, wind: 0.012, heightRef: TREE_HEIGHT, harvest: { grid: TREE_CELL, chan: 0 } }), lod: 2 },
       },
       bushes: {
         name: 'bushes',
         geos: [buildBush(3, 2), buildBush(3, 1), buildBush(3, 1)],
-        material: makePropMaterial({ wind: 0.01, heightRef: 1.6, toneVar: 0.25, cutaway: 'near' }),
+        material: makePropMaterial({ prints: true, wind: 0.01, heightRef: 1.6, toneVar: 0.25, cutaway: 'near' }),
         lodFor: (s) => (s <= 64 ? 0 : 1),
-        caster: { material: makeCasterMaterial({ wind: 0.01, heightRef: 1.6 }), lod: 1 },
+        caster: { material: makeCasterMaterial({ prints: true, wind: 0.01, heightRef: 1.6 }), lod: 1 },
       },
       rocks: {
         name: 'rocks',
         geos: [buildBoulder(5, 3), buildBoulder(5, 2), buildBoulder(5, 1)],
-        material: makePropMaterial({ toneVar: 0.18, harvest: { grid: ROCK_CELL, chan: 1 } }),
+        material: makePropMaterial({ prints: true, toneVar: 0.18, harvest: { grid: ROCK_CELL, chan: 1 } }),
         lodFor: (s) => (s <= 128 ? 0 : s <= 512 ? 1 : 2),
-        caster: { material: makeCasterMaterial({ harvest: { grid: ROCK_CELL, chan: 1 } }), lod: 1 },
+        caster: { material: makeCasterMaterial({ prints: true, harvest: { grid: ROCK_CELL, chan: 1 } }), lod: 1 },
       },
       tufts: {
         name: 'tufts',
         geos: [buildTuft()],
-        material: makePropMaterial({ wind: 0.12, heightRef: 0.6, toneVar: 0.4, doubleSide: true }),
+        material: makePropMaterial({ prints: true, wind: 0.12, heightRef: 0.6, toneVar: 0.4, doubleSide: true }),
         lodFor: () => 0,
       },
       flowers: {
         name: 'flowers',
         // Daisies / buttercups, harebells, bog reeds, glowcaps.
         geos: [buildFlower(0), buildFlower(1), buildReeds(), buildGlowcaps()],
-        material: makePropMaterial({ wind: 0.1, heightRef: 0.45, toneVar: 0.05, doubleSide: true }),
+        material: makePropMaterial({ prints: true, wind: 0.1, heightRef: 0.45, toneVar: 0.05, doubleSide: true }),
         lodFor: () => 0,
       },
       cabins: {
@@ -175,6 +176,9 @@ export class Terrain {
       },
     };
   }
+
+  /** Handed to the workers with every request (see WorldGen.dungeon: found once, on the main thread). */
+  dungeon: DungeonSite | null = null;
 
   setSeed(seed: number) {
     if (seed === this.seed) return;
@@ -331,7 +335,7 @@ export class Terrain {
       const req = this.queue.shift()!;
       const w = this.idle.pop()!;
       (w as Worker & { gen?: number }).gen = this.generation;
-      w.postMessage(req);
+      w.postMessage(this.dungeon ? { ...req, dungeon: this.dungeon } : req);
     }
   }
 

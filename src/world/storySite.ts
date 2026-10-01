@@ -1,4 +1,5 @@
 import { clamp, hash01, lerp, mulberry32 } from '../core/rng';
+import { homeHint, LANE_OFF } from './towers';
 
 // The guaranteed start area for the story: a broken cabin, an axe on a stump,
 // a small grove of trees to chop, a brook with stones on its bank and, far
@@ -34,6 +35,33 @@ export interface Pasture {
   end: 1 | -1;
 }
 
+/** A plot's levelled pad (m): flat to here, eased back into the ground over PLOT_EASE more. */
+export const PLOT_R = 4.5;
+export const PLOT_EASE = 6;
+
+/** A levelled, cleared plot beside the village lane. */
+export interface Plot {
+  x: number; z: number;
+  /** Pad height. */
+  y: number;
+  /** A house here faces the lane: its door looks along (sin rot, cos rot). */
+  rot: number;
+  /** A spirit's house stands here; the rest are kept free for whatever the village grows. */
+  house: boolean;
+  variant: number;
+}
+
+/**
+ * The village: a lane leaving the yard, with plots down both sides. The
+ * houses stand a giant's footfall apart, on alternate sides.
+ */
+export interface VillageSite {
+  /** The lane's centre line, from the yard outward. */
+  lane: SitePoint[];
+  plots: Plot[];
+  box: [number, number, number, number];
+}
+
 export interface StorySite {
   /** Cabin centre and floor-pad height. */
   x: number; z: number; y: number;
@@ -57,9 +85,11 @@ export interface StorySite {
   /** Where the far cabin's light is seen from at night (the doorstep, or a knoll nearby). */
   lookout: SitePoint;
   /** Short worn footpaths: door -> yard, yard -> brook bank, the approach, yard -> the pasture gate. */
-  paths: { ax: number; az: number; bx: number; bz: number }[];
+  paths: { ax: number; az: number; bx: number; bz: number; wide?: number }[];
   /** Where the stable and its pasture go (phase 3). */
   pasture: Pasture | null;
+  /** The other spirits' houses. A start site must have room for them (null only on the last-resort fallbacks). */
+  village: VillageSite | null;
   /** Bounding box of everything above (quick rejects). */
   box: [number, number, number, number];
 }
@@ -235,7 +265,7 @@ export function findStorySite(seed: number, f: Field): StorySite {
       }
       const door = L(-0.9, RUIN_D / 2 + 1.2);
       const yard = L(-0.6, RUIN_D / 2 + 9);
-      const paths = [
+      const paths: StorySite['paths'] = [
         { ax: door.x, az: door.z, bx: yard.x, bz: yard.z },
         { ax: L(RUIN_W / 2 + 1.5, 0.5).x, az: L(RUIN_W / 2 + 1.5, 0.5).z, bx: bank.x, bz: bank.z },
       ];
@@ -286,11 +316,29 @@ export function findStorySite(seed: number, f: Field): StorySite {
       const fd = Math.hypot(far.x - lookout.x, far.z - lookout.z);
       const vEnd = { x: lookout.x + ((far.x - lookout.x) / fd) * 130, z: lookout.z + ((far.z - lookout.z) / fd) * 130 };
       const pc = pasture ? [-1, 1].flatMap((a) => [-1, 1].map((b) => pastureLocal(pasture, a * (PASTURE_W / 2 + 8), b * (PASTURE_D / 2 + 8)))) : [];
-      for (const p of [...brook, ...trees, spring, lookout, vEnd, ...route, ...pc]) {
-        x0 = Math.min(x0, p.x - 12); z0 = Math.min(z0, p.z - 12);
-        x1 = Math.max(x1, p.x + 12); z1 = Math.max(z1, p.z + 12);
+      const grow = (pts: SitePoint[]) => {
+        for (const p of pts) {
+          x0 = Math.min(x0, p.x - 12); z0 = Math.min(z0, p.z - 12);
+          x1 = Math.max(x1, p.x + 12); z1 = Math.max(z1, p.z + 12);
+        }
+      };
+      grow([...brook, ...trees, spring, lookout, vEnd, ...route, ...pc]);
+      // The village goes in last, round what's already here, its lane side-on to where the home tower will be.
+      const tower = homeHint(seed, f, { x, z, y, rot, box: [x0, z0, x1, z1], village: null });
+      const village = findVillage(seed, f, s, yard, brook, trees, boulders, route, pasture, lookout, far, tower);
+      // Every start has its village: no room for one, no site here.
+      if (!village && strict) continue;
+      if (village) {
+        const ln = village.lane;
+        for (let i = 0; i + 1 < ln.length; i++) paths.push({ ax: ln[i].x, az: ln[i].z, bx: ln[i + 1].x, bz: ln[i + 1].z, wide: 0.7 });
+        for (const p of village.plots) {
+          if (!p.house) continue;
+          const c = nearestOn(ln, p.x, p.z);
+          paths.push({ ax: p.x + Math.sin(p.rot) * 2.6, az: p.z + Math.cos(p.rot) * 2.6, bx: c.x, bz: c.z });
+        }
       }
-      const site: StorySite = { x, z, y, rot, spawn, stump, trees, seat, brook, bank, stones, boulders, spring, far, lookout, paths, pasture, box: [x0, z0, x1, z1] };
+      if (village) grow([...village.lane, ...village.plots]);
+      const site: StorySite = { x, z, y, rot, spawn, stump, trees, seat, brook, bank, stones, boulders, spring, far, lookout, paths, pasture, village, box: [x0, z0, x1, z1] };
       // Strict: the next cabin's light must be clearly visible from here.
       if (ok && (!strict || view.margin >= 4)) return site;
       if (ok && strict) {
@@ -322,8 +370,141 @@ export function findStorySite(seed: number, f: Field): StorySite {
   const y = Math.max(f.base(0, 0), 4) + 0.05;
   return {
     x: 0, z: 0, y, rot: 0, spawn: { x: 1.4, z: 15, yaw: 0 }, stump: { x: -5.7, z: 5.1 }, trees: [], seat: { x: -20, z: 0 },
-    brook: [], bank: { x: 36, z: 0 }, stones: [], boulders: [{ x: 10, z: -9, rot: 0, sc: 0.95 }], spring: { x: 36, z: -40 }, far: findFarCabin(seed, f, 0, 0, y, 0).far, lookout: { x: 0, z: 5 }, paths: [], pasture: null, box: [-40, -40, 40, 40],
+    brook: [], bank: { x: 36, z: 0 }, stones: [], boulders: [{ x: 10, z: -9, rot: 0, sc: 0.95 }], spring: { x: 36, z: -40 }, far: findFarCabin(seed, f, 0, 0, y, 0).far, lookout: { x: 0, z: 5 }, paths: [], pasture: null, village: null, box: [-40, -40, 40, 40],
   };
+}
+
+/** The point of a polyline nearest (x, z). */
+function nearestOn(line: SitePoint[], x: number, z: number): SitePoint & { d: number } {
+  let best = { x: line[0].x, z: line[0].z, d: Infinity };
+  for (let i = 0; i + 1 < line.length; i++) {
+    const a = line[i], b = line[i + 1];
+    const vx = b.x - a.x, vz = b.z - a.z, l2 = vx * vx + vz * vz || 1;
+    const t = clamp(((x - a.x) * vx + (z - a.z) * vz) / l2, 0, 1);
+    const px = a.x + vx * t, pz = a.z + vz * t, d = Math.hypot(x - px, z - pz);
+    if (d < best.d) best = { x: px, z: pz, d };
+  }
+  return best;
+}
+
+/**
+ * How far the houses stand from the lane's middle, and apart along it: where
+ * the giant's feet come down when it walks the lane (its track is 14.5 m
+ * either side of its line, a footfall every 21 m on alternate sides).
+ */
+const PLOT_OFF = 14.5;
+const PLOT_STEP = 21;
+
+/**
+ * The village lane: a gently bending track out of the yard, about 125 m long
+ * (105 if nothing longer fits), over dry ground a kid can walk, with five
+ * house plots on alternate sides a footfall apart and, where the ground
+ * allows, a free plot facing each. It keeps clear of the brook, the grove,
+ * the boulders, the pasture, the way you arrive and the far light's
+ * sightline. Null if no lane fits.
+ */
+function findVillage(
+  seed: number, f: Field, s: { x: number; z: number; rot: number }, yard: SitePoint, brook: BrookPt[], trees: StoryTree[], boulders: StoryStone[],
+  approach: SitePoint[], pasture: Pasture | null, lookout: SitePoint, far: SitePoint, tower: SitePoint | null,
+): VillageSite | null {
+  const towerAt = tower ? Math.atan2(tower.z - yard.z, tower.x - yard.x) : 0;
+  const fd = Math.hypot(far.x - lookout.x, far.z - lookout.z) || 1;
+  const sight = [lookout, { x: lookout.x + ((far.x - lookout.x) / fd) * 125, z: lookout.z + ((far.z - lookout.z) / fd) * 125 }];
+  const clearAt = (x: number, z: number, m: number) => {
+    if (f.base(x, z) < 4) return false;
+    for (const b of brook) if (Math.hypot(b.x - x, b.z - z) < 6 + m) return false;
+    for (const t of trees) if (Math.hypot(t.x - x, t.z - z) < 4 + m) return false;
+    for (const b of boulders) if (Math.hypot(b.x - x, b.z - z) < 4 + m) return false;
+    if (pasture) {
+      const l = siteToLocal(pasture, x, z);
+      if (Math.abs(l.x) < PASTURE_W / 2 + 4 + m && Math.abs(l.z) < PASTURE_D / 2 + 4 + m) return false;
+    }
+    return true;
+  };
+  let best: VillageSite | null = null, bestScore = -Infinity;
+  for (const len of [125, 105]) {
+    for (let ai = 0; ai < 72; ai++) for (const bend of [0, 0.15, -0.15, 0.3, -0.3, 0.45, -0.45]) {
+      const a = (ai / 72) * Math.PI * 2;
+      const dx = Math.cos(a), dz = Math.sin(a);
+      const ex = yard.x + dx * len, ez = yard.z + dz * len;
+      const cx = (yard.x + ex) / 2 - dz * len * bend, cz = (yard.z + ez) / 2 + dx * len * bend;
+      // The lane, a point every ~3 m, with the distance along it.
+      const lane: SitePoint[] = [], along: number[] = [];
+      let ok = true, prevH = f.base(yard.x, yard.z), dist = 0, climb = 0;
+      const n = Math.ceil(len / 3);
+      for (let i = 0; i <= n && ok; i++) {
+        const t = i / n;
+        const px = (1 - t) * (1 - t) * yard.x + 2 * (1 - t) * t * cx + t * t * ex;
+        const pz = (1 - t) * (1 - t) * yard.z + 2 * (1 - t) * t * cz + t * t * ez;
+        if (i) dist += Math.hypot(px - lane[i - 1].x, pz - lane[i - 1].z);
+        const h = f.base(px, pz);
+        // Out of the yard it keeps off everything; no step steeper than 1 in 4.
+        if (dist > 9) {
+          if (!clearAt(px, pz, 2)) ok = false;
+          const l = siteToLocal(s, px, pz);
+          if (Math.abs(l.x) < RUIN_W / 2 + 6 && Math.abs(l.z) < RUIN_D / 2 + 6) ok = false;
+        }
+        if (dist > 22 && nearestOn(approach, px, pz).d < 9) ok = false;
+        if (Math.abs(h - prevH) > 0.8) ok = false;
+        climb += Math.abs(h - prevH);
+        prevH = h;
+        lane.push({ x: px, z: pz });
+        along.push(dist);
+      }
+      if (!ok) continue;
+      // Plots: a house every footfall on alternate sides, a free plot facing each.
+      const plots: Plot[] = [];
+      let rough = 0, wood = 0, houses = 0;
+      const first = hash01(ai, Math.round(bend * 100), seed, 941) < 0.5 ? 1 : -1;
+      const nH = 5, s0 = len === 125 ? 20 : 16, step = len === 125 ? PLOT_STEP : 19;
+      for (let k = 0; k < nH && ok; k++) {
+        const at = s0 + k * step;
+        let i = 1;
+        while (i < along.length - 1 && along[i] < at) i++;
+        const p = lane[i], q = lane[i - 1];
+        const tl = Math.hypot(p.x - q.x, p.z - q.z) || 1;
+        const nx = -(p.z - q.z) / tl, nz = (p.x - q.x) / tl;
+        for (const side of [1, -1]) {
+          const house = side === (k % 2 ? -first : first);
+          const px = p.x + nx * side * PLOT_OFF, pz = p.z + nz * side * PLOT_OFF;
+          const fl = flatness(f, px, pz, PLOT_R);
+          const fits = clearAt(px, pz, PLOT_R) && fl < 1.7 && nearestOn(sight, px, pz).d > PLOT_R + 3 && nearestOn(approach, px, pz).d > PLOT_R + 5 &&
+            Math.hypot(px - s.x, pz - s.z) > 16;
+          if (!fits) { if (house) ok = false; continue; }
+          // Pad height: the middle and the rim, averaged (as little digging as filling).
+          let y = f.base(px, pz) * 2;
+          for (let j = 0; j < 6; j++) y += f.base(px + Math.cos(j * 1.047) * PLOT_R, pz + Math.sin(j * 1.047) * PLOT_R);
+          y /= 8;
+          const rot = Math.atan2(-nx * side, -nz * side) + (house ? (hash01(k, side, seed, 942) - 0.5) * 0.5 : 0);
+          plots.push({ x: px, z: pz, y, rot, house, variant: Math.floor(hash01(k, side, seed, 943) * 3) });
+          rough += fl;
+          wood += f.forest(px, pz, f.base(px, pz));
+          if (house) houses++;
+        }
+      }
+      if (!ok || houses < nH) continue;
+      // No two houses alike next door.
+      const hs = plots.filter((p) => p.house);
+      for (let k = 1; k < hs.length; k++) if (hs[k].variant === hs[k - 1].variant) hs[k].variant = (hs[k].variant + 1) % 3;
+      // Open, level ground with room to grow; not back down the way you came;
+      // and not in line with the home tower, either way (the giant walks the
+      // lane's line, from well beyond its end to on past the yard, and is
+      // watched from the tower).
+      const line = tower ? Math.max(0, 1 - Math.abs(Math.atan(Math.tan(a - towerAt))) / LANE_OFF) : 0;
+      const score = (plots.length - nH) * 3 - rough * 1.5 - climb * 0.25 - (wood / plots.length) * 5 - Math.abs(bend) * 6 +
+        Math.min(nearestOn(approach, ex, ez).d, 80) * 0.05 - line * 40;
+      if (score > bestScore) {
+        bestScore = score;
+        let x0 = Infinity, z0 = Infinity, x1 = -Infinity, z1 = -Infinity;
+        for (const p of [...lane, ...plots]) { x0 = Math.min(x0, p.x); z0 = Math.min(z0, p.z); x1 = Math.max(x1, p.x); z1 = Math.max(z1, p.z); }
+        const m = PLOT_R + PLOT_EASE + 2;
+        // The path only needs a point every ~6 m.
+        best = { lane: lane.filter((_, i) => i % 2 === 0 || i === lane.length - 1), plots, box: [x0 - m, z0 - m, x1 + m, z1 + m] };
+      }
+    }
+    if (best) return best;
+  }
+  return null;
 }
 
 /** Pasture-local coordinates -> world. */

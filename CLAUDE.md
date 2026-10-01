@@ -11,8 +11,10 @@ count.** Keep this file lean. Depth lives in:
   off the village's hearth spirits, and you follow its footprints through
   mount-gated puzzle dungeons. Decided, not built. Read its "Conflicts to
   settle" before touching the story, and don't resolve one unasked.
-  What to build next is "Giant slice 1" at the end of `NOTES.md`.
-  No combat, no text, nothing scary.
+  What to build next is `docs/NEXT-dungeon1.md` (the owner's notes on
+  dungeon 1 and a sliced plan with the holes in it).
+  No combat, no text. Spooky is fine where the story wants it (the
+  giant's crows); nothing gory or cruel.
 - `docs/BRIEF.md`: the original request, verbatim, plus how to read `/inspo`.
   Read it before any visual change.
 - `NOTES.md`: stack reasoning, architecture, every major decision, known
@@ -66,7 +68,9 @@ npm run shots    # build + headless GPU screenshots -> shots/   (look at them!)
   inventory, save), `phase1.ts` / `phase3.ts` (steps as data), `spirit.ts`
   (the hearth spirit: wants, gestures, acts), `build.ts` (sketch-and-slots
   building; `cabin.ts` and `stable.ts` are the buildables), `herd.ts`
-  (creatures that live at the stable), `pointer.ts`, `icons.ts`
+  (creatures that live at the stable), `village.ts` (the other spirits'
+  houses down the lane; the lane and plots are `StorySite.village`),
+  `pointer.ts`, `icons.ts`
   (pictograms), `overlay.ts`. `src/world/harvest.ts`: felling, smashing,
   regrowth. `src/world/colliders.ts`: prop collision.
 - `src/story/beacons.ts`: beacon towers at runtime (drawing, the lock,
@@ -75,6 +79,31 @@ npm run shots    # build + headless GPU screenshots -> shots/   (look at them!)
   `towerRock.ts`: tower rock as exact solid shapes (collision, camera,
   arms). `towerView.ts`: the tower camera's overlay (silhouettes, eyes).
   `journey.ts`: phase 2 (bike gift, guided rides, the first two towers).
+- `src/giant/giant.ts`: the giant (skeleton, gait, IK, instanced boulders).
+  Drawn by `GIANT_FRAG`; fogged as one card via `uGiant` in `post.ts`.
+  Dev: `?giant=600,walk`. In the story, `visit.ts` drives it.
+  `trail.ts`: what a footfall leaves (print, flattened trees, steam).
+  `visit.ts`: the giant's visit to the village once the hearth is lit
+  (its footfalls, the smashing, the taking, the camera, restore from save).
+  `birds.ts`: its flock of black crows, which snatch the spirits and carry their lights.
+  `ring.ts`: the dungeon ring once open (forcefield, dark spirit, the two
+  arms that pull you down and lift you back out).
+- `src/dungeon/`: dungeon 1 inside, its own scene, drawn instead of the
+  world while `dungeon.inside` (main swaps the `WorldQuery` over to it).
+  `layout.ts` (the cave's plan as functions of the seed: walls, floor,
+  ceiling, props, lights), `shell.ts` (meshes from the plan), `dungeon.ts`
+  (scene, collision, camera, being let down and lifted, and what you do
+  there: the rockfall, the shut-in rockhopper, the ledge, the light). Its
+  creature is a `Mob` with `below`, run through `Mobs.under`. A first shot:
+  theme and mechanic aren't decided. Dev: `?dungeon=1`, `?fresh=1&cp=ring`.
+  `WorldGen.dungeon`: the first dungeon's ring and the way there (slow to
+  find: cached per seed and handed to workers, see `primeDungeon` in main).
+  `src/world/prints.ts`: the prints themselves, as a texture the terrain and
+  prop shaders read (`PRINT_GLSL`), plus the same maths in TS for walking.
+- `src/audio/ambience.ts`: the ambient soundtrack (sampled loops: one tonal
+  bed by place, day/night air, state layers, sparse plucks), on the `Sfx`
+  context (`src/story/audio.ts`, the synthesised effects). Files are
+  `public/audio/*.mp3`, made from the WAV pack by `scripts/audio.mjs`.
 - `src/ui/debug.ts`: the panel and HUD. `towerDebug.ts`: tower sight lines
   (L) and network map (M), only while the panel shows (H).
 

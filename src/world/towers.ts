@@ -23,6 +23,8 @@ export const HOME_MIN = 200;
 export const HOME_MAX = 420;
 /** ...or out to this, if nothing nearer can be seen from the yard (m). */
 export const HOME_FAR = 600;
+/** The home tower stands at least this far round (radians) from the village lane's line, if it can. */
+export const LANE_OFF = 0.7;
 /** Trees are kept out of the sightline from the yard to the home tower for this far (m). */
 export const HOME_VIEW = 90;
 /** Terrain must pass this far under the flame-to-flame line (m). */
@@ -348,8 +350,11 @@ function stack(seed: number, id: number, x: number, z: number, y: number, yaw: n
   return { id, x, z, y, scale, flame, head, slab, door, foot, yaw, home, boulders };
 }
 
+/** As much of the start site as placing the home tower looks at. */
+type HomeSite = Pick<StorySite, 'x' | 'z' | 'y' | 'rot' | 'box' | 'village'>;
+
 /** The spot in the yard the home tower is framed from. */
-function homeYard(site: StorySite) {
+function homeYard(site: HomeSite) {
   return { x: site.x + Math.sin(site.rot) * 8, z: site.z + Math.cos(site.rot) * 8 };
 }
 
@@ -359,6 +364,31 @@ function homeYard(site: StorySite) {
  * least one other candidate (so the network has somewhere to grow).
  */
 function homeSpot(seed: number, f: Field, site: StorySite, cands: Cand[], tests: { n: number }): Cand {
+  const opts = homeOpts(seed, f, site);
+  // The best one that can see somewhere to go.
+  for (const o of opts) {
+    const top = o.h + flameOver(1.12);
+    for (const c of cands) {
+      const d = Math.hypot(c.x - o.x, c.z - o.z);
+      if (d < TOWER_SPACING || d > TOWER_RANGE) continue;
+      tests.n++;
+      if (sees(f, o.x, top, o.z, c.x, c.h + flameOver(1), c.z)) return o;
+    }
+  }
+  return opts[0] ?? { x: site.x + 300, z: site.z, h: f.base(site.x + 300, site.z), score: 0 };
+}
+
+/**
+ * Where the home tower is likely to go, for a start site that's still being
+ * laid out (no village yet; `box`: what there is so far), or null if there's
+ * no hilltop for it. The village lane is turned side-on to it (storySite.ts).
+ */
+export function homeHint(seed: number, f: Field, site: HomeSite): { x: number; z: number } | null {
+  return homeOpts(seed, f, site)[0] ?? null;
+}
+
+/** Hilltops the home tower could stand on, best first. */
+function homeOpts(seed: number, f: Field, site: HomeSite): Cand[] {
   const opts: Cand[] = [];
   const inRing = (x: number, z: number) => {
     const d = Math.hypot(x - site.x, z - site.z);
@@ -401,22 +431,20 @@ function homeSpot(seed: number, f: Field, site: StorySite, cands: Cand[], tests:
         clear = Math.min(clear, eye + (top - 14 - eye) * t - g - wood);
       }
       const prom = c.h - ringMean(f, c.x, c.z, 90);
-      c.score = Math.min(c.h - site.y, 80) * 0.6 + Math.min(prom, 30) + (clear > 0 ? 70 : Math.max(-40, clear * 2)) - Math.abs(d - 300) * 0.03 - Math.max(0, d - HOME_MAX) * 0.15 - steep * 40 - wood * 40;
+      // Not along the village lane's line, either way: the giant comes down
+      // it and goes on past the yard, and is watched from up here. Side-on.
+      let axis = 0;
+      const ln = site.village?.lane;
+      if (ln) {
+        const l0 = ln[0], l1 = ln[ln.length - 1];
+        const off = Math.atan2(c.x - l0.x, c.z - l0.z) - Math.atan2(l1.x - l0.x, l1.z - l0.z);
+        axis = Math.max(0, 1 - Math.abs(Math.atan(Math.tan(off))) / LANE_OFF);
+      }
+      c.score = -axis * 90 + Math.min(c.h - site.y, 80) * 0.6 + Math.min(prom, 30) + (clear > 0 ? 70 : Math.max(-40, clear * 2)) - Math.abs(d - 300) * 0.03 - Math.max(0, d - HOME_MAX) * 0.15 - steep * 40 - wood * 40;
       opts.push(c);
     }
   }
-  opts.sort((a, b) => b.score - a.score);
-  // The best one that can see somewhere to go.
-  for (const o of opts) {
-    const top = o.h + flameOver(1.12);
-    for (const c of cands) {
-      const d = Math.hypot(c.x - o.x, c.z - o.z);
-      if (d < TOWER_SPACING || d > TOWER_RANGE) continue;
-      tests.n++;
-      if (sees(f, o.x, top, o.z, c.x, c.h + flameOver(1), c.z)) return o;
-    }
-  }
-  return opts[0] ?? { x: site.x + 300, z: site.z, h: f.base(site.x + 300, site.z), score: 0 };
+  return opts.sort((a, b) => b.score - a.score);
 }
 
 export function buildTowerNet(seed: number, f: Field, site: StorySite): TowerNet {

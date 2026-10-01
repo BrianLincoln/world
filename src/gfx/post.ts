@@ -70,6 +70,8 @@ uniform vec3 uTint;
 uniform float uTintAmt;
 uniform float uLift;
 uniform float uBloom;
+// The giant as one card: x = its distance as a whole (0 = no giant), y = its mid height.
+uniform vec2 uGiant;
 
 vec3 nrm(vec3 v) { return v / max(length(v), 1e-4); }
 
@@ -145,9 +147,14 @@ void main() {
     float fogDist = length(ray * fd);
     vec3 wdir = normalize(mat3(uCamWorld) * vp);
     float wy = uCamPos.y + wdir.y * dist;
+    float airY = wy;
+    // The giant (normal length 0.8) takes one fog tone from head to foot, so
+    // it reads as a painted card however the bands fall across it.
+    float gl2 = dot(nd.xyz, nd.xyz);
+    if (uGiant.x > 0.0 && gl2 > 0.55 && gl2 < 0.75) { fogDist = uGiant.x; airY = uGiant.y; }
     float f = 1.0 - exp(-max(fogDist - uFogStart, 0.0) * uFogDensity);
     // Thinner air up high: peaks and snow caps stay legible as landmarks.
-    f *= 1.0 - 0.4 * smoothstep(90.0, 420.0, wy);
+    f *= 1.0 - 0.4 * smoothstep(90.0, 420.0, airY);
     if (uFogBands > 0.5) f = floor(f * uFogBands + 0.3) / uFogBands;
     // Valley mist: one flat bank with a hard top, lying over low ground in
     // the distance (never contoured bands that cut across objects).
@@ -155,6 +162,8 @@ void main() {
     float mist = step(wy, mistTop) * uFogHeight * smoothstep(250.0, 900.0, dist);
     f = max(f, min(uFogMax, f + mist));
     f = min(f, uFogMax);
+    // A beacon (emissive over 1.5: the warm lights the giant carries) shows through the air.
+    f *= 1.0 - 0.85 * step(1.5, cc.a);
     col = mix(col, uFogCol, f);
   }
 
@@ -274,6 +283,8 @@ export class PostPipeline {
    * and the render size, to fade behind solid geometry.
    */
   overlay: { scene: THREE.Scene; tND: THREE.IUniform; uRes: THREE.IUniform } | null = null;
+  /** The giant's distance from the camera and mid height, while it's about (see uGiant). */
+  giant: { dist: number; y: number } | null = null;
   private w = 1;
   private h = 1;
 
@@ -304,6 +315,7 @@ export class PostPipeline {
       uOutlineCol: { value: new THREE.Color() }, uOutlineOn: { value: 1 }, uOutlineWidth: { value: 1 },
       uDepthThr: { value: 0.05 }, uNormalThr: { value: 0.4 }, uFade0: { value: 0 }, uFade1: { value: 1 },
       uTint: { value: new THREE.Color() }, uTintAmt: { value: 0 }, uLift: { value: 0 }, uBloom: { value: 1 },
+      uGiant: { value: new THREE.Vector2() },
     };
     this.composite = new FullscreenPass(fsMat(COMPOSITE_FRAG, this.uniforms));
     const fx = new THREE.ShaderMaterial({
@@ -329,7 +341,8 @@ export class PostPipeline {
     this.fxaa.material.uniforms.resolution.value.set(1 / this.w, 1 / this.h);
   }
 
-  render(scene: THREE.Scene, camera: THREE.PerspectiveCamera, fog: THREE.Color, outline: THREE.Color, tint: THREE.Color, tintAmt: number, lift = 0) {
+  /** `air`: the fog of an enclosed place (a dungeon), in place of the open world's settings: no layers, no valley mist. */
+  render(scene: THREE.Scene, camera: THREE.PerspectiveCamera, fog: THREE.Color, outline: THREE.Color, tint: THREE.Color, tintAmt: number, lift = 0, air?: { density: number; start: number; bands: number; max: number }) {
     const r = this.renderer;
     const s = postSettings;
     r.setRenderTarget(this.gbuf);
@@ -352,7 +365,7 @@ export class PostPipeline {
       this.blur.render(r, this.bloomA);
     }
 
-    if (s.layeredFog) {
+    if (s.layeredFog && !air) {
       this.layer.material.uniforms.tND.value = this.gbuf.textures[1];
       this.layer.material.uniforms.uStep.value.set(0, 1 / this.layerRT.height);
       this.layer.material.uniforms.uCamWorld.value.copy(camera.matrixWorld);
@@ -362,7 +375,7 @@ export class PostPipeline {
     const u = this.uniforms;
     u.tLayer.value = this.layerRT.texture;
     u.uLayerSize.value.set(this.layerRT.width, this.layerRT.height);
-    u.uLayered.value = s.layeredFog ? 1 : 0;
+    u.uLayered.value = s.layeredFog && !air ? 1 : 0;
     u.tColor.value = this.gbuf.textures[0];
     u.tND.value = this.gbuf.textures[1];
     u.tBloom.value = this.bloomA.texture;
@@ -371,12 +384,12 @@ export class PostPipeline {
     u.uCamWorld.value.copy(camera.matrixWorld);
     u.uCamPos.value.copy(camera.position);
     u.uFogCol.value.copy(fog);
-    u.uFogDensity.value = s.fogDensity;
-    u.uFogStart.value = s.fogStart;
-    u.uFogBands.value = s.fogBands;
-    u.uFogHeight.value = s.fogHeight;
+    u.uFogDensity.value = air?.density ?? s.fogDensity;
+    u.uFogStart.value = air?.start ?? s.fogStart;
+    u.uFogBands.value = air?.bands ?? s.fogBands;
+    u.uFogHeight.value = air ? 0 : s.fogHeight;
     u.uFogFalloff.value = s.fogFalloff;
-    u.uFogMax.value = s.fogMax;
+    u.uFogMax.value = air?.max ?? s.fogMax;
     u.uOutlineCol.value.copy(outline);
     u.uOutlineOn.value = s.outline ? 1 : 0;
     u.uOutlineWidth.value = s.outlineWidth;
@@ -388,6 +401,7 @@ export class PostPipeline {
     u.uTintAmt.value = Math.min(1, tintAmt * s.gradeScale);
     u.uBloom.value = s.bloom;
     u.uLift.value = lift;
+    u.uGiant.value.set(air ? 0 : this.giant?.dist ?? 0, this.giant?.y ?? 0);
 
     const drawOverlay = (target: THREE.WebGLRenderTarget | null) => {
       const o = this.overlay;

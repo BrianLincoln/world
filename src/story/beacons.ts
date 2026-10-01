@@ -195,7 +195,7 @@ interface HeadState { lit: number; home: number; tilt: number; look: number; hl:
  * A stretchy glowing arm: a tapered tube along a cubic curve from the
  * shoulder to a mitten, rebuilt in place per frame.
  */
-class Arm {
+export class Arm {
   readonly group = new THREE.Group();
   private geo = new THREE.BufferGeometry();
   private pos: Float32Array;
@@ -645,13 +645,25 @@ export class Beacons {
   get busy() { return !!this.free || !!this.slurp; }
   /** You're the head of this tower (or on your way in or out). */
   get inside(): Tower | null { return this.slurp?.tower ?? null; }
+  /** Settled in a tower's head, looking out (not on the way up, down or across). */
+  get onTop(): boolean { return this.slurp?.phase === 'view'; }
   isLit(id: number) { return this.lit.has(id); }
   tower(id: number) { return this.towers[id]; }
 
   // ------------------------------------------------------------ actions
 
+  /** Kept in the head: no coming down and no flying on (the first time up, until the giant has been and gone). */
+  holdIn = false;
+
+  /** Where the view out of the head you're in sits when it looks toward a world point (null if you're not in one). */
+  eyeToward(x: number, z: number): THREE.Vector3 | null {
+    const t = this.inside;
+    return t ? this.eyeAt(t, Math.atan2(x - t.head.x, z - t.head.z)) : null;
+  }
+
   /** What the one action would do right now: smash a lock, fly to the tower you're aimed at, or leave the head. */
   action(mode: string): 'pick' | 'down' | 'ember' | null {
+    if (this.slurp && this.holdIn) return null;
     if (this.slurp) return this.slurp.phase === 'view' ? (this.aim ? 'ember' : 'down') : null;
     if (this.free || mode !== 'walk' || !this.lock || this.lock.broken) return null;
     if (!this.d.canSmash()) return null;
@@ -671,7 +683,7 @@ export class Beacons {
 
   /** Esc while you're the head: out you go. */
   escape(): boolean {
-    if (this.slurp?.phase !== 'view') return false;
+    if (this.slurp?.phase !== 'view' || this.holdIn) return false;
     this.leave();
     return true;
   }
@@ -704,6 +716,14 @@ export class Beacons {
   }
 
   /** Turn the view out of the head round to tower `id` (the journey showing you where next). */
+  /** You're a tower's head: turn its view toward a world point. */
+  lookToward(x: number, z: number, y?: number) {
+    const t = this.inside;
+    if (!t) return;
+    this.viewYaw = Math.atan2(x - t.head.x, z - t.head.z);
+    if (y !== undefined) this.viewPitch = THREE.MathUtils.clamp(Math.atan2(y - t.head.y, Math.hypot(x - t.head.x, z - t.head.z)), -0.9, 0.7);
+  }
+
   guide(id: number) {
     this.guideId = id;
     this.guideT = 2.4;
@@ -1485,12 +1505,17 @@ export class Beacons {
     return best;
   }
 
-  /** Is a world point inside tower rock (the door boulder's hollow and doorway are open air)? */
-  solidAt(p: THREE.Vector3): boolean {
+  /**
+   * Is a world point inside tower rock? The door boulder's hollow and doorway
+   * are open air, unless `sealed` (then it's solid right through).
+   */
+  solidAt(p: THREE.Vector3, sealed = false): boolean {
     const t = this.solidNear(p.x, p.z);
     if (!t) return false;
     for (const rk of this.rocks.of(t)) {
-      if (rk.hollow) {
+      if (rk.hollow && sealed) {
+        if (inside(rk, p.x, p.y, p.z)) return true;
+      } else if (rk.hollow) {
         const q = this.shellQ(t, p.x, p.y, p.z);
         const d = q.length();
         // The drawn shape outside, the ellipsoid hollow within.
@@ -1506,18 +1531,22 @@ export class Beacons {
    * Keep the camera out of tower rock: pull it in along its line to the
    * focus, to just short of the first rock in the way. It snaps in and eases
    * back out. In a door boulder's room, that keeps it inside the room unless
-   * it's looking in through the doorway.
+   * it's looking in through the doorway. The room is only somewhere for the
+   * camera to be while you're in it or on its threshold: once you're outside,
+   * the door boulder is solid to the camera, doorway and all, or it slips in
+   * through the doorway behind you and watches you leave from behind the wall.
    */
   clampCamera(cam: THREE.Vector3, focus: THREE.Vector3, dt: number) {
     let k = 1;
     const t = this.solidNear(cam.x, cam.z) ?? this.solidNear(focus.x, focus.z);
     if (t && !this.inside && !this.solidAt(focus)) {
+      const sealed = this.shellQ(t, focus.x, focus.y, focus.z).length() > 1.05;
       const L = cam.distanceTo(focus);
       const n = Math.ceil(L / 0.3);
       const p = new THREE.Vector3();
       for (let i = 1; i <= n; i++) {
         p.lerpVectors(focus, cam, i / n);
-        if (this.solidAt(p)) { k = Math.max(0, ((i - 1) / n) - 0.5 / Math.max(L, 1e-3)); break; }
+        if (this.solidAt(p, sealed)) { k = Math.max(0, ((i - 1) / n) - 0.5 / Math.max(L, 1e-3)); break; }
       }
     }
     this.camK = Math.min(k, this.camK + (1 - this.camK) * (1 - Math.exp(-3 * dt)));

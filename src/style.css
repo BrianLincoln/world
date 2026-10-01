@@ -77,3 +77,13 @@ body.touch #help, body.touch #prompt, body.touch #fps { display: none; }
   right: calc(24px + env(safe-area-inset-right)); bottom: calc(196px + env(safe-area-inset-bottom));
 }
 #touch .jump.climb { font-size: 22px; }
+/* Dev: the checkpoint strip (` shows it). */
+#checkpoints {
+  position: fixed; left: 50%; top: 10px; transform: translateX(-50%); z-index: 6; display: flex; gap: 4px;
+  background: rgba(250, 240, 228, 0.82); padding: 4px 6px; border-radius: 999px;
+}
+#checkpoints button, #checkpoints select {
+  font: 12px/1.4 ui-monospace, Menlo, monospace; color: #3d2a2a; background: #fbf4ea;
+  border: 1.5px solid #5c3a3e; border-radius: 999px; padding: 2px 9px; cursor: pointer;
+}
+#checkpoints button:disabled { opacity: 0.35; cursor: default; }

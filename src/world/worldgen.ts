@@ -1,6 +1,6 @@
 import { Simplex } from '../core/noise';
 import { clamp, hash01, hashInt, lerp, mulberry32, smoothstep } from '../core/rng';
-import { brookQuery, findStorySite, PASTURE_D, PASTURE_W, pasturePlane, RUIN_D, RUIN_W, siteToLocal, type StorySite } from './storySite';
+import { brookQuery, findStorySite, PASTURE_D, PASTURE_W, pasturePlane, PLOT_EASE, PLOT_R, RUIN_D, RUIN_W, siteToLocal, type StorySite } from './storySite';
 import { buildTowerNet, HOME_VIEW, type Tower, type TowerNet } from './towers';
 
 // The world is a pure function of (seed, x, z). Nothing here touches three.js
@@ -12,6 +12,8 @@ export const TREE_LINE = 175;
 
 const PEAK_CELL = 2300;
 const POI_CELL = 420;
+/** The giant's way to the first dungeon keeps this far (m) from the home tower. */
+const HOME_CLEAR = 120;
 
 export interface Boulder {
   x: number; y: number; z: number;
@@ -36,6 +38,8 @@ export interface PathSeg { ax: number; az: number; bx: number; bz: number; /** E
 
 /** Phase 2's guided routes: polylines (x, z) and the tower they lead to second. */
 export interface Journey { toHome: [number, number][]; toNext: [number, number][]; next: number }
+/** The first dungeon's place: a ring of tall stones where the giant's trail ends. `r` is the ring's radius. */
+export interface DungeonSite { x: number; z: number; y: number; r: number; /** The tower the way there passes (-1: none). */ tower: number; /** The way there from the yard: dry, never steep, a bike can take it. It stops short of the ring. */ way: [number, number][] }
 
 interface Peak { x: number; z: number; h: number; r: number }
 
@@ -64,6 +68,9 @@ export class WorldGen {
   private pathCache = new Map<number, PathSeg[]>();
   private _story: StorySite | null = null;
   private _journey: Journey | null = null;
+  private _dungeon: DungeonSite | null = null;
+  private dungeonBusy = false;
+  private wayClear: { line: [number, number][]; box: [number, number, number, number] } | null = null;
   private journeyBox: [number, number, number, number] | null = null;
   private _towers: TowerNet | null = null;
   private towerCells: Map<number, number[]> | null = null;
@@ -111,6 +118,176 @@ export class WorldGen {
   }
 
   /**
+   * Use a dungeon site found earlier (the search runs a path-finder over a
+   * dozen or more candidates and takes seconds: the main thread does it once
+   * per seed and hands the answer to the chunk workers and to later loads).
+   */
+  presetDungeon(d: DungeonSite) {
+    this._dungeon = d;
+    // For keeping the wild biomes off the way: a coarser line and its box.
+    const w = d.way.filter((_, i) => i % 4 === 0 || i === d.way.length - 1);
+    let x0 = Infinity, z0 = Infinity, x1 = -Infinity, z1 = -Infinity;
+    for (const p of w) { x0 = Math.min(x0, p[0]); z0 = Math.min(z0, p[1]); x1 = Math.max(x1, p[0]); z1 = Math.max(z1, p[1]); }
+    this.wayClear = { line: w, box: [x0 - 80, z0 - 80, x1 + 80, z1 + 80] };
+    this.poiCache.clear();
+    this.pathCache.clear();
+  }
+
+  /** The tower after the home tower: a neighbour of home that looks back at it, the nearest. */
+  get nextTower(): Tower {
+    const net = this.towers, home = net.home;
+    const links = home.links.map((i) => net.towers[i]);
+    const score = (t: Tower) => Math.hypot(t.x - home.x, t.z - home.z) * (t.parent === home.id ? 1 : 1.6);
+    return links.sort((a, b) => score(a) - score(b))[0] ?? net.towers[1];
+  }
+
+  /**
+   * Where the giant's trail ends and the first dungeon is: a ring of tall
+   * stones on open, level, dry ground about 1.0-1.6 km from the village,
+   * that a dry, bikeable way reaches (WorldGen.route), with a beacon tower
+   * part of the way along if one can be had, and well clear of every tower
+   * and of the start. A pure function of the seed, like the start site:
+   * chunk workers stand the stones.
+   */
+  get dungeon(): DungeonSite {
+    if (!this._dungeon) {
+      const st = this.story, net = this.towers;
+      const yard = st.village?.lane[0] ?? { x: st.x, z: st.z };
+      const R = 13;
+      // The tower nearest the straight way there, between a quarter and 85% of the way along.
+      const towerBy = (x: number, z: number) => {
+        const dx = x - yard.x, dz = z - yard.z, l2 = dx * dx + dz * dz;
+        let id = -1, off = 260;
+        for (const t of net.towers) {
+          const k = ((t.x - yard.x) * dx + (t.z - yard.z) * dz) / l2;
+          if (k < 0.25 || k > 0.85 || t.home) continue;
+          const d = Math.abs((t.x - yard.x) * dz - (t.z - yard.z) * dx) / Math.sqrt(l2);
+          if (d < off) { off = d; id = t.id; }
+        }
+        return { id, off };
+      };
+      let best: DungeonSite | null = null;
+      /** No slope on the way steeper than `STEEP` (rise over run): gentle if it can be had, else a push. */
+      let STEEP = 0.34;
+      // The giant goes this way from the village while you watch from the home tower: never by it.
+      const home = [net.home.x, net.home.z, HOME_CLEAR];
+      const reach = (c: DungeonSite) => {
+        // (A route that gave up comes back as one straight line.)
+        const l0 = Math.hypot(c.x - yard.x, c.z - yard.z);
+        const end: [number, number] = [c.x - ((c.x - yard.x) / l0) * 48, c.z - ((c.z - yard.z) / l0) * 48];
+        const t = c.tower >= 0 ? net.towers[c.tower] : null;
+        if (t) {
+          // By the tower, 130 m off it (its hill is steep) on the side the straight way already leans to.
+          const dx = c.x - yard.x, dz = c.z - yard.z;
+          const sd = ((t.x - yard.x) * dz - (t.z - yard.z) * dx) / l0 > 0 ? -1 : 1;
+          const wx = t.x + (dz / l0) * sd * 130, wz = t.z - (dx / l0) * sd * 130;
+          const a = this.route(yard.x, yard.z, wx, wz, STEEP, home), b = this.route(wx, wz, end[0], end[1], STEEP, home);
+          if (a.length > 2 && b.length > 2) { c.way = [...a, ...b.slice(1)]; return true; }
+        }
+        const way = this.route(yard.x, yard.z, end[0], end[1], STEEP, home);
+        if (way.length <= 2) return false;
+        c.tower = -1;
+        c.way = way;
+        return true;
+      };
+      // Routing reads the POIs, which ask for the dungeon: it isn't there yet.
+      this.dungeonBusy = true;
+      // First, outward from a tower, so the way is sure to go by one: to a
+      // point 130 m to one side of it (its hill is steep), then on 350-650 m
+      // past it to the ring.
+      const fit = (x: number, z: number, lax: number): DungeonSite | null => {
+        const h = this.baseHeight(x, z);
+        if (h < 6 || h > 140) return null;
+        let rough = 0, low = Infinity;
+        for (let k = 0; k < 8; k++) {
+          const b = (k / 8) * Math.PI * 2;
+          rough = Math.max(rough, Math.abs(this.baseHeight(x + Math.cos(b) * (R + 4), z + Math.sin(b) * (R + 4)) - h));
+          low = Math.min(low, this.baseHeight(x + Math.cos(b) * 45, z + Math.sin(b) * 45));
+        }
+        if (rough > 2.6 * lax || low < 2.5) return null;
+        if (net.towers.some((t) => Math.hypot(t.x - x, t.z - z) < 160)) return null;
+        return { x, z, y: h, r: R, tower: -1, way: [] };
+      };
+      const near = net.towers.map((t) => ({ t, d: Math.hypot(t.x - yard.x, t.z - yard.z) })).filter((k) => !k.t.home && k.d > 300 && k.d < 1200).sort((p, q) => Math.abs(p.d - 700) - Math.abs(q.d - 700)).slice(0, 5);
+      // (Clear of the home tower by less, or not at all, only if there's no way otherwise.)
+      for (const hc of [HOME_CLEAR, 60, 0]) {
+        home[2] = hc;
+        for (const steep of [0.34, 0.5]) {
+          for (const { t, d } of near) {
+            const ux = (t.x - yard.x) / d, uz = (t.z - yard.z) / d;
+            for (const sd of [1, -1]) {
+              const wx = t.x + uz * sd * 130, wz = t.z - ux * sd * 130;
+              // (Never closer to the tower than 75 m: its feet are 14 m either side of the line.)
+              const off = [t.x, t.z, 75, ...home];
+              const legA = this.route(yard.x, yard.z, wx, wz, steep, off);
+              if (legA.length <= 2) continue;
+              const cands: { c: DungeonSite; score: number }[] = [];
+              for (const r of [500, 380, 620]) for (let ai = -4; ai <= 4; ai++) {
+                const a = ai * 0.25, ca = Math.cos(a), sa = Math.sin(a);
+                const x = t.x + (ux * ca - uz * sa) * r, z = t.z + (uz * ca + ux * sa) * r;
+                const far = Math.hypot(x - yard.x, z - yard.z);
+                if (far < 800 || far > 1900) continue;
+                const c = fit(x, z, 1.8);
+                if (c) cands.push({ c, score: -Math.abs(a) * 3 - this.forestBase(x, z, c.y) * 6 - Math.abs(far - 1300) * 0.004 });
+              }
+              cands.sort((p, q) => q.score - p.score);
+              for (const k of cands.slice(0, 3)) {
+                const l = Math.hypot(k.c.x - wx, k.c.z - wz) || 1;
+                const legB = this.route(wx, wz, k.c.x - ((k.c.x - wx) / l) * 48, k.c.z - ((k.c.z - wz) / l) * 48, steep, off);
+                if (legB.length <= 2) continue;
+                best = { ...k.c, tower: t.id, way: [...legA, ...legB.slice(1)] };
+                break;
+              }
+              if (best) break;
+            }
+            if (best) break;
+          }
+          if (best) break;
+        }
+        // Failing that, anywhere a way reaches, with or without a tower.
+        for (const [lax, steep] of best ? [] : [[1, 0.34], [1.8, 0.34], [1.8, 0.5], [2.6, 0.7], [2.6, Infinity]]) {
+          STEEP = steep;
+          const cands: { c: DungeonSite; score: number }[] = [];
+          for (const r of [1300, 1150, 1450, 1000, 1600, 850]) for (let ai = 0; ai < 48; ai++) {
+            const a = (ai / 48) * Math.PI * 2 + hash01(Math.round(r), 0, this.seed, 953);
+            const x = yard.x + Math.cos(a) * r, z = yard.z + Math.sin(a) * r;
+            const h = this.baseHeight(x, z);
+            // (High country only when nothing lower will do.)
+            if (h < 6 || h > 140 * lax) continue;
+            let rough = 0, low = Infinity;
+            for (let k = 0; k < 8; k++) {
+              const b = (k / 8) * Math.PI * 2;
+              rough = Math.max(rough, Math.abs(this.baseHeight(x + Math.cos(b) * (R + 4), z + Math.sin(b) * (R + 4)) - h));
+              low = Math.min(low, this.baseHeight(x + Math.cos(b) * 45, z + Math.sin(b) * 45));
+            }
+            if (rough > 2.6 * lax || low < 2.5) continue;
+            if (net.towers.some((t) => Math.hypot(t.x - x, t.z - z) < 160)) continue;
+            const tb = towerBy(x, z);
+            const score = -rough * 2 - this.forestBase(x, z, h) * 6 - Math.abs(r - 1300) * 0.004 + (tb.id >= 0 ? 12 - tb.off * 0.03 : 0);
+            cands.push({ c: { x, z, y: h, r: R, tower: tb.id, way: [] }, score });
+          }
+          cands.sort((p, q) => q.score - p.score);
+          for (const k of cands.slice(0, 12)) if (reach(k.c)) { best = k.c; break; }
+          if (best) break;
+        }
+        if (best) break;
+      }
+      this.dungeonBusy = false;
+      // Cells looked at meanwhile were made without the ring.
+      this.poiCache.clear();
+      this.pathCache.clear();
+      if (!best) {
+        // Last resort: 1.2 km out toward the second tower, wherever that is.
+        const nx = this.nextTower, dl = Math.hypot(nx.x - yard.x, nx.z - yard.z) || 1;
+        const x = yard.x + ((nx.x - yard.x) / dl) * 1200, z = yard.z + ((nx.z - yard.z) / dl) * 1200;
+        best = { x, z, y: Math.max(this.baseHeight(x, z), 3), r: R, tower: -1, way: [[yard.x, yard.z], [x, z]] };
+      }
+      this.presetDungeon(best);
+    }
+    return this._dungeon!;
+  }
+
+  /**
    * Phase 2's journey (see story/journey.ts): the path the hearth spirit
    * leads you along from the cabin yard to the home tower's doorway, the
    * tower it takes you to next (a neighbour of home that looks back at it,
@@ -122,9 +299,7 @@ export class WorldGen {
       const net = this.towers, home = net.home, st = this.story;
       const front = (t: Tower, d: number): [number, number] => [t.door.ground.x + Math.sin(t.yaw) * d, t.door.ground.z + Math.cos(t.yaw) * d];
       const yard: [number, number] = [st.x + Math.sin(st.rot) * 9, st.z + Math.cos(st.rot) * 9];
-      const links = home.links.map((i) => net.towers[i]);
-      const score = (t: Tower) => Math.hypot(t.x - home.x, t.z - home.z) * (t.parent === home.id ? 1 : 1.6);
-      const next = links.sort((a, b) => score(a) - score(b))[0] ?? net.towers[1];
+      const next = this.nextTower;
       const leg = (pts: [number, number][]) => {
         const out: [number, number][] = [];
         for (let i = 0; i + 1 < pts.length; i++) {
@@ -148,14 +323,15 @@ export class WorldGen {
    * and prefers gentle, open ground (a kid bikes it, beside the spirit). Then
    * pulled straight where the way is clear and rounded at the corners.
    */
-  private route(ax: number, az: number, bx: number, bz: number): [number, number][] {
+  route(ax: number, az: number, bx: number, bz: number, steep = Infinity, keepOff: number[] = []): [number, number][] {
     const C = 8;
     const d = Math.hypot(bx - ax, bz - az);
     const pad = Math.max(120, d * 0.4);
     const x0 = Math.min(ax, bx) - pad, z0 = Math.min(az, bz) - pad;
     const W = Math.ceil((Math.max(ax, bx) + pad - x0) / C) + 1, H = Math.ceil((Math.max(az, bz) + pad - z0) / C) + 1;
     // Things to keep off: centres and radii.
-    const avoid: number[] = [];
+    // (`keepOff`: more places to stay clear of, as x, z, radius.)
+    const avoid: number[] = [...keepOff];
     const st = this.story;
     this.poiCellRange(x0, z0, x0 + W * C, z0 + H * C, (p) => {
       if (p.kind === 'tower') for (const b of p.boulders!) avoid.push(b.x, b.z, b.sx + 3);
@@ -171,6 +347,7 @@ export class WorldGen {
     };
     for (const b of st.boulders) avoid.push(b.x, b.z, 3.5);
     avoid.push(st.stump.x, st.stump.z, 2.5);
+    for (const p of st.village?.plots ?? []) avoid.push(p.x, p.z, PLOT_R + 1);
     const wet = (x: number, z: number) => this.tameHeight(x, z) < 2.2 || this.brookDist(x, z) < 5.5;
     const blockedAt = (x: number, z: number) => {
       if (wet(x, z) || inPasture(x, z)) return true;
@@ -188,7 +365,8 @@ export class WorldGen {
       else {
         const h = this.tameHeight(x, z);
         const sl = Math.max(Math.abs(this.tameHeight(x + 4, z) - this.tameHeight(x - 4, z)), Math.abs(this.tameHeight(x, z + 4) - this.tameHeight(x, z - 4))) / 8;
-        c = 1 + 14 * sl * sl + 1.2 * this.forestBase(x, z, h);
+        // (`steep`: no way at all over ground steeper than this.)
+        c = sl > steep ? Infinity : 1 + 14 * sl * sl + 1.2 * this.forestBase(x, z, h);
       }
       costs[k] = c;
       return c;
@@ -436,6 +614,14 @@ export class WorldGen {
       const e = Math.hypot(Math.max(0, Math.abs(l.x) - PASTURE_W / 2 - 2), Math.max(0, Math.abs(l.z) - PASTURE_D / 2 - 2));
       if (e < 10) h = lerp(h, pasturePlane(pa, l.x, l.z), 1 - smoothstep(0, 10, e));
     }
+    // The village's plots: level pads, eased back into the ground.
+    const vi = st.village;
+    if (vi && x > vi.box[0] && x < vi.box[2] && z > vi.box[1] && z < vi.box[3]) {
+      for (const p of vi.plots) {
+        const d = Math.hypot(x - p.x, z - p.z);
+        if (d < PLOT_R + PLOT_EASE) h = lerp(h, p.y, 1 - smoothstep(PLOT_R, PLOT_R + PLOT_EASE, d));
+      }
+    }
     // The story brook: a channel with sandy banks, carved into whatever is there.
     if (st.brook.length && x > st.box[0] && x < st.box[2] && z > st.box[1] && z < st.box[3]) {
       const q = brookQuery(st.brook, x, z, this.bq);
@@ -449,7 +635,7 @@ export class WorldGen {
     const st = this.story;
     if (x < st.box[0] || x > st.box[2] || z < st.box[1] || z > st.box[3]) return Infinity;
     let d = Infinity;
-    for (const p of st.paths) d = Math.min(d, segDist(x, z, p));
+    for (const p of st.paths) d = Math.min(d, segDist(x, z, p) - (p.wide ?? 0));
     return d;
   }
 
@@ -474,6 +660,16 @@ export class WorldGen {
       const t = ((x - y.x) * dx + (z - y.z) * dz) / dl;
       if (t > -2 && t < HOME_VIEW && Math.abs((x - y.x) * dz - (z - y.z) * dx) / dl < 4 + r + t * 0.05) return true;
     }
+    // The giant's way to the first dungeon is open ground, village to ring:
+    // a clear swath wide enough for both its feet (and a bike).
+    if (kind !== 'tuft' && !this.dungeonBusy) {
+      void this.dungeon;
+      const wc = this.wayClear!;
+      if (x > wc.box[0] && x < wc.box[2] && z > wc.box[1] && z < wc.box[3]) {
+        const w = (kind === 'rock' ? 17 : 23) + r;
+        for (let i = 0; i + 1 < wc.line.length; i++) if (segDist(x, z, { ax: wc.line[i][0], az: wc.line[i][1], bx: wc.line[i + 1][0], bz: wc.line[i + 1][1] }) < w) return true;
+      }
+    }
     if (x < st.box[0] || x > st.box[2] || z < st.box[1] || z > st.box[3]) return false;
     // The pasture is open grass: nothing else in it, and bare ground under the stable.
     const pa = st.pasture;
@@ -483,6 +679,14 @@ export class WorldGen {
       if (Math.abs(q.x) < PASTURE_W / 2 + m + r && Math.abs(q.z) < PASTURE_D / 2 + m + r) {
         if (kind !== 'tuft') return true;
         if (q.x * pa.end > PASTURE_W / 2 - 7 && Math.abs(q.z) < 6) return true;
+      }
+    }
+    // The village's plots are clear (a house's own ground is bare).
+    const vi = st.village;
+    if (vi && x > vi.box[0] && x < vi.box[2] && z > vi.box[1] && z < vi.box[3]) {
+      for (const p of vi.plots) {
+        const d = Math.hypot(x - p.x, z - p.z);
+        if (kind === 'tuft' ? p.house && d < 3 : d < PLOT_R + (kind === 'tree' ? 3.5 : 1.5) + r) return true;
       }
     }
     const l = siteToLocal(st, x, z);
@@ -570,6 +774,16 @@ export class WorldGen {
           d = Math.min(d, segDist(x, z, { ax: line[i][0], az: line[i][1], bx: line[i + 1][0], bz: line[i + 1][1] }));
         }
         k *= smoothstep(25, 70, d);
+      }
+    }
+    // Nor the giant's way to the first dungeon: you follow its prints on foot or by bike.
+    if (k > 0 && !this.dungeonBusy) {
+      void this.dungeon;
+      const wc = this.wayClear!;
+      if (x > wc.box[0] && x < wc.box[2] && z > wc.box[1] && z < wc.box[3]) {
+        let d = Infinity;
+        for (let i = 0; i + 1 < wc.line.length; i++) d = Math.min(d, segDist(x, z, { ax: wc.line[i][0], az: wc.line[i][1], bx: wc.line[i + 1][0], bz: wc.line[i + 1][1] }));
+        k *= smoothstep(30, 75, d);
       }
     }
     return k;
@@ -728,7 +942,8 @@ export class WorldGen {
 
     // The story set: nothing natural too close to it, plus its own POIs.
     const st = this.story;
-    const keep = out.filter((p) => Math.hypot(p.x - st.x, p.z - st.z) > 110 && Math.hypot(p.x - st.far.x, p.z - st.far.z) > 45 &&
+    const dg = this.dungeonBusy ? { x: 1e9, z: 1e9, y: 0, r: 0, tower: -1, way: [] } : this.dungeon;
+    const keep = out.filter((p) => Math.hypot(p.x - st.x, p.z - st.z) > 110 && Math.hypot(p.x - st.far.x, p.z - st.far.z) > 45 && Math.hypot(p.x - dg.x, p.z - dg.z) > 70 &&
       !(p.x > st.box[0] - 20 && p.x < st.box[2] + 20 && p.z > st.box[1] - 20 && p.z < st.box[3] + 20));
     out.length = 0;
     // Nothing else crowds a beacon tower's hilltop.
@@ -739,6 +954,17 @@ export class WorldGen {
       out.push({ kind: 'tower', tower: id, x: t.x, z: t.z, y: t.y, rot: t.yaw, clear: t.foot * 1.5 + 16, boulders: [...t.boulders, t.head] });
     }
     const inThis = (x: number, z: number) => Math.floor(x / POI_CELL) === cx && Math.floor(z / POI_CELL) === cz;
+    // The first dungeon's ring: nine tall dark stones, none fallen.
+    if (inThis(dg.x, dg.z)) {
+      const boulders: Boulder[] = [];
+      for (let k = 0; k < 9; k++) {
+        const a = (k / 9) * Math.PI * 2 + 0.2;
+        const bx = dg.x + Math.cos(a) * dg.r, bz = dg.z + Math.sin(a) * dg.r;
+        const sy = 3.6 + hash01(k, 1, this.seed, 951) * 1.6;
+        boulders.push({ x: bx, y: this.baseHeight(bx, bz) + sy * 0.6, z: bz, sx: 1.25 + hash01(k, 2, this.seed, 952) * 0.4, sy, rot: a });
+      }
+      out.push({ kind: 'circle', x: dg.x, z: dg.z, y: dg.y, rot: 0, clear: dg.r + 8, boulders });
+    }
     if (inThis(st.x, st.z)) out.push({ kind: 'cabin', story: 'ruin', x: st.x, z: st.z, y: st.y, rot: st.rot, clear: 13, variant: 0 });
     if (inThis(st.far.x, st.far.z)) out.push({ kind: 'cabin', story: 'far', x: st.far.x, z: st.far.z, y: st.far.y, rot: st.far.rot, clear: 40, variant: 0 });
     if (inThis(st.spring.x, st.spring.z) && st.brook.length) {

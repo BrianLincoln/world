@@ -1,4 +1,5 @@
-// Every sound is synthesised here with WebAudio: no samples to load. The
+// Every effect is synthesised here with WebAudio: no samples to load (the
+// sampled ambient soundtrack is src/audio/ambience.ts, on this context). The
 // palette is small and soft, like a picture book read aloud: the spirit's
 // chirps and whimpers are pure glides, wood is filtered noise plus a low
 // knock, and the hearth is a noise swell that settles into crackles.
@@ -59,6 +60,9 @@ export class Sfx {
     const d = this.noiseBuf.getChannelData(0);
     for (let i = 0; i < n; i++) d[i] = Math.random() * 2 - 1;
   }
+
+  /** The one AudioContext, once a gesture has made it (the ambience plays on it too). */
+  get context() { return this.ctx; }
 
   private get ok() {
     return !!this.ctx && !this.muted && this.ctx.state === 'running';
@@ -193,6 +197,23 @@ export class Sfx {
     this.noise(t, { a: 0.003, d: 0.3, peak: 0.35 }, 'lowpass', 900, 200, 0.7);
   }
 
+  /**
+   * The giant's foot coming down: a sub drop you feel, a chesty body an
+   * octave up (so it still reads on small speakers), the ground's dull
+   * crump, and a long low rumble rolling away after it.
+   */
+  stomp() {
+    if (!this.ok) return;
+    const t = this.ctx!.currentTime + 0.005;
+    const k = 0.94 + Math.random() * 0.12;
+    this.tone('sine', 62 * k, 24, t, { a: 0.006, d: 1.3, peak: 1.0 });
+    this.tone('sine', 120 * k, 38, t, { a: 0.004, d: 0.55, peak: 0.7 });
+    this.tone('triangle', 84 * k, 30, t, { a: 0.008, d: 0.8, peak: 0.3 });
+    this.noise(t, { a: 0.004, d: 0.45, peak: 0.6 }, 'lowpass', 520, 70, 0.9);
+    this.noise(t + 0.06, { a: 0.18, d: 1.9, peak: 0.3 }, 'lowpass', 190, 45, 1.2);
+    this.noise(t + 0.12, { a: 0.05, d: 0.7, peak: 0.1 }, 'bandpass', 900, 260, 0.7);
+  }
+
   /** Picking something up. */
   pickup() {
     if (!this.ok) return;
@@ -241,6 +262,27 @@ export class Sfx {
     for (const [f, dt] of [[392, 0.6], [523, 0.75], [659, 0.9], [784, 1.05]] as const) {
       this.tone('sine', f, f, t + dt, { a: 0.02, d: 1.4, peak: 0.1 }, { echo: true });
     }
+  }
+
+  /** Taken down by a ring's dark arms (or brought back `up`): a low swallow. No chimes: this isn't the hearth. */
+  sink(up = false) {
+    if (!this.ok) return;
+    const t = this.ctx!.currentTime + 0.01;
+    this.noise(t, { a: 0.25, d: 0.9, peak: 0.4 }, 'lowpass', up ? 300 : 1800, up ? 1800 : 220, 0.9);
+    this.tone('sine', up ? 60 : 150, up ? 150 : 50, t, { a: 0.2, d: 1.0, peak: 0.32 });
+    this.tone('triangle', up ? 196 : 294, up ? 294 : 196, t + 0.15, { a: 0.05, d: 0.9, peak: 0.06 }, { echo: true });
+  }
+
+  /** Taken by a crow: wings going by low and fast, and a small cry cut short as it's carried off. Nothing glad in it. */
+  snatch() {
+    if (!this.ok) return;
+    const t = this.ctx!.currentTime + 0.01;
+    this.noise(t, { a: 0.07, d: 0.3, peak: 0.5 }, 'bandpass', 2200, 320, 0.8);
+    this.noise(t, { a: 0.05, d: 0.22, peak: 0.3 }, 'lowpass', 900, 160, 0.7);
+    this.tone('sine', 110, 55, t + 0.05, { a: 0.004, d: 0.14, peak: 0.4 });
+    const f = 1000 * (0.9 + Math.random() * 0.2);
+    this.tone('sine', f, f * 0.52, t + 0.07, { a: 0.012, d: 0.2, peak: 0.2 }, { vib: 30, vibHz: 13, echo: true });
+    this.tone('triangle', f * 1.5, f * 0.75, t + 0.07, { a: 0.012, d: 0.13, peak: 0.03 });
   }
 
   private pop(t: number, level: number) {

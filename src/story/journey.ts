@@ -18,20 +18,26 @@ import { Puffs } from '../gfx/puffs';
 //           along the path to the home tower, waiting when you fall behind.
 //   lock1   At the tower it hops off and shows you the old lock. Smash it:
 //           the tower's spirit comes out and climbs into the head.
-//   enter1  It points you into the doorway. Up in the head, the view turns
-//           to the next tower, dark on its hill. Come back down...
-//   ride2   ...and it's waiting on its bike to lead you there.
-//   lock2   The same again at that tower...
-//   enter2  ...and from its head, home glows: fly back as an ember.
-//   done    It goes back to its fire. The next time you come home, phase 3
-//           (the stable, see phase3.ts) begins.
+//   enter1  It points you into the doorway. Up in the head, the giant comes
+//           (giant/visit.ts). Come back down...
+//   trudge  ...and it turns for home on foot, its bike forgotten at the
+//           tower: back down the path, slowly, eyes on the ground, without
+//           a stop. It doesn't lead you or wait for you.
+//   grieve  In the village it keeps to itself for a few minutes, going from
+//           one wrecked house to the next, standing or sitting by each.
+//   done    Once that's passed and you're in the village, phase 3 (the
+//           stable, see phase3.ts) begins. Not before, and it doesn't call
+//           you home for it.
+//
+// (ride2, lock2 and enter2 were a second guided ride to the next tower; the
+// giant's trail goes that way instead. Old saves can still be in them.)
 //
 // From `ride1` on, the gift bike always turns up again outside the cabin.
 // Which stage you're at is saved per seed, and is the checkpoint a reload
 // resumes from (resume()).
 
-export type Stage = 'wait' | 'gift' | 'ride1' | 'lock1' | 'enter1' | 'ride2' | 'lock2' | 'enter2' | 'done';
-export const STAGES: Stage[] = ['wait', 'gift', 'ride1', 'lock1', 'enter1', 'ride2', 'lock2', 'enter2', 'done'];
+export type Stage = 'wait' | 'gift' | 'ride1' | 'lock1' | 'enter1' | 'ride2' | 'lock2' | 'enter2' | 'trudge' | 'grieve' | 'done';
+export const STAGES: Stage[] = ['wait', 'gift', 'ride1', 'lock1', 'enter1', 'ride2', 'lock2', 'enter2', 'trudge', 'grieve', 'done'];
 
 export interface JourneyDeps {
   gen: WorldGen;
@@ -57,6 +63,12 @@ const LITTLE = 0.55, BESIDE = 1.5;
 const AHEAD = 10, WAIT_AT = 24;
 /** Seconds at a stage without progress before the spirit comes and tugs your coat (as at home), and within what distance (m). */
 const HINT_AFTER = 20, HINT_NEAR = 40;
+/** The walk home after the giant: its pace (m/s), and how far from you it has to be to make up ground unseen (from, to full speed; m). */
+const TRUDGE = 1.8, UNSEEN = [95, 130] as const, UNSEEN_PACE = 14;
+/** How long it keeps to itself in the village before it has anything to ask of you (s). */
+const GRIEVE = 180;
+/** You're "in the village" within this of the cabin or of the lane (m). */
+const VILLAGE_R = 32;
 
 /** Rides the spirit's bike along a path, keeping a little ahead of you. */
 class Leader {
@@ -155,6 +167,12 @@ export class Journey {
   private turn = 0;
   private callT = 0;
   private hintT = 0;
+  /** The walk home: the path back, and how far along it the spirit is heading. */
+  private back: Leader | null = null;
+  private backS = -1;
+  /** Keeping to itself: how long at this spot, how long it's been, how long getting there. */
+  private mope = { stay: 0, t: 0, go: 0, last: -1 };
+  private low = false;
   private tmp = new THREE.Vector3();
 
   constructor(private d: JourneyDeps) {
@@ -208,9 +226,11 @@ export class Journey {
     }
     if (e === 'opened') this.spirit.celebrate();
     if (e === 'lit' && (this.stage === 'lock1' || this.stage === 'lock2')) { this.spirit.celebrate(); this.setStage(this.stage === 'lock1' ? 'enter1' : 'enter2'); }
-    // Up in the head: the view turns to where you go next.
-    if (e === 'inHead') this.d.beacons.guide(this.stage === 'enter1' ? this.next.id : this.home.id);
-    if (e === 'outHead' && this.stage === 'enter1') this.startRide2();
+    // Up in the head of the second tower (old saves): the view turns home.
+    if (e === 'inHead' && this.stage === 'enter2') this.d.beacons.guide(this.home.id);
+    // Up in the home tower's head for the first time is where the giant comes (main.ts starts giant/visit.ts).
+    // Down again, the guided part is over: the world is open, and the spirit sets off home on foot.
+    if (e === 'outHead' && this.stage === 'enter1') this.setStage('trudge');
     if (e === 'outHead' && this.stage === 'enter2') this.setStage('done');
   }
 
@@ -233,6 +253,10 @@ export class Journey {
       this.spirit.riding = null;
       story.lent = false;
     }
+    const low = this.stage === 'trudge' || this.stage === 'grieve';
+    this.spirit.sullen = low;
+    if (this.low && !low) this.spirit.haste = null;
+    this.low = low;
     this.tidyCabin();
     if (this.stage === 'wait') {
       // The hearth is lit and the house has settled: a few moments later, the gift.
@@ -246,7 +270,6 @@ export class Journey {
     }
     const b = this.d.body;
     const riding = this.d.cycling();
-
     switch (this.stage) {
       case 'gift': {
         const g = this.giftSpot();
@@ -319,14 +342,46 @@ export class Journey {
         this.want(this.byDoorway(t), d, 'point', 'up', d);
         break;
       }
+      case 'trudge': {
+        const sp = this.spirit;
+        const L = (this.back ??= new Leader(this.d.gen.journey.toHome, this.d.gen));
+        const s = L.project(sp.pos).s;
+        // In the yard: home.
+        if (s < 4) { this.back = null; this.backS = -1; this.setStage('grieve'); break; }
+        // Out of your sight it makes up ground, so it's never far behind you; where you can see it, it trudges.
+        sp.haste = THREE.MathUtils.lerp(TRUDGE, UNSEEN_PACE, THREE.MathUtils.smoothstep(sp.pos.distanceTo(b.pos), UNSEEN[0], UNSEEN[1]));
+        // Down the path a stretch at a time.
+        // (Its goal is always well ahead of it, so it never slows for one.)
+        if (this.backS < 0 || Math.hypot(sp.want.at.x - sp.pos.x, sp.want.at.z - sp.pos.z) < 6) {
+          this.backS = Math.max(0, s - 14);
+          sp.want = { at: L.at(this.backS), face: null, pose: 'stand', icon: null, lead: false, settled: true };
+        }
+        break;
+      }
+      case 'grieve': {
+        const sp = this.spirit;
+        sp.haste = TRUDGE;
+        this.keepToItself(dt);
+        // A few minutes on, and you're here: it has something to ask of you again.
+        if (this.t > GRIEVE && this.inVillage(b.pos) && b.grounded && !sp.busy) {
+          story.lent = false;
+          sp.home = new THREE.Vector3(this.d.gen.story.x, 0, this.d.gen.story.z);
+          sp.sullen = false;
+          sp.haste = null;
+          sp.want = { at: sp.pos.clone(), face: story.anchor('hearth'), pose: 'stand', icon: null, lead: false, settled: true };
+          this.setStage('done');
+          story.startStable();
+        }
+        break;
+      }
       case 'done': {
         // Back to its fire once you're well away (or home already).
         if (story.lent) {
           const far = this.spirit.pos.distanceTo(b.pos) > 90;
           if (far) this.goHome();
           else this.want(this.spirit.pos.clone(), b.pos, 'stand', null);
-        } else if (story.stableReady && Math.hypot(b.pos.x - this.d.gen.story.x, b.pos.z - this.d.gen.story.z) < 35 && b.grounded) {
-          // Home again after lighting the first two towers: the stable (phase 3).
+        } else if (story.stableReady && this.inVillage(b.pos) && b.grounded) {
+          // (An older save, already past all this.) Home again: the stable (phase 3).
           story.startStable();
         }
         break;
@@ -335,10 +390,54 @@ export class Journey {
     if (this.sBike && this.stage !== 'ride1' && this.stage !== 'ride2') this.parkSpiritBike(dt);
   }
 
+  /** In the village: by the cabin, or somewhere along the lane. */
+  private inVillage(p: THREE.Vector3) {
+    const st = this.d.gen.story;
+    let d = Math.hypot(p.x - st.x, p.z - st.z);
+    for (const q of st.village?.lane ?? []) d = Math.min(d, Math.hypot(p.x - q.x, p.z - q.z));
+    return d < VILLAGE_R;
+  }
+
+  /**
+   * Its own thing, after the giant: from one wrecked house to the next, out
+   * in the lane in front of each, standing or sitting and looking at what's
+   * left; now and then a while by its own fire. Nothing to ask of you (it
+   * can be patted).
+   */
+  private keepToItself(dt: number) {
+    const sp = this.spirit, m = this.mope, story = this.d.story;
+    if (sp.busy) return;
+    if (sp.arrived || m.go > 60) m.t += dt;
+    else m.go += dt;
+    if (m.t < m.stay) return;
+    m.t = m.go = 0;
+    const vil = this.d.gen.story.village;
+    const houses = vil?.plots.filter((p) => p.house) ?? [];
+    let k = Math.floor(Math.random() * (houses.length + 1));
+    if (k === m.last) k = (k + 1) % (houses.length + 1);
+    m.last = k;
+    if (k >= houses.length) {
+      m.stay = 25 + Math.random() * 15;
+      sp.want = { at: story.anchor('hearthSeat').clone(), face: story.anchor('hearth'), pose: 'sit', icon: null, lead: false, settled: true };
+      return;
+    }
+    // In the lane abreast of the house, a step toward it.
+    const h = houses[k];
+    let q = vil!.lane[0], bd = Infinity;
+    for (const l of vil!.lane) { const d = Math.hypot(l.x - h.x, l.z - h.z); if (d < bd) { bd = d; q = l; } }
+    const side = 2 + Math.random() * 2.5, along = (Math.random() - 0.5) * 4;
+    const ux = (h.x - q.x) / (bd || 1), uz = (h.z - q.z) / (bd || 1);
+    const at = new THREE.Vector3(q.x + ux * side - uz * along, 0, q.z + uz * side + ux * along);
+    at.y = this.d.gen.height(at.x, at.z);
+    m.stay = 12 + Math.random() * 12;
+    sp.want = { at, face: new THREE.Vector3(h.x, h.y + 0.6, h.z), pose: Math.random() < 0.4 ? 'sit' : 'stand', icon: null, lead: false, settled: true };
+  }
+
   /**
    * Where the task is (story/pointer.ts): the spirit while it's giving the
-   * bike or leading a ride, the tower's door at a lock, home when the stable
-   * is waiting; otherwise the house's own steps.
+   * bike or leading a ride, the tower's door at a lock; otherwise the
+   * house's own steps. Nothing calls you home for the stable: that waits
+   * until you're there.
    */
   guide(leading: boolean): Guide | null {
     const story = this.d.story;
@@ -349,9 +448,9 @@ export class Journey {
         const g = t.door.ground;
         return { at: new THREE.Vector3(g.x, g.y, g.z), near: 45 };
       }
+      case 'trudge': case 'grieve': return null;
       case 'done':
-        if (story.lent) return null;
-        if (story.stableReady) { const st = this.d.gen.story; return { at: new THREE.Vector3(st.x, this.d.gen.height(st.x, st.z), st.z), near: 35 }; }
+        if (story.lent || story.stableReady) return null;
     }
     return story.guide(leading);
   }
@@ -464,6 +563,14 @@ export class Journey {
     this.sBike.ridden = true;
   }
 
+  /** Stand the spirit's bike at a spot of someone else's choosing (the giant's visit: beside it, at the foot of the tower). */
+  standBike(x: number, z: number, heading: number) {
+    if (!this.sBike) this.sBike = this.d.bikes.place('spirit', x, z, heading, 2, LITTLE);
+    else this.d.bikes.move(this.sBike, x, z, heading);
+    this.sBike.scale = LITTLE;
+    this.sBike.ridden = true;
+  }
+
   /** Waiting on its bike at the start for you to get on yours. */
   private holding = false;
   private boardT = 0;
@@ -517,13 +624,6 @@ export class Journey {
     const b = this.d.body.pos;
     for (const [key, k] of this.d.bikes.bikes) if (key !== 'spirit' && !k.ridden && k.pos.distanceTo(b) < 30) return true;
     return false;
-  }
-
-  private startRide2() {
-    this.setStage('ride2');
-    this.leader = null;
-    this.boardT = 0;
-    this.spirit.want = { at: this.spirit.pos.clone(), face: this.d.body.pos.clone(), pose: 'stand', icon: null, lead: false };
   }
 
   /** The little bike and its rider, from the leader's place on the path. */
@@ -727,8 +827,11 @@ export class Journey {
     if (!story.done) { story.debugJump('home'); story.done = true; story.save(); }
     const idx = STAGES.indexOf(s);
     bz.setLit(this.home.id, idx > STAGES.indexOf('lock1'));
-    bz.setLit(this.next.id, idx > STAGES.indexOf('lock2'));
+    bz.setLit(this.next.id, idx > STAGES.indexOf('lock2') && s !== 'trudge' && s !== 'grieve');
     this.leader = null;
+    this.back = null;
+    this.backS = -1;
+    this.mope = { stay: 0, t: 0, go: 0, last: -1 };
     this.spirit.riding = null;
     if (this.sBike) { this.d.bikes.bikes.delete('spirit'); this.sBike = null; }
     this.stage = s;
@@ -754,10 +857,17 @@ export class Journey {
       this.d.bikes.move(gift, x + 2, z, this.home.yaw);
       this.d.place(x, z, this.home.yaw);
       this.d.mount(gift);
+    } else if (s === 'grieve') {
+      // In the yard, the spirit just in from the path; its bike still at the tower.
+      const [x, z] = j.toHome[0], [nx, nz] = j.toHome[1];
+      this.d.place(x, z, Math.atan2(x - nx, z - nz));
+      this.spirit.teleport(new THREE.Vector3(x + 2, this.d.gen.height(x + 2, z), z));
+      this.parkAtEnd(j.toHome);
     } else {
-      const t = s === 'lock1' || s === 'enter1' ? this.home : this.next;
+      const t = s === 'lock1' || s === 'enter1' || s === 'trudge' ? this.home : this.next;
       this.atTower(t, gift);
-      this.spirit.teleport(this.besideDoor(t, 3.2));
+      this.spirit.teleport(s === 'trudge' ? this.byDoorway(t) : this.besideDoor(t, 3.2));
+      if (s === 'trudge') this.parkAtEnd(j.toHome);
       if (s === 'done') this.goHome();
     }
     this.save();
@@ -794,6 +904,8 @@ export class Journey {
    */
   resume() {
     const s = this.stage, j = this.d.gen.journey;
+    // Keeping to itself in the village (the house has put it by its fire); the bike it forgot is still at the tower.
+    if (this.d.story.done && s === 'grieve') { this.parkAtEnd(j.toHome); return; }
     if (!this.d.story.done || s === 'wait' || s === 'gift' || s === 'done') return;
     this.leader = null;
     this.spirit.riding = null;
@@ -819,8 +931,8 @@ export class Journey {
     try {
       const s = localStorage.getItem(this.key()) as Stage | null;
       if (s && STAGES.includes(s)) {
-        // Where you pick up again is resume()'s (a ride starts over).
-        this.stage = s;
+        // Where you pick up again is resume()'s (a ride starts over; the walk home is over, and it's in the village).
+        this.stage = s === 'trudge' ? 'grieve' : s;
       }
     } catch { /* ignore */ }
   }

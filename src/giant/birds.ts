@@ -1,0 +1,220 @@
+import * as THREE from 'three';
+import { makeSolidMaterial } from '../gfx/materials';
+import { crowParts } from '../mobs/crow';
+import { mirrorX, PartBatch } from '../mobs/parts';
+
+// The giant's birds: a flock of big black crows that roosts in the trees on
+// its shoulders. When it stops they lift off all together, stoop down the
+// lane, and each snatches up a spirit; from then on they wheel round its
+// head, every one carrying a small warm light. They are the world's crow
+// (mobs/crow.ts) in soot black with blank yellow eyes: the spooky thing in
+// the story, by the owner's wish.
+//
+// They are drawn here (six instanced batches for the whole flock) and told
+// where to be by giant/visit.ts; they have no brain of their own.
+
+/** About 7 m from wingtip to wingtip: they have to read beside an 80 m giant. */
+const S = 1.9;
+/** What a crow carries hangs this far under it. */
+export const GRIP = 1.6;
+/** Soot: the crow's ink, nearly put out. */
+const SOOT = [0.3, 0.26, 0.34].map((k) => new THREE.Color(k, k, k * 1.12));
+
+export type BirdState = 'roost' | 'wheel' | 'dive' | 'climb';
+
+export interface Bird {
+  pos: THREE.Vector3;
+  /** The way it's flying (unit). */
+  dir: THREE.Vector3;
+  state: BirdState;
+  /** Where on the wheel it flies, and where it sits. */
+  phase: number;
+  perch: number;
+  /** A dive or a climb: from, by way of, to, and how far along (0..1). */
+  a: THREE.Vector3; b: THREE.Vector3; c: THREE.Vector3; t: number; dur: number;
+  /** How far along that curve it is by each of `ARC` even steps (0..1), to fly it at a speed of our choosing. */
+  arc: Float32Array;
+  /** What it does when it gets there. */
+  then: BirdState;
+  /** Carrying a spirit: its light hangs under it (and how far it has come up, 0..1). */
+  light: THREE.Mesh | null;
+  glow: number;
+  /** Where what it carries hangs: straight down under it. */
+  grip: THREE.Vector3;
+  flap: number;
+  tint: THREE.Color;
+}
+
+const m4 = new THREE.Matrix4(), m5 = new THREE.Matrix4(), part = new THREE.Matrix4(), wingM = new THREE.Matrix4();
+const up = new THREE.Vector3(0, 1, 0), one = new THREE.Vector3(1, 1, 1);
+const bx = new THREE.Vector3(), by = new THREE.Vector3(), bz = new THREE.Vector3(), v = new THREE.Vector3();
+const qa = new THREE.Quaternion(), qb = new THREE.Quaternion(), qc = new THREE.Quaternion();
+const AX = new THREE.Vector3(1, 0, 0), AY = new THREE.Vector3(0, 1, 0), AZ = new THREE.Vector3(0, 0, 1);
+const EYE = new THREE.Vector4(0, 0, 1, 0);
+const ARC = 24;
+
+export class Birds {
+  readonly group = new THREE.Group();
+  readonly birds: Bird[] = [];
+  private body: PartBatch;
+  private head: PartBatch;
+  private wing: PartBatch[];
+  private hand: PartBatch[];
+  private frame = crowParts(0.25);
+  private glow = makeSolidMaterial('#ee6a20', 1.6, { keep: 1 });
+  private glowGeo = new THREE.IcosahedronGeometry(1, 3);
+  private time = 0;
+  /** Lifts a point on a dive or a climb clear of something it mustn't fly through (the giant). */
+  clear: ((p: THREE.Vector3) => void) | null = null;
+
+  constructor(n: number) {
+    const g = this.frame;
+    this.body = new PartBatch(g.body, { keep: 0.9 }, n);
+    // Blank yellow eyes, no pupil to speak of: they don't look at you, they look through you.
+    this.head = new PartBatch(g.head, { keep: 0.9, eyePos: [0.5, 0.2], eyeSize: [0.24, 0.2], pupil: [0.012, 0.016], lookRange: [0, 0], eyeTilt: -0.35 }, n);
+    this.head.material.uniforms.uWhite.value = new THREE.Color('#ffd35e');
+    this.wing = [new PartBatch(g.wing, { keep: 0.9 }, n), new PartBatch(mirrorX(g.wing), { keep: 0.9 }, n)];
+    this.hand = [new PartBatch(g.hand, { keep: 0.9 }, n), new PartBatch(mirrorX(g.hand), { keep: 0.9 }, n)];
+    this.group.add(this.body.mesh, this.head.mesh, ...this.wing.map((b) => b.mesh), ...this.hand.map((b) => b.mesh));
+    for (let i = 0; i < n; i++) {
+      this.birds.push({
+        pos: new THREE.Vector3(), dir: new THREE.Vector3(0, 0, 1), state: 'roost', phase: (i / n) * Math.PI * 2 + (i % 2) * 0.35, perch: i,
+        a: new THREE.Vector3(), b: new THREE.Vector3(), c: new THREE.Vector3(), t: 0, dur: 1, arc: new Float32Array(ARC + 1), then: 'wheel', light: null, glow: 0, grip: new THREE.Vector3(), flap: i * 1.7, tint: SOOT[i % SOOT.length],
+      });
+    }
+  }
+
+  /** Send bird `i` from where it is to `to`, swinging out by way of `via`, in `dur` seconds. */
+  send(i: number, state: 'dive' | 'climb', via: THREE.Vector3, to: THREE.Vector3, dur: number, then: BirdState = 'wheel') {
+    const b = this.birds[i];
+    b.state = state;
+    b.a.copy(b.pos); b.b.copy(via); b.c.copy(to);
+    b.t = 0; b.dur = dur; b.then = then;
+    // Measure it: the curve's own pace bunches up at a short leg (the level run at the mark), which is
+    // just where it mustn't dawdle.
+    let len = 0;
+    b.arc[0] = 0;
+    bx.copy(b.a);
+    for (let j = 1; j <= ARC; j++) {
+      const k = j / ARC;
+      v.copy(b.a).multiplyScalar((1 - k) * (1 - k)).addScaledVector(b.b, 2 * (1 - k) * k).addScaledVector(b.c, k * k);
+      len += v.distanceTo(bx);
+      b.arc[j] = len;
+      bx.copy(v);
+    }
+    for (let j = 1; j <= ARC; j++) b.arc[j] = len > 1e-4 ? b.arc[j] / len : j / ARC;
+  }
+
+  /** What bird `i` has hold of becomes a warm light under it (`now`: lit already, a restored save). */
+  carry(i: number, now = false) {
+    const b = this.birds[i];
+    if (b.light) return;
+    b.glow = now ? 1 : 0;
+    b.light = new THREE.Mesh(this.glowGeo, this.glow);
+    b.light.frustumCulled = false;
+    b.light.scale.setScalar(now ? 1.1 : 0);
+    this.group.add(b.light);
+  }
+
+  /**
+   * Fly them. `perch(i)` is where bird i roosts, `hub` the middle of the
+   * wheel (the giant's head), `facing` the way the giant faces.
+   */
+  update(dt: number, perch: (i: number, out: THREE.Vector3) => THREE.Vector3, hub: THREE.Vector3, facing: number) {
+    this.time += dt;
+    const t = this.time;
+    const all = [this.body, this.head, ...this.wing, ...this.hand];
+    for (const b of all) b.begin();
+    for (const [i, b] of this.birds.entries()) {
+      let fold = 0, flapRate = 7, glide = 0;
+      if (b.state === 'roost') {
+        perch(b.perch, b.pos);
+        b.dir.set(Math.sin(facing + (i % 3 - 1) * 0.5), 0, Math.cos(facing + (i % 3 - 1) * 0.5));
+        fold = 1;
+      } else if (b.state === 'wheel') {
+        // Round its head, each at its own height, rising and falling a little.
+        const a = b.phase + t * 0.55, r = 30 + (i % 3) * 5;
+        v.set(hub.x + Math.cos(a) * r, hub.y + 6 + (i % 4) * 3 + Math.sin(t * 0.7 + i) * 2.5, hub.z + Math.sin(a) * r);
+        // Ease on to the wheel from wherever it was, so nothing snaps.
+        b.dir.subVectors(v, b.pos);
+        const far = b.dir.length();
+        if (far > 0.5 && dt > 0) {
+          b.dir.divideScalar(far);
+          const want = bx.set(-Math.sin(a), 0.02, Math.cos(a));
+          b.dir.lerp(want, THREE.MathUtils.clamp(1 - far / 12, 0, 1)).normalize();
+          b.pos.lerp(v, 1 - Math.exp(-3.5 * dt));
+        } else b.dir.set(-Math.sin(a), 0, Math.cos(a));
+        glide = 0.5 + 0.5 * Math.sin(t * 0.9 + i * 2);
+      } else {
+        b.t = Math.min(1, b.t + dt / b.dur);
+        // Down, level through the mark and up again all at one speed: it doesn't slow for what it takes.
+        // (Home to roost, it eases in to land.)
+        const s = b.then === 'roost' ? b.t * b.t * (3 - 2 * b.t) : b.t;
+        // That far along the curve by distance, as the curve's own parameter.
+        let j = 1;
+        while (j < ARC && b.arc[j] < s) j++;
+        const e = (j - 1 + (s - b.arc[j - 1]) / Math.max(1e-6, b.arc[j] - b.arc[j - 1])) / ARC;
+        const at = (k: number, out: THREE.Vector3) => {
+          out.copy(b.a).multiplyScalar((1 - k) * (1 - k)).addScaledVector(b.b, 2 * (1 - k) * k).addScaledVector(b.c, k * k);
+          if (this.clear) {
+            // (Eased in and out, so it still leaves from and arrives at exactly where it was sent.)
+            const y = out.y;
+            this.clear(out);
+            out.y = THREE.MathUtils.lerp(y, out.y, THREE.MathUtils.smoothstep(Math.min(k, 1 - k), 0, 0.1));
+          }
+          return out;
+        };
+        at(e, b.pos);
+        at(Math.min(1, e + 0.02), v);
+        if (v.distanceToSquared(b.pos) > 1e-4) b.dir.subVectors(v, b.pos).normalize();
+        // (Wings held out along the ground, where a beat would go through it.)
+        glide = b.state === 'dive' ? 0.85 : b.then === 'roost' ? 0 : 0.85 * (1 - THREE.MathUtils.smoothstep(b.t, 0.05, 0.3));
+        flapRate = b.state === 'climb' ? 10 : 7;
+        if (b.t >= 1) b.state = b.then;
+      }
+      b.flap += dt * flapRate * (1 - glide * 0.8);
+      // Body frame: +z along the way it flies. On a perch it sits up.
+      bz.copy(b.dir);
+      bx.crossVectors(up, bz);
+      if (bx.lengthSq() < 1e-4) bx.set(1, 0, 0);
+      bx.normalize();
+      by.crossVectors(bz, bx);
+      m4.makeBasis(bx, by, bz).setPosition(b.pos).scale(v.set(S, S, S));
+      if (fold) m4.multiply(m5.makeRotationX(-0.38));
+      this.body.push(m4, b.tint);
+      const f = this.frame;
+      this.head.push(part.multiplyMatrices(m4, m5.makeTranslation(0, f.neck.y, f.neck.z + (fold ? 0 : 0.08))).multiply(m5.makeRotationX(fold ? 0.38 : -0.2)), b.tint, EYE);
+      // Wings as the crow's: beating about the body's long axis with the
+      // hand trailing the beat; held out on a glide; laid along the flanks
+      // on a perch.
+      const open = 1 - fold, amp = 1 - 0.85 * glide;
+      const beat = Math.sin(b.flap), lag = Math.sin(b.flap - 0.9);
+      for (let k = 0; k < 2; k++) {
+        const s = k ? -1 : 1;
+        qa.setFromAxisAngle(AZ, s * (beat * amp * 0.95 + 0.14 * glide));
+        qa.multiply(qb.setFromAxisAngle(AY, s * (0.15 + 0.1 * beat * amp)));
+        if (fold) {
+          qa.setFromAxisAngle(AX, 0.42);
+          qa.multiply(qc.setFromAxisAngle(AY, s * 1.66)).multiply(qc.setFromAxisAngle(AX, -1.35)).multiply(qc.setFromAxisAngle(AZ, s * -0.12));
+        }
+        const flank = 0.4 + 0.14 * f.plump;
+        v.set(s * THREE.MathUtils.lerp(flank, f.shoulder.x, open), THREE.MathUtils.lerp(0.16, f.shoulder.y, open), THREE.MathUtils.lerp(0.26, f.shoulder.z, open));
+        wingM.multiplyMatrices(m4, m5.compose(v, qa, one.set(THREE.MathUtils.lerp(0.62, 1, open), 1, 1)));
+        this.wing[k].push(wingM, b.tint);
+        qb.setFromAxisAngle(AZ, s * (lag * amp * 0.6 - beat * amp * 0.25) * open);
+        v.set(s * THREE.MathUtils.lerp(0.5, 0.8, open), 0, 0);
+        part.multiplyMatrices(wingM, m5.compose(v, qb, one.set(THREE.MathUtils.lerp(0.82, 1, open) / THREE.MathUtils.lerp(0.62, 1, open), 1, THREE.MathUtils.lerp(0.5, 1, open))));
+        this.hand[k].push(part, b.tint);
+      }
+      b.grip.copy(b.pos).setY(b.pos.y - GRIP);
+      if (b.light) {
+        b.glow = Math.min(1, b.glow + dt / 0.6);
+        b.light.position.copy(b.grip).setY(b.grip.y + 0.35);
+        b.light.scale.setScalar((1.1 + 0.08 * Math.sin(t * 5 + i)) * b.glow * (2 - b.glow));
+      }
+    }
+    for (const b of all) b.end();
+  }
+
+  dispose() { this.group.removeFromParent(); }
+}

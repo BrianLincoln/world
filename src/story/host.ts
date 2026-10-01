@@ -25,6 +25,8 @@ export interface HostDeps {
   puffs(at: THREE.Vector3, n: number, size: number, spread: number): void;
   colliders: Colliders;
   harvest: Harvest;
+  /** What the giant's footprints add to the ground height (world/prints.ts). */
+  dent?(x: number, z: number): number;
 }
 
 export class StoryHost {
@@ -56,7 +58,7 @@ export class StoryHost {
     this.story?.dispose();
     this.story = new Story({
       scene: this.d.scene, overlay: this.overlay, gen, env: this.d.env, rig: this.d.rig, body: this.d.body, sfx: this.sfx,
-      camera: this.d.camera, puffs: this.d.puffs, colliders: this.d.colliders, harvest: this.d.harvest, saveKey: seedText, active: this.active,
+      camera: this.d.camera, puffs: this.d.puffs, colliders: this.d.colliders, harvest: this.d.harvest, saveKey: seedText, active: this.active, dent: this.d.dent,
     });
     return this.story;
   }

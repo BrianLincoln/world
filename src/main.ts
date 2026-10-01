@@ -8,7 +8,7 @@ import { initMaterials, TERRAIN_U, U } from './gfx/materials';
 import { PostPipeline, postSettings } from './gfx/post';
 import { Puffs } from './gfx/puffs';
 import { Sky } from './gfx/sky';
-import { CharacterRig } from './player/character';
+import { CharacterRig, type Mood } from './player/character';
 import { Input } from './player/input';
 import { TouchControls, isTouchDevice } from './ui/touch';
 import { BikeMode, BODY_RADIUS, CarriedMode, CHARGE_RUN, FlyMode, GlideMode, MovementController, RideMode, SwimMode, WalkMode, type MoveContext, type WorldQuery } from './player/movement';
@@ -22,9 +22,16 @@ import type { Drakitten } from './mobs/drakitten';
 import type { BeastData } from './mobs/beast';
 import { OrbitCamera } from './player/orbitCamera';
 import { DebugUI } from './ui/debug';
+import { CHECKPOINTS, CheckpointBar } from './ui/checkpoints';
 import { StoryHost } from './story/host';
+import { Ambience } from './audio/ambience';
 import { Harvest } from './world/harvest';
 import { Bikes, type Bike } from './vehicles/bikes';
+import { Dungeon, DUNGEON_LOOK } from './dungeon/dungeon';
+import { Giant } from './giant/giant';
+import { Trail } from './giant/trail';
+import { Ring } from './giant/ring';
+import { Visit } from './giant/visit';
 import { TowerDebug } from './ui/towerDebug';
 import { Beacons } from './story/beacons';
 import { Journey, STAGES, type Stage } from './story/journey';
@@ -51,7 +58,21 @@ const camera = new THREE.PerspectiveCamera(36, 1, 0.5, 18000);
 
 let seedText = params.get('seed') ?? 'hilda';
 let gen = new WorldGen(seedFromString(seedText));
+/**
+ * The dungeon site is slow to find (seconds on a bad seed), so it's found
+ * once per seed, kept in localStorage, and handed to the chunk workers.
+ */
+function primeDungeon(g: WorldGen) {
+  const key = `fjellheim.dungeon.v5.${g.seed}`;
+  try {
+    const raw = localStorage.getItem(key);
+    if (raw) g.presetDungeon(JSON.parse(raw));
+    else localStorage.setItem(key, JSON.stringify(g.dungeon));
+  } catch { /* private mode: it's found again each load */ }
+  return g.dungeon;
+}
 const terrain = new Terrain(gen.seed);
+terrain.dungeon = primeDungeon(gen);
 scene.add(terrain.root);
 const groundShadow = new GroundShadow();
 if (params.get('shadows') === '0') groundShadowSettings.enabled = false;
@@ -67,20 +88,28 @@ const colliders = new Colliders(gen);
 const bikes = new Bikes(gen, colliders);
 // The story's opening (the broken cabin, the hearth spirit): see src/story/.
 let storyHost: StoryHost | null = null;
+// The giant (only once summoned). Asleep, it's solid: see `world` below.
+let giant: Giant | null = null;
+// What the giant leaves behind: footprints you can walk down into, flattened trees.
+const trail = new Trail({ ground: (x, z) => gen.height(x, z), colliders });
+// The first dungeon, inside (built the first time the ring takes you down). While you're in it, it is the world.
+let dungeon: Dungeon | null = null;
 const world: WorldQuery = {
-  groundHeight: (x, z) => gen.height(x, z),
-  floorHeight: (x, z, feetY, r) => Math.max(gen.height(x, z), colliders.surface(x, z, feetY, r), storyHost?.story?.surface(x, z, feetY, r, 0.5) ?? -Infinity, beacons?.surface(x, z, feetY) ?? -Infinity),
+  groundHeight: (x, z) => (dungeon?.inside ? dungeon.floorAt(x, z) : trail.height(x, z)),
+  floorHeight: (x, z, feetY, r) => dungeon?.inside ? dungeon.floorAt(x, z, feetY) : Math.max(trail.height(x, z), colliders.surface(x, z, feetY, r), storyHost?.story?.surface(x, z, feetY, r, 0.5) ?? -Infinity, beacons?.surface(x, z, feetY) ?? -Infinity, giant?.surface(x, z, feetY, 0.6) ?? -Infinity),
   collide: (pos, vel, r, rampMax, noTrees) => {
+    if (dungeon?.inside) { dungeon.collide(pos, vel, r); return; }
     colliders.push(pos, vel, r, rampMax, noTrees);
     bikes.push(pos, vel, r);
     storyHost?.story?.collide(pos, vel, r);
     beacons?.collide(pos, vel, r);
+    giant?.push(pos, vel, r);
   },
-  ramp: (x, z, r, maxRise) => colliders.ramp(x, z, r, maxRise),
-  climbTop: (x, z, r) => Math.max(colliders.cabinTop(x, z, r), storyHost?.story?.surface(x, z, Infinity, r, Infinity) ?? -Infinity),
-  wetland: (x, z) => gen.bog(x, z),
-  forest: (x, z) => gen.forestDensity(x, z, gen.height(x, z)),
-  landmarks: (pos, vel, r) => beacons?.collide(pos, vel, r),
+  ramp: (x, z, r, maxRise) => (dungeon?.inside ? -Infinity : colliders.ramp(x, z, r, maxRise)),
+  climbTop: (x, z, r) => dungeon?.inside ? -Infinity : Math.max(colliders.cabinTop(x, z, r), storyHost?.story?.surface(x, z, Infinity, r, Infinity) ?? -Infinity),
+  wetland: (x, z) => (dungeon?.inside ? 0 : gen.bog(x, z)),
+  forest: (x, z) => (dungeon?.inside ? 0 : gen.forestDensity(x, z, gen.height(x, z))),
+  landmarks: (pos, vel, r) => { if (dungeon?.inside) return; beacons?.collide(pos, vel, r); giant?.land(pos, vel, r); },
   waterLevel: SEA_LEVEL,
 };
 
@@ -90,6 +119,8 @@ const player = new MovementController([new WalkMode(), new SwimMode(), new FlyMo
 const rig = new CharacterRig();
 scene.add(rig.root);
 if (params.get('eyes') === 'round') rig.eyeType = 'round';
+// Dev: ?mood=sad|scared|set holds her face in a mood (outside the story).
+if (params.has('mood')) rig.mood = params.get('mood') as Mood;
 const puffs = new Puffs();
 scene.add(puffs.group);
 // Ride effects for the wilder mounts: churned mud, glimmer motes, static sparks.
@@ -116,7 +147,7 @@ const mobCtx: MobCtx = {
   time: 0,
   gen,
   player: { pos: new THREE.Vector3(), vel: new THREE.Vector3(), heading: 0, mode: 'walk' },
-  surface: (x, z) => Math.max(gen.height(x, z), SEA_LEVEL),
+  surface: (x, z) => Math.max(trail.height(x, z), SEA_LEVEL),
   collide: (pos, vel, r) => {
     colliders.push(pos, vel, r);
     storyHost?.story?.collide(pos, vel, r, true);
@@ -211,6 +242,11 @@ function dismountBike() {
  * so a floof trailing on its lead counts.
  */
 function nextMount(): { mob: Mob } | { bike: Bike } | null {
+  // Down in the dungeon the only mount is its own creature, once you've let it out.
+  if (dungeon?.inside) {
+    const m = dungeon.freed ? mobs.mountable(player.body.pos, riding ? 6.5 : undefined) : null;
+    return m ? { mob: m } : null;
+  }
   const p = player.body.pos;
   const mounted = !!riding || !!cycling;
   const mode = player.current.name;
@@ -256,9 +292,24 @@ const post = new PostPipeline(renderer);
 const storyActive = params.get('story') === '1' || (params.get('story') !== '0' && !params.has('t') && !params.has('x') && params.get('mode') !== 'fly');
 // Felled trees and smashed rocks (hidden on the GPU, left out of collision).
 const harvest = new Harvest();
-colliders.skip = (kind, x, z) => { const [gi, gj] = Harvest.cellOf(kind, x, z); return harvest.gone(kind, gi, gj); };
+colliders.skip = (kind, x, z) => { const [gi, gj] = Harvest.cellOf(kind, x, z); return harvest.gone(kind, gi, gj) || trail.prints.sdf(x, z) < 1; };
 colliders.busy = (kind, x, z) => { const [gi, gj] = Harvest.cellOf(kind, x, z); return harvest.has(kind, gi, gj); };
-storyHost = new StoryHost({ scene, post, env, rig, body: player.body, camera, puffs: (at, n, size, spread) => puffs.emit(at, n, size, spread), colliders, harvest }, storyActive);
+storyHost = new StoryHost({ scene, post, env, rig, body: player.body, camera, puffs: (at, n, size, spread) => puffs.emit(at, n, size, spread), colliders, harvest, dent: (x, z) => trail.prints.offset(x, z) }, storyActive);
+const ambience = new Ambience(storyHost.sfx);
+let homeIn = false;
+/**
+ * For the ambience's home bed: by the lit cabin, or along the village lane
+ * until the giant has been. A wider ring to leave than to enter, so the
+ * edge doesn't flutter.
+ */
+function atHome() {
+  const story = storyHost?.story;
+  if (!story || !story.cabin.lit) return (homeIn = false);
+  const p = player.body.pos, r = homeIn ? 70 : 55;
+  let d = Math.hypot(p.x - story.cabin.hearthPos.x, p.z - story.cabin.hearthPos.z);
+  if (story.village && !story.giantGone) for (const q of story.village.site.lane) d = Math.min(d, Math.hypot(p.x - q.x, p.z - q.z));
+  return (homeIn = d < r);
+}
 if (params.has('fresh')) try { localStorage.removeItem(`fjellheim.story.${seedText}`); } catch { /* ignore */ }
 storyHost.build(gen, seedText);
 if (params.has('fresh')) try { localStorage.removeItem(`fjellheim.journey.${seedText}`); } catch { /* ignore */ }
@@ -272,7 +323,7 @@ if (params.has('fresh')) try { localStorage.removeItem(`fjellheim.towers.${seedT
 let hadCine = false;
 /** Easing the camera between a cinematic and the orbit: where it came from, and how far along (1 = done). */
 const camBlendPos = new THREE.Vector3(), camBlendQ = new THREE.Quaternion(), camToQ = new THREE.Quaternion(), camLastPos = new THREE.Vector3(), camLastQ = new THREE.Quaternion();
-let camBlend = 1;
+let camBlend = 1, camBlendDur = 1.1;
 /** Last frame's final camera pose (a blend can start from it). */
 const camPrevPos = new THREE.Vector3(), camPrevQ = new THREE.Quaternion();
 /** Sandbox only: how long the pick stays in the mitten after a swing at a tower's lock. */
@@ -312,7 +363,7 @@ function makeHerd() {
   // yours (saddled, and it comes home) once it's been brought to the stable.
   mobs.rules.stable = !!storyHost!.active;
 }
-if (params.has('fresh')) try { localStorage.removeItem(`fjellheim.herd.${seedText}`); } catch { /* ignore */ }
+if (params.has('fresh')) try { localStorage.removeItem(`fjellheim.herd.${seedText}`); localStorage.removeItem(`fjellheim.dungeon1.${seedText}`); } catch { /* ignore */ }
 makeJourney();
 
 /** Dev: straight to a phase 3 step (the journey done, everything before it built), standing by the pasture gate. */
@@ -334,6 +385,191 @@ function stableJump(id: string) {
   return true;
 }
 if (params.get('beacons') === '0') beacons.group.visible = false;
+
+// The giant (slice 1, step 1: the look; no story drives it yet). It only
+// exists once summoned: `__ow.giant(dist)` or ?giant=<metres>[,walk].
+const giantDust = new Puffs('#efe4d2', 60, 0, 0.35);
+const giantBreath = new Puffs('#fbf8f4', 16, 0, 0.5, true);
+scene.add(giantDust.group, giantBreath.group, trail.group);
+function summonGiant(x: number, z: number, heading: number) {
+  if (!giant) {
+    giant = new Giant({
+      ground: (gx, gz) => Math.max(gen.height(gx, gz), SEA_LEVEL - 6),
+      onStep: (at, _foot, yaw) => {
+        // It leaves a print for good, and whatever stood there is flat.
+        trail.stamp(at, yaw);
+        visit?.onStep(at);
+        // A ring of dust as big as a cabin, and the ground jumps under you.
+        giantDust.emit(at, 14, 4.6, 16, undefined, { life: 1.6, rise: 1.2, drag: 1.6, up: 3 });
+        giantDust.emit(at, 8, 2.2, 7, undefined, { life: 1.1, rise: 2, drag: 1.4, up: 6 });
+        const d = at.distanceTo(player.body.pos);
+        if (d < 900) orbit.bump(1.8 * (1 - d / 900) ** 2);
+      },
+      onBreath: (at, dir) => {
+        for (let i = 0; i < 3; i++) giantBreath.emit(v3.copy(at).addScaledVector(dir, 2 + i * 2.5), 1, 2.6 - i * 0.5, 0.4, v3b.copy(dir).multiplyScalar(-14 + i * 3), { life: 3.2, rise: 0.5, drag: 0.9, up: -0.6 });
+      },
+    });
+    scene.add(giant.group);
+  }
+  giant.place(x, z, heading);
+  return giant;
+}
+/**
+ * Dev: stand the giant about `dist` m off, on dry land in clear view, as near
+ * the way the camera looks as the ground allows, and turn to look at it.
+ * `face` is its heading relative to facing you (0 = toward you).
+ */
+function giantAhead(dist: number, face = 0, walk = false) {
+  const p = player.body.pos;
+  const eye = p.y + 3;
+  let best = Infinity, bx = 0, bz = 0, ba = 0;
+  for (let i = 0; i < 48; i++) {
+    const off = (i % 2 ? 1 : -1) * Math.ceil(i / 2) * 0.13;
+    const a = orbit.yaw + Math.PI + off;
+    const x = p.x + Math.sin(a) * dist, z = p.z + Math.cos(a) * dist;
+    const g = gen.height(x, z);
+    if (g < 1.5) continue;
+    // How much of it the ground between hides (metres up from its feet).
+    let hidden = 0;
+    for (let t = 0.04; t < 1; t += 0.04) {
+      const h = gen.height(p.x + (x - p.x) * t, p.z + (z - p.z) * t);
+      hidden = Math.max(hidden, (h - eye) / t + eye - g);
+    }
+    // Woods in the foreground hide it too.
+    let woods = 0;
+    for (let d = 20; d < Math.min(dist, 320); d += 30) {
+      const wx = p.x + Math.sin(a) * d, wz = p.z + Math.cos(a) * d;
+      woods = Math.max(woods, gen.forestDensity(wx, wz, gen.height(wx, wz)) * (1 - d / 400));
+    }
+    // Best about level with you, so it stands on the skyline rather than down in a valley.
+    const score = Math.max(hidden, 0) + woods * 60 + Math.abs(off) * 6 + Math.abs(g + 30 - eye) * 0.6;
+    if (score < best) { best = score; bx = x; bz = z; ba = a; }
+  }
+  if (best === Infinity) return null;
+  const g = summonGiant(bx, bz, ba + Math.PI + face);
+  g.walking = walk;
+  orbit.yaw = ba + Math.PI;
+  orbit.pitch = -0.02;
+  orbit.snap();
+  return g;
+}
+// The giant's visit: it comes up the lane once the hearth is lit (story only;
+// `__ow.visit().start()` runs it from anywhere in the story).
+let visit: Visit | null = null;
+/** After the giant: you're in among what it left (see where `rig.mood` is set). */
+let grieving = false;
+// The first dungeon's ring: bare stones until the giant gets there and opens it.
+let ring: Ring | null = null;
+let visitWait = 0;
+let visitHud = false;
+/** The cut between the world and the dungeon: a flat violet veil, driven by whichever has hold of you. */
+const dungeonVeil = document.createElement('div');
+dungeonVeil.style.cssText = 'position:fixed;inset:0;background:#2b2147;opacity:0;pointer-events:none;z-index:4';
+document.body.append(dungeonVeil);
+let dungeonVeilK = 0;
+/** The orbit camera's zoom as it was above ground. */
+let zoomAbove = 10;
+/** What the dungeon's creatures live by (see Mobs.under). */
+let dungeonCtx: MobCtx | null = null;
+
+/**
+ * Down into the dungeon: it becomes the world (floor, walls, what's drawn)
+ * and the explorer moves into its scene. `drop` (dev) skips being let down
+ * and stands you at a point of its plan.
+ */
+function enterDungeon(drop?: [number, number]) {
+  if (!ring || dungeon?.inside) return;
+  if (riding) dismount();
+  if (cycling) dismountBike();
+  if (!dungeon) {
+    // Its creatures live by its floor and walls, not the land's overhead.
+    const at = (x: number, z: number) => dungeon!.floorAt(x, z);
+    const under: MobCtx = Object.assign(Object.create(mobCtx), {
+      gen: new Proxy(gen, { get: (g, k) => (k === 'height' ? at : k === 'bog' ? () => 0 : Reflect.get(g, k)) }),
+      surface: at,
+      collide: (pos: THREE.Vector3, vel: THREE.Vector3, r: number) => dungeon!.collide(pos, vel, r),
+    });
+    const host = storyHost!;
+    dungeon = new Dungeon(gen.dungeon, gen.seed, ring.groundY, {
+      body: player.body, sfx: host.sfx, setMode: (m) => player.set(m, ctx), rig, saveKey: seedText,
+      canSmash: () => (host.active && host.story ? host.story.hasPick : true),
+      showPick: () => { if (host.active && host.story) host.story.showTool('pick'); else sandboxPickT = 0.8; },
+      puff: (p, n, size, spread) => puffs.emit(p, n, size, spread),
+      adopt: (p) => {
+        const m = mobs.adopt('rockhopper', 'cave:rockhopper', p, new THREE.Color('#e2dbcf'), under);
+        if (m) m.below = true;
+        return m;
+      },
+    });
+    dungeon.onLeft = leaveDungeon;
+    dungeonCtx = under;
+  }
+  mobs.under = dungeonCtx;
+  dungeon.scene.add(mobs.group);
+  // No sea down there (it lies below sea level on low ground).
+  world.waterLevel = -1e9;
+  dungeon.scene.add(rig.root, puffs.group);
+  rig.root.visible = true;
+  if (drop) dungeon.drop(drop[0], drop[1]); else dungeon.enter();
+  // A tight camera, behind you, looking the way on. No easing across the cut.
+  zoomAbove = orbit.targetDistance;
+  orbit.maxDistance = 16;
+  orbit.targetDistance = 9;
+  orbit.yaw = dungeon.startYaw;
+  orbit.pitch = 0.14;
+  orbit.snap();
+  hadCine = !!dungeon.cinematic();
+  camBlend = 1;
+}
+
+/** Back up: the world is the world again, and the ring's arms lift you out on to the field. */
+function leaveDungeon() {
+  if (riding) dismount();
+  world.waterLevel = SEA_LEVEL;
+  mobs.under = null;
+  scene.add(rig.root, puffs.group, mobs.group);
+  rig.root.visible = true;
+  orbit.maxDistance = 80;
+  orbit.targetDistance = zoomAbove;
+  orbit.pitch = 0.22;
+  ring?.emerge(trail.height(gen.dungeon.x, gen.dungeon.z));
+  orbit.snap();
+  hadCine = false;
+  camBlend = 1;
+}
+
+function makeVisit() {
+  visit?.dispose();
+  ring?.dispose();
+  if (dungeon) {
+    if (dungeon.inside) { dungeon.inside = false; world.waterLevel = SEA_LEVEL; mobs.under = null; scene.add(rig.root, puffs.group, mobs.group); orbit.maxDistance = 80; player.set('walk', ctx); }
+    dungeon.dispose();
+    dungeon = null;
+    dungeonCtx = null;
+  }
+  ring = new Ring(gen.dungeon, (x, z) => gen.height(x, z), { body: player.body, sfx: storyHost!.sfx, setMode: (m) => player.set(m, ctx) });
+  ring.onTaken = () => enterDungeon();
+  scene.add(ring.group);
+  storyHost?.overlay.add(ring.overlay);
+  const story = storyHost?.story;
+  visit = story && story.village ? new Visit({
+    story, trail, summon: summonGiant, gen, ground: (x, z) => gen.height(x, z),
+    dust: (at) => { giantDust.emit(at, 16, 3.2, 13, undefined, { life: 1.8, rise: 1.6, drag: 1.5, up: 7 }); giantDust.emit(at, 8, 1.8, 6, undefined, { life: 1.3, rise: 2.4, drag: 1.3, up: 10 }); },
+    sound: (n, level = 1) => { const fx = storyHost!.sfx, was = fx.level; fx.level = was * level; if (n === 'squeak') fx.chirp(true); else fx[n](); fx.level = was; },
+    tree: (x, z, max) => colliders.nearestTree(x, z, max)?.d ?? Infinity,
+    ring: () => ring,
+    solid: (p) => beacons.solidAt(p, true),
+    bike: (x, z, h) => journey?.standBike(x, z, h),
+  }) : null;
+  if (visit) scene.add(visit.group);
+  visitWait = 0;
+  if (visit && storyHost!.active && story!.giantGone) visit.restore();
+}
+makeVisit();
+if (params.has('giant')) {
+  const [d, w] = params.get('giant')!.split(',');
+  giantAhead(parseFloat(d) || 500, w === 'walk' ? Math.PI / 2 : 0, w === 'walk');
+}
 
 /** Find dry, gentle ground near a point: spiral search. */
 function findSpawn(x0: number, z0: number): [number, number] {
@@ -367,7 +603,7 @@ function goToTower(i: number) {
 
 function placePlayer(x: number, z: number) {
   const b = player.body;
-  b.pos.set(x, gen.height(x, z), z);
+  b.pos.set(x, trail.height(x, z), z);
   b.vel.set(0, 0, 0);
   orbit.snap();
 }
@@ -402,6 +638,59 @@ if (params.get('journey') && STAGES.includes(params.get('journey') as Stage)) jo
 else if (!params.has('x')) journey?.resume();
 // ?stable=<step>: straight to a phase 3 step.
 if (params.get('stable')) stableJump(params.get('stable')!);
+
+/** Dev: set the story up as it stands at a checkpoint (`?fresh=1&cp=<id>`; see ui/checkpoints.ts). Expects a fresh save. */
+function checkpoint(id: string) {
+  const story = storyHost?.story, c = CHECKPOINTS.find((k) => k.id === id);
+  if (!c || !story || !storyHost!.active) return false;
+  if (c.kind === 'phase1') {
+    if (!story.debugJump(id)) return false;
+    spawn();
+  } else if (c.kind === 'journey') journey?.jump(id as Stage);
+  else if (c.kind === 'ring') journey?.jump('done');
+  else if (!stableJump(id)) return false;
+  // Past the home tower's head the giant has been: its prints and the wrecked lane, as a save from there has them.
+  if (c.giantGone) { story.giantGone = true; visit?.restore(); }
+  if (c.kind === 'ring') goToRing();
+  story.save();
+  return true;
+}
+if (params.get('cp')) {
+  checkpoint(params.get('cp')!);
+  // A reload from here picks the save up like any other, rather than starting the checkpoint over.
+  const u = new URL(location.href);
+  u.searchParams.delete('cp');
+  u.searchParams.delete('fresh');
+  history.replaceState(null, '', u);
+}
+/** Where the story stands, as a checkpoint id. */
+function checkpointNow() {
+  const story = storyHost?.story;
+  if (!story || !storyHost!.active) return null;
+  if (story.phaseIndex > 0 || !story.done) return story.step.id === 'home' ? 'wait' : story.step.id;
+  return journey?.stage ?? 'wait';
+}
+const checkpoints = new CheckpointBar(checkpointNow);
+/** Dev: stand on the giant's way just outside the first dungeon's ring, facing it. */
+function goToRing() {
+  const d = gen.dungeon, w = d.way[d.way.length - 1] ?? [d.x + 1, d.z];
+  const l = Math.hypot(w[0] - d.x, w[1] - d.z) || 1, ux = (w[0] - d.x) / l, uz = (w[1] - d.z) / l;
+  if (riding) dismount();
+  if (cycling) dismountBike();
+  player.set('walk', ctx);
+  placePlayer(d.x + ux * 22, d.z + uz * 22);
+  player.body.heading = Math.atan2(-ux, -uz);
+  orbit.yaw = Math.atan2(ux, uz);
+  orbit.pitch = 0.16;
+  orbit.targetDistance = 11;
+  orbit.snap();
+}
+// ?dungeon=1: straight into the first dungeon (the ring opened), in the well; ?dungeon=x,z: at a point of its plan.
+if (params.has('dungeon')) {
+  const [dx, dz] = params.get('dungeon')!.split(',').map(parseFloat);
+  (ring as Ring | null)?.setOpen();
+  enterDungeon([Number.isFinite(dx) && Number.isFinite(dz) ? dx : 0, Number.isFinite(dz) ? dz : 0]);
+}
 if (params.get('mode') === 'fly') {
   player.set('fly', ctx);
   player.body.pos.y = gen.height(player.body.pos.x, player.body.pos.z) + (params.has('y') ? parseFloat(params.get('y')!) : 60);
@@ -410,8 +699,10 @@ if (params.get('mode') === 'fly') {
 function setSeed(s: string) {
   seedText = s;
   gen = new WorldGen(seedFromString(s));
+  terrain.dungeon = primeDungeon(gen);
   terrain.setSeed(gen.seed);
   colliders.reset(gen);
+  trail.clear();
   if (riding) dismount();
   if (cycling) dismountBike();
   mobs.reset(gen);
@@ -428,6 +719,7 @@ function setSeed(s: string) {
   beacons.setGen(gen, s);
   makeJourney();
   journey?.resume();
+  makeVisit();
   const u = new URL(location.href);
   u.searchParams.set('seed', s);
   history.replaceState(null, '', u);
@@ -435,6 +727,7 @@ function setSeed(s: string) {
 
 const ui = new DebugUI({
   env,
+  ambience,
   terrain,
   getSeed: () => seedText,
   setSeed,
@@ -597,12 +890,16 @@ function frame(ts?: number) {
     resize();
   }
 
-  const storyBusy = !!storyHost?.story?.busy;
-  if (input.pressed('KeyF') && !riding && !cycling && !beacons.busy && !journey?.busy && !storyBusy) player.set(player.current.name === 'fly' ? 'walk' : 'fly', ctx);
+  const storyBusy = !!storyHost?.story?.busy || !!visit?.busy;
+  /** In the ring's arms (either way), and down in the dungeon. */
+  const held = !!ring?.busy || !!dungeon?.busy, below = !!dungeon?.inside;
+  if (input.pressed('KeyF') && !riding && !cycling && !beacons.busy && !journey?.busy && !storyBusy && !held && !below) player.set(player.current.name === 'fly' ? 'walk' : 'fly', ctx);
   // Only take the press (pressed() consumes it) when a tower is on offer.
   const beaconUsed = !!beacons.action(player.current.name) && (input.pressed('KeyE') || input.pressed('Mouse0')) && beacons.act(player.current.name);
-  if (!beaconUsed) storyHost?.story?.handleAction(input);
-  if (input.pressed('KeyE') && !beaconUsed && !journey?.busy && !storyBusy) {
+  // Likewise the dungeon's (the pick, at its rockfall).
+  const dungeonUsed = below && !!dungeon!.action(player.current.name) && (input.pressed('KeyE') || input.pressed('Mouse0')) && dungeon!.act(player.current.name);
+  if (!beaconUsed && !dungeonUsed) storyHost?.story?.handleAction(input);
+  if (input.pressed('KeyE') && !beaconUsed && !dungeonUsed && !journey?.busy && !storyBusy && !held) {
     // Something else in reach? Climb straight across; otherwise E hops off.
     const next = nextMount();
     if (next && (riding || cycling)) switchTo(next);
@@ -614,6 +911,7 @@ function frame(ts?: number) {
   const lassoKey = input.pressed('KeyR') || input.pressed('Mouse2');
   if (lassoKey && mobs.act() === 'throw') rig.throwLasso();
   if (input.pressed('KeyH')) ui.toggle();
+  if (input.pressed('Backquote')) checkpoints.toggle();
   if (ui.shown && input.pressed('KeyL')) towerDebug.settings.links = !towerDebug.settings.links;
   if (ui.shown && input.pressed('KeyM')) towerDebug.settings.map = !towerDebug.settings.map;
   if (input.pressed('KeyT')) env.hour = (Math.floor(env.hour) + 1) % 24;
@@ -626,7 +924,7 @@ function frame(ts?: number) {
 
   ctx.input = input.state();
   // Watching a tower's spirit (or being carried in and out): hands off.
-  if (beacons.busy || journey?.busy || storyBusy) ctx.input = { ...ctx.input, x: 0, y: 0, run: false, jump: false, jumpPressed: false, up: false, down: false };
+  if (beacons.busy || journey?.busy || storyBusy || held) ctx.input = { ...ctx.input, x: 0, y: 0, run: false, jump: false, jumpPressed: false, up: false, down: false };
   ctx.camYaw = inputYaw ?? orbit.yaw;
   ctx.camPitch = orbit.pitch;
   ctx.dt = dt;
@@ -639,6 +937,11 @@ function frame(ts?: number) {
   const body = player.body;
   if (cycling && player.current.name !== 'bike') dismountBike(); // tumbled into deep water
   beacons.update(dt, camera, player.current.name, body.grounded, input.held('KeyE') || input.held('Mouse0'));
+  // The ring takes you down (on your own feet only); the dungeon lets you down, and takes you back up.
+  ring?.update(dt, camera.position, player.current.name, body.grounded, !storyBusy && !beacons.busy && !journey?.busy && !riding && !cycling && !dungeon?.inside);
+  if (dungeon?.inside) dungeon.update(dt, player.current.name, body.grounded, input.held('KeyE') || input.held('Mouse0'));
+  const veilK = Math.max(ring?.veil ?? 0, dungeon?.veil ?? 0);
+  if (veilK !== dungeonVeilK) dungeonVeil.style.opacity = String((dungeonVeilK = veilK));
   if (sandboxPickT > 0) {
     sandboxPickT -= dt;
     rig.setTools({ axe: false, pick: sandboxPickT > 0 }, sandboxPickT > 0 ? 'pick' : null);
@@ -720,7 +1023,7 @@ function frame(ts?: number) {
   mobCtx.player.vel.copy(body.vel);
   mobCtx.player.heading = body.heading;
   mobCtx.player.mode = mode;
-  mobs.update(mobCtx, camera, hand, mode === 'walk' || mode === 'glide' || mode === 'ride' || mode === 'bike');
+  mobs.update(mobCtx, camera, hand, !dungeon?.inside && (mode === 'walk' || mode === 'glide' || mode === 'ride' || mode === 'bike'));
   herd?.update(dt);
   bikes.update(dt, body.pos, camera);
   bikes.shadows(camera);
@@ -740,17 +1043,61 @@ function frame(ts?: number) {
   glowPuffs.update(dt);
   sparkPuffs.update(dt);
   smokePuffs.update(dt);
+  giant?.update(dt);
+  giantDust.update(dt);
+  giantBreath.update(dt);
+  trail.update(dt, body.pos);
+  post.giant = giant ? { dist: giant.centre.distanceTo(camera.position), y: giant.centre.y } : null;
   if (storyHost?.story) {
-    storyHost.story.external = beacons.action(mode);
+    storyHost.story.external = beacons.action(mode) ?? (dungeon?.inside ? dungeon.action(mode) : null);
     // No pats in the middle of a cutscene.
     storyHost.story.noPat = beacons.busy || !!journey?.busy || storyBusy;
   }
   storyHost?.story?.update(dt, input, mode);
   journey?.update(dt);
+  // The giant comes the first time you look out of the home tower's head:
+  // you see it from up there, then the village, then you're back in the
+  // head as it walks off. (A save from before this order, already past the
+  // tower, gets it as soon as it loads.)
+  if (visit && visit.state === 'idle' && storyHost?.active && storyHost.story && journey && !storyHost.story.giantGone) {
+    if (journey.stage === 'enter1') visit.prepare();
+    const head = journey.stage === 'enter1' && beacons.onTop ? beacons.inside : null;
+    if (head) {
+      // Seven seconds to look about first. Then the view turns, from the head's own eyes, to what's coming.
+      if ((visitWait += dt) > 7 &&visit.start((x, z) => beacons.eyeToward(x, z) ?? new THREE.Vector3(head.head.x, head.head.y, head.head.z), head) && visit.route) beacons.lookToward(visit.route.start.x, visit.route.start.z);
+    } else if (journey.stage === 'done' && storyHost.story.cabin.lit) visit.start();
+    else visitWait = 0;
+  }
+  // That first time up there's no coming down until it has been and gone.
+  beacons.holdIn = !!visit && !!storyHost?.active && !!storyHost.story && !storyHost.story.giantGone && (visit.busy || (visit.state === 'idle' && journey?.stage === 'enter1'));
+  const visitWas = !!visit?.busy;
+  visit?.update(dt);
+  // How the two of you take it. While it's here, she feels what the guide
+  // does. Afterwards the guide stays downcast, and so does she among the
+  // wreckage; away from it her grin is gone and her face is set.
+  const moodHeld = params.has('mood');
+  if (storyHost?.active && storyHost.story) {
+    const st = storyHost.story, sp = st.spirit, was = rig.mood;
+    if (st.giantGone) {
+      let d = Infinity;
+      if (st.village) for (const q of st.village.site.lane) d = Math.min(d, Math.hypot(body.pos.x - q.x, body.pos.z - q.z));
+      grieving = d < (grieving ? 85 : 65);
+      rig.mood = grieving ? 'sad' : 'set';
+      if (!sp.mood) sp.mood = 'down';
+    } else {
+      if (sp.mood === 'down') sp.mood = null;
+      rig.mood = visit?.state === 'running' ? sp.mood as Mood | null : null;
+    }
+    if (moodHeld) rig.mood = was;
+  } else if (!moodHeld) rig.mood = null;
+  // No buttons or tallies over the cutscene.
+  if (visitHud !== !!visit?.busy) { visitHud = !!visit?.busy; for (const id of ['story-inv', 'story-act']) { const el = document.getElementById(id); if (el) el.style.visibility = visitHud ? 'hidden' : ''; } }
+  // Handed back to the tower's eyes, looking after it.
+  if (visitWas && visit && !visit.busy && beacons.inside && giant) beacons.lookToward(giant.centre.x, giant.centre.z, giant.centre.y - 10);
   // Far from the task: a small arrowhead shows the way.
   if (pointer && storyHost?.story) {
     const g = journey ? journey.guide(mobs.leading) : storyHost.story.guide(mobs.leading);
-    pointer.update(dt, camera, body.pos, g, !beacons.busy && !beacons.inside && !journey?.busy && !storyBusy);
+    pointer.update(dt, camera, body.pos, g, !beacons.busy && !beacons.inside && !journey?.busy && !storyBusy && !dungeon?.inside);
   }
   // Patting the spirit: from behind, the explorer's back hides it all, so
   // with the mouse idle the camera eases round to the patting side.
@@ -765,6 +1112,8 @@ function frame(ts?: number) {
   focus.y += mode === 'swim' ? 1.1 : mode === 'glide' ? 2.0 : mode === 'ride' && riding ? riding.species.seat(riding).pos.y - body.pos.y + 1.1 : mode === 'bike' ? 1.55 : 1.4;
   focus.y += focusShift;
   if (focusOverride) focus.copy(focusOverride);
+  // In the ring's arms the camera stays up where you stood.
+  if (ring?.busy) focus.y = Math.max(focus.y, ring.heldY + 1.4);
   // Speed feel: FOV kick + pull-back when sprinting, diving, gliding.
   const hs = Math.hypot(body.vel.x, body.vel.z);
   const sprint = mode === 'walk' ? THREE.MathUtils.clamp((hs - 6.5) / 4, 0, 1) : 0;
@@ -774,7 +1123,7 @@ function frame(ts?: number) {
   const rideK = mode === 'ride' ? THREE.MathUtils.clamp((body.vel.length() - 8) / 30, 0, 1) : 0;
   // Keeps building with speed: a mountain descent should feel like one.
   const bikeK = mode === 'bike' ? THREE.MathUtils.clamp((hs - 8) / 50, 0, 1.4) : 0;
-  orbit.update(focus, dt, (x, z) => Math.max(gen.height(x, z), SEA_LEVEL), {
+  orbit.update(focus, dt, (x, z) => (dungeon?.inside ? dungeon.floorAt(x, z) : Math.max(trail.height(x, z), SEA_LEVEL)), {
     fovKick: 3.5 * sprint + 7 * fall + (3 + THREE.MathUtils.clamp((hs - 9) / 6, 0, 1) * 4) * glide + 8 * flyK + 6 * rideK + 9 * bikeK,
     distScale: 1 + 0.12 * sprint + 0.15 * fall + 0.4 * glide + (mode === 'ride' ? 0.25 + 0.2 * rideK : 0) + 0.3 * bikeK,
     airborne: !body.grounded && mode !== 'ride',
@@ -790,30 +1139,37 @@ function frame(ts?: number) {
     orbit.targetDistance = 11;
     orbit.snap();
     beacons.lowered = null;
-    camBlendPos.copy(camPrevPos); camBlendQ.copy(camPrevQ); camBlend = 0;
+    camBlendPos.copy(camPrevPos); camBlendQ.copy(camPrevQ); camBlend = 0; camBlendDur = 1.1;
   }
   // In a tower's room, the camera stays inside it too.
   beacons.clampCamera(camera.position, focus, dt);
+  if (dungeon?.inside) dungeon.clampCamera(camera.position, focus, dt);
   beacons.camNow.copy(camera.position);
   // You are the tower's head: the camera looks out through its eyes.
   // A tower's spirit being freed: the camera watches it, not you, easing
   // in from where it was and back to you after (never a cut).
   // Or the hearth spirit pulling your bike out of its heart.
-  const cine = beacons.cinematic() ?? journey?.cinematic() ?? storyHost?.story?.cinematic() ?? null;
+  const cine = beacons.cinematic() ?? (dungeon?.inside ? dungeon.cinematic() : null) ?? visit?.cinematic() ?? journey?.cinematic() ?? storyHost?.story?.cinematic() ?? null;
   if (cine) {
-    if (!hadCine) { camBlendPos.copy(camera.position); camBlendQ.copy(camera.quaternion); camBlend = 0; }
+    if (!hadCine) {
+      // From a tower's head the turn starts from the head's own view (last frame's camera), and takes its time.
+      if (beacons.inside) { camBlendPos.copy(camPrevPos); camBlendQ.copy(camPrevQ); camBlendDur = 2.4; } else { camBlendPos.copy(camera.position); camBlendQ.copy(camera.quaternion); camBlendDur = 1.1; }
+      camBlend = 0;
+    }
     camera.position.copy(cine.pos);
     camera.lookAt(cine.at);
+    const cf = (cine as { fov?: number }).fov;
+    if (cf !== undefined && camera.fov !== cf) { camera.fov = cf; camera.updateProjectionMatrix(); }
     camLastPos.copy(camera.position); camLastQ.copy(camera.quaternion);
   } else if (hadCine) {
     orbit.yaw = body.heading + Math.PI;
     orbit.pitch = 0.18;
     orbit.targetDistance = 10;
-    camBlendPos.copy(camLastPos); camBlendQ.copy(camLastQ); camBlend = 0;
+    camBlendPos.copy(camLastPos); camBlendQ.copy(camLastQ); camBlend = 0; camBlendDur = 1.1;
   }
   hadCine = !!cine;
   if (camBlend < 1) {
-    camBlend = Math.min(1, camBlend + dt / 1.1);
+    camBlend = Math.min(1, camBlend + dt / camBlendDur);
     const k = THREE.MathUtils.smootherstep(camBlend, 0, 1);
     camera.position.lerpVectors(camBlendPos, camera.position, k);
     // (Not slerpQuaternions(from, camera.quaternion): it copies `from` in first, so it never turns.)
@@ -821,7 +1177,7 @@ function frame(ts?: number) {
     camera.quaternion.copy(camBlendQ).slerp(camToQ, k);
     camera.updateMatrixWorld();
   }
-  const vc = beacons.viewCam();
+  const vc = visit?.busy ? null : beacons.viewCam();
   if (vc) {
     camera.position.copy(vc.pos);
     camera.lookAt(vc.at);
@@ -830,6 +1186,8 @@ function frame(ts?: number) {
     camera.updateMatrixWorld();
   }
   camPrevPos.copy(camera.position); camPrevQ.copy(camera.quaternion);
+  // Backed against the rock down there, the camera is pushed in on top of you: you're not drawn, rather than seen from inside your hat.
+  if (dungeon?.inside) rig.root.visible = camera.position.distanceTo(focus) > 1.3;
   U.uFocus.value.copy(focus);
   // Contact shadow sits on the ground under the explorer and shrinks with height.
   // Floor, not bare terrain: on a rock or roof the terrain-only shadow hides.
@@ -841,17 +1199,27 @@ function frame(ts?: number) {
   updateAimHud();
 
   env.update(dt);
+  // Down there the light is the cave's own, whatever the hour is above.
+  if (dungeon?.inside) dungeon.applyLight();
+  ambience.update(dt, { night: env.sky.night, home: atHome(), hush: !!visit?.busy || !!dungeon?.inside });
   U.uTime.value = elapsed;
   sky.update(camera, elapsed);
   terrain.update(camera.position);
 
   renderer.info.reset();
-  if (!skipRender) {
+  if (!skipRender && dungeon?.inside) {
+    // Its own scene, its own air; nothing of the world's overlay (the field, the pointer) shows through.
+    const k = DUNGEON_LOOK, ov = post.overlay;
+    post.overlay = null;
+    post.render(dungeon.scene, camera, k.fog, k.outline, k.tint, k.tintAmt, k.lift, k.air);
+    post.overlay = ov;
+  } else if (!skipRender) {
     groundShadow.update(renderer, terrain.root, camera.position);
     const s = env.sky;
     post.render(scene, camera, s.fog, s.outline, s.tint, s.tintAmt, s.lift);
   }
 
+  checkpoints.tick(dt);
   ui.tick(dt, () => {
     const p = player.body.pos;
     const i = renderer.info.render;
@@ -988,6 +1356,7 @@ function rocketWork(m: Mob, dt: number) {
 let trailT = 0;
 let trailEmit = 0;
 const v3 = new THREE.Vector3();
+const v3b = new THREE.Vector3();
 
 /**
  * Touch: with no finger on the camera, it swings round behind the way you're
@@ -1082,6 +1451,8 @@ window.__ow = {
   ready: () => !terrain.busy,
   stats: () => ({ ...terrain.stats, calls: renderer.info.render.calls, tris: renderer.info.render.triangles, kinds: terrain.kindStats() }),
   setHour: (h: number) => { env.hour = h; env.apply(); },
+  /** The ambient soundtrack's mix and what's playing (tests). */
+  ambience,
   setPalette: (p: string | null) => { env.paletteOverride = p; },
   teleport: (x: number, z: number) => placePlayer(x, z),
   view: (yaw: number, pitch: number, dist: number) => { orbit.yaw = yaw; orbit.pitch = pitch; orbit.targetDistance = dist; orbit.snap(); },
@@ -1152,6 +1523,7 @@ window.__ow = {
   _colliders: colliders,
   _body: player.body,
   _cam: camera,
+  _orbit: orbit,
   mobs,
   /** Drop a flock (floof|crow|stelk) `d` m in front of the explorer. */
   spawnFlock: (name: string, d = 14, n?: number) => {
@@ -1174,6 +1546,22 @@ window.__ow = {
   /** Drop a flock of `n` right at (x, z). */
   spawnAt: (name: string, x: number, z: number, n?: number) => mobs.spawnFlockAt(name, x, z, mobCtx, n),
   drakArrive,
+  /** The giant: `giantAhead(dist, face, walk)` stands it in view; `giant()` is it (or null). */
+  giantAhead,
+  summonGiant,
+  giant: () => giant,
+  /** The giant's visit to the village (null without a story). */
+  visit: () => visit,
+  /** The first dungeon's ring (`ring().setOpen()` opens it for shots). */
+  ring: () => ring,
+  goToRing,
+  /** The first dungeon, inside (null until you've been down). `enterDungeon()` is the ring taking you; `enterDungeon(x, z)` stands you at a point of its plan; `leaveDungeon()` brings you back up. */
+  dungeon: () => dungeon,
+  enterDungeon: (x?: number, z?: number) => { ring?.setOpen(); enterDungeon(x === undefined ? undefined : [x, z ?? 0]); },
+  leaveDungeon: () => { if (dungeon?.inside) { dungeon.inside = false; leaveDungeon(); } },
+  /** The other spirits' houses down the lane (null when no lane fits the seed). */
+  village: () => storyHost?.story?.village ?? null,
+  trail,
   /** Phase 3 (shots/tests): `n` fresh creatures of a species, lassoed inside the pasture so they come to live there. */
   bringHome: (name: string, n = 1) => {
     const st = storyHost?.story?.stable;

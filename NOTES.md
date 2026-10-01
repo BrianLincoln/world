@@ -2020,3 +2020,995 @@ houses stay wrecked; what opens the forcefield.
 Later slices: the dungeon (its own enclosed scene, big rooms, tight
 camera, first one gated by the bog hag's dive), rescue and return, village
 growth, the emote wheel, side content, the finale.
+
+## Giant slice 1, step 1: the giant on the skyline (2026-09-30)
+
+Built: the giant itself, standing and walking, with no story driving it.
+`src/giant/giant.ts`, `GIANT_VERT/FRAG` in `shaders.ts`, `makeGiantMaterial`,
+a dev hook and `scripts/giant.mjs`. Steps 2-6 are not started.
+
+- **Body:** about 60 pebble boulders (three shapes, instanced, 3 draw calls)
+  on an Object3D skeleton, plus ten real conifers (lod 1) as plain meshes on
+  the torso bone. About 116k triangles and 7-13 draw calls; no LOD needed.
+  It stands about 82 m: a turfed hump over a head sunk between the shoulders,
+  limbs as strings of pebbles, soles of 12.5 x 8 m with three toes.
+- **Terrain's look, not the creatures':** colour is a rule stack with hard
+  noise-wobbled edges: stone, turf and moss on the tops, snow above a line.
+  The caps are measured in each boulder's *rest* pose (`aUp`), so turf and
+  snow ride with the stone instead of sliding as it leans. Pebble normals are
+  70% sphere normals: the lumps show in the outline, the toon bands stay
+  clean curves (raw normals contoured every bump and looked muddy).
+- **The fog-layer trick, as built:** it writes normal length 0.8
+  (`uIsProp = 3`). The layer pass treats anything over 0.71 as terrain, so
+  it defines a layer like a ridge; the composite then recognises 0.8 and
+  fogs the whole giant by one distance (`uGiant`, camera to chest), so no
+  fog band can ever cut across it. Lighting flattens to one tone between
+  350 and 1300 m, the same rule as far terrain.
+- **Cold:** stone `#9db3d6` (the cold spirit's ash blue, a little deeper)
+  with `uKeep` 0.72, so the grade can't warm it away. At 0.55 it went khaki
+  under the golden palette.
+- **Face:** the towers' superellipse eyes painted on the head boulder, with
+  a stone lid drawn half down (`uLid`), a slow blink every 4-9 s.
+- **Gait:** feet are planted on prints (`print(n)`, on `height()`), each
+  swings two strides to its next print; legs and arms are two-bone IK. The
+  pelvis rides as high as the shorter leg allows (a spring), sways over the
+  standing foot and twists with the stride; trees lag on springs. It eases
+  off from standing (a half first step). `hug` blends the arms between
+  swinging and wrapped round itself. It breathes
+  out flat-bottomed puffs (`Puffs` got a `flat` option). Each footfall calls
+  `onStep`: a dust ring and a camera dip that falls off over 900 m.
+- **Stride is 42 m, not the 45 in DESIGN.md.** With 39 m legs, 45 pulls the
+  hips too low at double support. Footprints (step 2) should use
+  `Giant.print(n)` so the trail and the feet agree; say if 45 matters more
+  than the leg length.
+- **Not in yet, from the look brief:** the warm load (waits on "how does it
+  carry them"), clouds at its shoulders (sky clouds are a dome at infinity,
+  they can't sit in front of it), crows round its head, its ground shadow,
+  the crouched "it's a hill" pose and getting up, stopping and turning.
+  No sound.
+- **Dev:** `?giant=<metres>[,walk]`, `__ow.giantAhead(dist, face, walk)`
+  (stands it in clear view, about level with you), `__ow.summonGiant(x, z,
+  heading)`, `__ow.giant()`. `scripts/giant.mjs <dir> [skyline,walk,gait,close]`.
+
+### Owner's review of step 1 (2026-09-30)
+Scale, vibe, face and the top of it: good. Changed: feet and ankles much
+bigger (soles about 21 x 14 m, so the prints are that size too, not the 12 x
+7 first written); arms swing by default; the constant self-hug is gone
+(an occasional "brrr" shiver replaced it, and was removed on 2026-10-01: it
+didn't read well; `hug` stays for the dormant pose). The 42 m stride
+stays. The blue is "ok for now", not settled. Asked for and not built yet:
+it smashes whatever is in its path whenever it walks (trees, rocks), and
+its footprints are permanent. Both belong to step 2 (prints pressed into
+`height()`, harvest-flag knocks under each sole from `onStep`).
+
+## Giant slice 1, step 2: footprints (2026-09-30)
+
+Built: every footfall leaves a print for good and flattens what stood
+there, wherever it walks. `src/world/prints.ts`, `src/giant/trail.ts`.
+
+- **Not in worldgen, and no chunk rebuilds.** The plan was to press prints
+  into `height()`. But they only exist once the giant has walked, so they
+  are story state like the harvest flags, and the world stays a pure
+  function of the seed. A 512 x 512 float texture holds one print per 12 m
+  cell (x, z, heading, number); prints are always further apart than a
+  cell can span, and the newest wins.
+- **The hollow** is pressed in by the terrain *vertex* shader (1.9 m deep,
+  a 0.5 m squashed rim) from an analytic sole shape: an oval and three
+  toes, about 21 x 14 m, the sole as built. Near chunks have 2 m cells, so
+  the mesh hollow is soft; the *fragment* shader redoes the shape exactly
+  for the colours, the normal, and a painted shadow: the wall that faces
+  away from the light and the crescent it throws on the floor. That
+  crescent is what makes it read as a hole; the real normals alone didn't.
+- **Walking in it:** `Trail.height()` is the ground plus `Prints.offset()`
+  (the same functions in TS as in `PRINT_GLSL`; keep them in step). The
+  player, the camera floor and creatures use it. `gen.height()` itself is
+  untouched, so anything that calls it directly (towers, story props)
+  doesn't know about prints.
+- **Warmth** is by number, not time: a print is as warm as it is close
+  behind the newest (`uPrintCool` = 9 prints), in four hard steps. Warm
+  floor is rose-amber and keeps its colour through the grade; after dark it
+  is self-lit (emissive 0.5+, which skips the night grade and blooms): the
+  string of lights. Cold floor is whatever the ground was (grass grows
+  back); the walls and lip stay bare earth for good. Warm floor also melts
+  snow (it's painted after the snow rule).
+- **Smashing:** world props whose base is inside a sole are hidden on the
+  GPU (`trodden()` in `PROP_POSE`, opted into by terrain's prop and caster
+  materials with `prints: true`; landmark boulders are spared) and dropped
+  from collision. Trees among them are redrawn pressed flat, crown away
+  from the middle of the sole (up to 90 kept, oldest cleared).
+- **Steam:** small flat-bottomed puffs off the ten newest prints, more the
+  warmer.
+- **Not done:** no print in water or shallows (ground under 0.6 m): the
+  puddle is later. Flowers and glowcaps blooming in warm prints, creatures
+  gathering in them, cracked boulders (rocks just go). Flattened trees
+  don't survive a reload, and nothing is saved yet (no story uses it).
+  Prints on LOD seams can show a hairline crack. Flat trees shade dark
+  (squashed normals).
+- **Shots:** `node scripts/giant.mjs shots/giant prints`.
+- **Owner's review:** the first shape (an oval and three toe circles) read
+  as a cartoon bear's paw. Now a square-shouldered slab, broader at the
+  front, with two cracks in from the front edge; the foot's toes became
+  three blunt blocks along its front to match.
+- **To plan before step 5 (owner):** the real giant must take a route you
+  can follow: not over mountains, not through water. Today it walks a
+  straight line or an arc over anything. `WorldGen.route` (A* that avoids
+  water, the cabin and POIs) is the starting point, but the giant needs a
+  wide, gently turning corridor, a slope limit, prints that never land in
+  water, and its feet and the trail's prints coming from the same list.
+  Needs real planning with the owner; not started.
+
+## Giant slice 1, step 3: the village, rough (2026-09-30)
+
+A rough version to choose from, not the village. `src/story/village.ts`,
+dev only: `__ow.village({ n, size, rMin, rMax })` or
+`?village=<n>,<small|mid|big>,<rMin>,<rMax>`. Shots:
+`node scripts/village.mjs shots/village [seed=..] [only=a,b,c]`.
+
+- **Deliberately not in worldgen.** Size, count and room aren't decided, so
+  nothing in `storySite.ts` moved. Spots are picked on the main thread from
+  what's there: dry, near-level, clear of the cabin, brook, grove, boulders,
+  paths and pasture, and with no world tree or rock standing on them.
+- **Three options shot** (seeds hilda, 42, fjord): (a) four spirit-sized
+  huts, about 2.3 m to the ridge, within 20 m of the yard; (b) five of the
+  same hut at 1.8x, about 4 m to the ridge, within 30 m; (c) three of the
+  world's full-size cabins, within 46 m. Each with one footprint stamped in
+  the yard for scale.
+- **Room:** every option fitted on all three seeds without moving anything
+  (5 to 18 free spots; full-size cabins are tightest at 5 to 7). So the
+  start site doesn't have to grow for a village of this size. The real one
+  still wants its houses in `StorySite` (placed after the cabin, so the
+  cabin doesn't move) for `storyBlock`, levelled pads and paths to the yard.
+- **Found:** a sole (21 x 14 m) is bigger than the guide's cabin. One
+  footfall covers two or three spirit-sized huts at once; and at a 42 m
+  stride, "three or four footfalls through the village" needs about 130 m
+  of village, or a giant that shortens its step there.
+- **Rough edges, known:** no colliders, no ground shadows, no levelled
+  pads, no paths to the doors, every spirit is a whole `Spirit` (4 draw
+  calls each; they lose their glow at night), hut smoke is too small, the
+  mid hut is a scaled-up small one (window too big).
+
+### Owner's answers (2026-09-30), and what was built from them
+Mid-size houses (about 4 m to the ridge), five of them with room left for
+more ("cabins maybe, but just stuff"), along a lane about 120 m long.
+
+- **In the start site now** (`findVillage` in `storySite.ts`,
+  `StorySite.village`): a gently bending lane out of the yard, 125 m (105 if
+  nothing longer fits), no step steeper than about 1 in 4, clear of the
+  brook, grove, boulders, pasture, the way you arrive and the far light's
+  sightline. Five house plots on alternate sides, 21 m apart (one giant
+  footfall) and 9 m off the lane; a free plot faces each where the ground
+  allows (8 to 10 plots in all). Plots are 4.5 m level pads eased into the
+  ground over 6 m; `storyBlock` keeps them clear; the lane and each door's
+  path are story paths; `WorldGen.route` goes round the plots.
+- **It is placed last and is optional,** so the cabin, brook, pasture and
+  far cabin are exactly where they were on every seed. The start site's box
+  grew to hold it, which can shift the home tower and the wild biomes' edge.
+- **It doesn't fit everywhere.** Of 40 seeds, 27 get a lane (26 full
+  length) and 13 get no village at all; `hilda` and `42` do, `fjord`
+  doesn't. Making it a requirement of the start site would fix that and
+  move the cabin on about a third of seeds. Not done: the owner's call.
+- **`src/story/village.ts`** is owned by `Story` now (drawn with the story
+  on or off): three hut shapes at 1.8x (red, timber with a moss roof, tall
+  red), lit windows, chimney wisps, ground shadows, walls you can't walk
+  through and roofs you can land on. A `Spirit` on each doorstep, warm,
+  settled, watching the lane. `__ow.village()`; the rough ring options and
+  `?village=` are gone.
+- **Not done:** the free plots are just cleared grass (no markers); the
+  spirits are five whole `Spirit`s (20 draw calls) with no sounds, no pats
+  and nothing to say; all five are warm from the start (whether they start
+  cold and warm with your hearth isn't decided); nothing can be smashed
+  yet (step 4); the giant's track (feet 14.5 m either side of its line) and
+  the 9 m plot offset haven't been matched up, which is part of planning
+  its route. Perf not re-measured (about 30 more draw calls near home).
+
+### Owner's second round (2026-09-30)
+- **Every seed gets a village.** Room for the lane is now a requirement of
+  the start site (strict pass), so the cabin moves on the seeds where it
+  didn't fit. 40 of 40 survey seeds have one (2 with the 105 m lane; 9.2
+  plots on average). Which seeds moved wasn't listed; old saves on those
+  seeds will find the cabin elsewhere.
+- **Only the guide starts cold.** The other spirits are warm from the
+  start, as built.
+- **Houses stand where the giant's feet fall** ("use good judgement"): the
+  giant's track is 14.5 m either side of its line, so the plots moved from
+  9 m to 14.5 m off the lane. Walking down the middle of the lane, each
+  footfall (every 21 m, alternate sides) can land on a house; the free
+  plots facing them fall between footfalls. Not yet tried with the giant
+  itself: lining its first step up with the first house is step 4's job.
+- The scale (one sole takes one house) is approved. Step 3 is done.
+
+### Decided for step 4 (owner, 2026-09-30)
+- **The giant carries the spirits cupped to its chest.** No lantern or sack.
+- **Smashed houses stay smashed.** When a spirit is freed it starts mending
+  its own house; that takes wood and stone, and you probably help. How
+  exactly isn't settled (a later slice: rescue and return).
+
+## Giant slice 1, step 4: the visit (2026-09-30, first pass)
+
+Built: once the hearth is lit, the giant comes up the lane, treads on the
+five other houses, gathers their spirits against its chest as warm lights,
+misses the guide and walks off. `src/giant/visit.ts`; shots from
+`node scripts/visit.mjs shots/visit [seed=..] [t=16.6] [after]`.
+
+- **Where it treads is a pure function of the start site** (`visitRoute`):
+  six or seven footfalls in from beyond the lane's far end (whichever puts
+  the correct foot on the first house), one on each house from the far end
+  to the yard, then fourteen more bearing off just enough to keep 26 m from
+  your cabin and clear of the pasture, the grove and water. So a reloaded
+  save puts the prints and the wreckage back without a replay
+  (`Visit.restore`, `Story.giantGone` in the story save).
+- **The giant walks a list of footfalls** (`Giant.walkRoute`): its feet go
+  where they're told and the body rides half way between the last two. It
+  stops on the last pair. This is the "feet and prints from one list" the
+  step 2 notes asked for; step 5's trail can feed it the same way.
+  `Giant.cradle` brings the left arm up to hold what it carries;
+  `Giant.hold()` is where.
+- **Smashing** (`Village.smash`): the house and its shadow go, 16 boards and
+  7 stones (two instanced batches for the whole village) fly out, land in
+  the print and stay. The spirit becomes a warm light (emissive 1.6) that
+  arcs up to the giant's forearm over 2.4 s.
+- **Beacons show through fog:** anything with emissive over 1.5 takes only
+  15% of the fog (`post.ts`). Without it the lights went cream at 250 m.
+- **The camera** (hard cuts between shots, a dip on every footfall): the
+  guide stops and turns; from the yard, the giant coming down the lane; the
+  wade from 250 m off to one side and 38 m up, the whole of it and the
+  whole lane; the taking from level with its chest; the guide left behind;
+  its going, from the side again. 40.5 s, a little over the 40 asked for.
+  Shots from near the lane were tried first and failed: by the last houses
+  an 82 m giant is on top of any camera in the yard.
+- **Timing with the story:** it starts 4 s after the hearth is lit and the
+  cheering is done; the bike gift (phase 2) now waits until it has gone.
+  Phases 2 and 3 are otherwise untouched: what happens to them is still the
+  owner's to decide, and a cheerful bike gift straight after is odd.
+- **Not done, or rough:** no hand coming down to scoop (the lights fly up
+  by themselves); the guide doesn't reach up (it stands and looks); no
+  crows lifting, no brook ripple, no shadow sliding over the yard, no "hill
+  stands up" (it is simply there, 250 m off, when the camera turns); house
+  debris is tiny from the wide shot; the lights read yellow rather than
+  amber; the stone doesn't warm to rose where they rest; sounds are the
+  existing thud, smash, chirp and whimper; afterwards the giant just stands
+  at the end of its route (about 300 m off) until step 5 gives it
+  somewhere to go; a smashed house's free plot and wreckage have no
+  collision. Only seed `hilda` was shot.
+
+### Owner's review of step 4 (2026-09-30)
+The lights cupped at its chest don't pass. New direction, replacing "cupped
+to its chest": the giant opens a **jar** and the spirits are sucked into it
+("something like that"). Not built; the details (where it carries the jar,
+what the pull looks like) are being proposed first.
+
+### Step 4, second pass: the jar (2026-09-30)
+Owner: it pauses, struggles to open its jar, holds it out in front while
+the spirits are sucked in, then the lid goes on, and it carries the jar at
+its chest. If the camera is taken, the houses being destroyed must be seen.
+The guide's close-up had no reaction.
+
+- **The jar** (`Visit` makes it, the giant carries it: `Giant.jar`,
+  `jarAt: 'hip' | 'out' | 'chest'`, `tug`, `lid`): pale glass about 14 m
+  tall with a cork, on its hip on the way in. A step past the last house it
+  stops (`Giant.pauseAt`, a whole number of steps so both feet are down),
+  brings the jar out front, heaves at the cork three times, and it comes.
+  The spirits, left cowering in their wreckage since their houses went, are
+  pulled out one after another as stretched amber streaks that corkscrew
+  into the mouth; the glass takes their colour and glows as it fills
+  (emissive up to 1.55, so it shows through fog). Cork on, jar to the
+  chest in the left arm, and it walks off. About 11 s of the 42.
+- **Houses seen going under:** each house but the middle one gets its own
+  shot from the lane beside it (26 m off, 3 m up); the middle one is the
+  wide storybook shot. Boards and stones now start in a ring at the edge
+  of the sole and are thrown high and wide (they were hidden under the
+  foot), 26 boards and 8 stones a house.
+- **The guide** has moods (`Spirit.mood`): 'scared' while the giant wades
+  (trembling, wide-eyed), dragged a few metres down the yard by the pull,
+  then 'sad' when the cork goes on: both arms stretched up after them,
+  looking up, mouth turned down.
+- **Shorter walk in** (4 or 5 footfalls before the first house, 2.0 s a
+  step) to make room for the jar. 42 s in all: over the 40 asked for.
+- **Still rough:** the cork is hidden under its hand during the struggle,
+  so the tugging reads only as a wobble; the lifted cork is hard to see;
+  the jar is opaque (no alpha outside the overlay pass), so the spirits
+  inside are a glow, not five lights; the full jar reads yellow more than
+  amber; the guide's mouth is small at that distance; the guide is not
+  hidden behind anything when it's missed, it is just let go. Only `hilda`
+  by day was shot this pass.
+
+### Owner's review of the jar (2026-09-30)
+The event is "pretty good"; the jar is "pretty lame". New idea, not yet
+settled: the giant has flying minions that go down and snatch up the
+spirits. Their style, where the spirits end up and whether the jar stays
+are being proposed before anything is built. The jar code is still in.
+
+### Step 4, third pass: the birds (2026-09-30)
+Owner chose: the minions are the giant's own birds, and they keep the
+spirits. The jar is gone from the code (`Giant.pauseAt` / `resume()` stay).
+
+- **`src/giant/birds.ts`:** eight plump ash-blue birds, about 6 m across
+  the wings, four instanced batches for the flock. No brain: `Visit` tells
+  them when to roost, wheel, dive and climb. They roost on the treetops on
+  its shoulders (`Giant.perch`) and wheel round its head (`Giant.crown`).
+- **The beat** (about 8 s, the giant standing a step past the last house):
+  they lift off together; five stoop down the lane, one to each cowering
+  spirit, and climb back with it as a warm light slung underneath; a sixth
+  stoops at the guide, which ducks, and goes up with nothing; the guide is
+  left reaching up. From then on the flock wheels round its head with five
+  lights, which is what you see from any side as it walks off, and what a
+  reloaded save restores.
+- **Camera for it:** the birds waking, from level with its head; one
+  snatch from close by in the wreckage; the wide shot as the lights go up;
+  the guide; the wide shot as it leaves. 39 s in all.
+- **Not done:** the birds have no sound of their own, no feet and nothing
+  holding the light; they don't sit on its shoulders during ordinary dev
+  summons (`?giant=`), only in the visit; the two spare birds never land
+  again. Nothing ties a bird to a dungeon yet (the idea: each dungeon frees
+  one bird's spirit).
+
+### Step 4, fourth pass: black crows (2026-09-30)
+Owner: the round blue birds were too soft ("you are over indexing on the
+kid game thing"); use the crow, "black black" and spookier. Also, a bird
+"flashed in view" during the guide's close-up with no reason given.
+
+- **The flock is the world's crow** (`crowParts()` exported from
+  `mobs/crow.ts`: its body, head, wing and hand shapes), in soot black
+  (instance tint about 0.3 on the crow's ink, `keep` 0.9 so the grade
+  doesn't lift it), with blank yellow eyes: no pupil, lids slanted. Eleven
+  of them, about 7 m across. Six instanced batches.
+- **The miss is now a shot of its own:** from 15 m to one side, the crow
+  comes in over the guide and goes up empty; then the close-up of the
+  guide reaching. Before, the stoop went straight through the close-up's
+  camera, which was the flash.
+- **"Nothing scary" is loosened by the owner:** spooky is wanted where the
+  story calls for it. DESIGN.md's pillar is reworded. Still no combat, no
+  gore, nobody hurt.
+- At 230 m in the leaving shot the fog lifts them to grey: they are black
+  only up close. Not changed.
+
+## Giant slice 1, step 5 (part 1): the long walk, the ring, the giant asleep (2026-10-01)
+
+Owner's decisions going in: the route is mine to work out (passable, no
+mountains or water, bikeable, "much farther"); about 1.5 km; the giant ends
+by sinking into the ground so only the hill on top shows, or going dormant
+as a rock pile; a tower on the way to the first dungeon if it can be had.
+Also decided, **not built yet** (see DESIGN.md): dungeons are rings of
+stones with a forcefield on the ground inside, opened by dark spirits the
+giant sets free, which pull you *down* with black arms as the tower
+spirits pull you up; and the order becomes house, first tower ride, giant,
+then open world, with the second guided ride scrapped.
+
+- **`WorldGen.dungeon`** (a `DungeonSite`: place, ring radius, the tower
+  passed, and `way`, the route there from the yard). Candidates all round
+  the village at 850-1600 m, on level dry open ground, well away from
+  towers and the start; best first, and the first one `WorldGen.route`
+  actually reaches wins. Four passes, from strict to lax (ground roughness
+  and a hard slope limit of 0.34, then 0.5, then 0.7: `route` takes a new
+  `steep` argument and refuses steeper cells). The way goes by a tower
+  (130 m off it, because tower hills are steep) when one lies between a
+  quarter and 85% of the way along and both legs route; else straight
+  there. The wild biomes keep off the way as they do off the journey's
+  paths, so no bog pool or ravine opens under it.
+- **It is slow to find** (0.4 to 4.8 s; failed path searches are the
+  cost), so the main thread finds it once per seed, keeps it in
+  localStorage (`fjellheim.dungeon.v1.<seed>`: bump the version if the
+  search changes) and hands it to the chunk workers with each request
+  (`ChunkRequest.dungeon`, `WorldGen.presetDungeon`). First load of a new
+  seed stalls for that long.
+- **The ring** is nine tall stones (3.6 to 5.2 m), radius 13 m, stood by
+  the chunk workers as a stone-circle POI. Pale like every other stone for
+  now; no forcefield, no dark spirit.
+- **The giant's walk** (`visitRoute`): four footfalls bearing off past
+  your cabin as before, chosen now to leave it facing the way; then on to
+  `dungeon.way` 170 m out from the yard, rounded off, a footfall every
+  21 m on alternate sides. A foot that would land in water, on the
+  tower's rock or in the ring is drawn in toward the line. It stops 48 m
+  short of the ring.
+- **Dormant** (`Giant.dormant`, `settle()`): at the end it wraps its arms
+  round itself, shuts its eyes and sinks 43 m over nine seconds: a boulder
+  hill about 45 m high with its trees on top. The crows fly back to roost
+  in the trees with their lights. A reloaded save puts all of it back.
+- **Measured on ten seeds:** nine get a real route (924 to 2100 m of
+  walking, no footfall in water, same-foot rise under about 0.5); four of
+  those pass a tower. One seed (`42`) finds no route at all and falls back
+  to a straight line 1.2 km toward the second tower, which crosses water
+  and cliffs. `hilda` is the short one: 924 m, no tower.
+- **Not done:** the camera does nothing at the end (it happens whether or
+  not you're there); the fallback seed; prints that land on LOD seams; no
+  sound for the settling; the sunk giant has no collision, so you walk
+  through the hill; perf with the giant walking all the way wasn't
+  measured.
+
+### Owner's review of step 5 part 1, and three fixes (2026-10-01)
+"Pretty good." Asked for: the resting giant to be solid; the crows to sit
+on something instead of floating; the whole way cleared of trees, not just
+under its feet.
+
+- **The sleeping giant is solid** (`Giant.surface` / `push`, hooked into
+  `world.floorHeight` and `collide` in main): its boulders are taken as
+  ellipsoids once it has finished sinking (inverse matrices cached while it
+  lies still). You can land on it from the air and walk about on top; from
+  the ground you're pushed back off its sides, or step up on to the low
+  stones. Tested: dropped from 90 m, landed at 46 m on the hump; walking in
+  from four sides stops 10 to 22 m from its middle. Its trees aren't solid,
+  the camera doesn't know about it, and creatures and bikes don't either.
+- **The crows sit on the treetops.** The perch was worked out in the
+  torso's frame, so with the torso leaning they hung in the air beside the
+  trees; it's the tip of each tree's own mesh now. The one more crow than
+  there are trees sits on the hump.
+- **The way is a clear swath** (`storyBlock`, from `dungeon.way`): no
+  trees or bushes within 23 m of the line, no rocks within 17 m, from the
+  yard to the ring. It is in worldgen, so it is **there before the giant
+  has walked**: a ride through the forest that the prints later run down.
+  Clearing it only as the giant passes would mean knocking hundreds of
+  trees at run time (harvest flags, which also regrow); not done.
+
+## Dev: the checkpoint strip (2026-10-01)
+- \` shows a strip (◀ list ▶ ↻) over the story's checkpoints in play order:
+  phase 1's steps, the journey's stages, phase 3's steps. The list is `CHECKPOINTS` in `src/ui/checkpoints.ts`,
+  built from the phase tables, so new steps appear by themselves.
+- A step is a **reload** with `?fresh=1&cp=<id>`, not an in-place jump. The
+  jumps (`debugJump`, `Journey.jump`) only ever add (build, fell, light), so
+  going back in place would leave the roof on; from a fresh save back is as
+  safe as forward. `cp` and `fresh` are dropped from the URL once applied, so
+  a plain reload resumes the save.
+- The giant comes in `enter1` (the home tower's head), so checkpoints up to
+  and including it have the village whole, and `enter1` plays the visit;
+  everything after sets `giantGone` and restores the wreckage. That's the
+  `giantGone` flag on each checkpoint: move it if the visit moves again.
+  (`?journey=` and `?stable=` alone never set it.)
+- A new story beat needs a `kind` in `CHECKPOINTS` and a branch in
+  `checkpoint()` in `main.ts`.
+
+## Giant slice 1, step 5 (part 2): the new order, the ring opened, a tower on the way (2026-10-01)
+
+The owner had no time to test and said to carry on; everything here is from
+scripted runs and shots, not from play.
+
+- **The order of the opening is the new one.** House and hearth, the bike
+  gift, the ride to the home tower, light it, go up: 2.5 s after you settle
+  in its head (`Beacons.onTop`) the giant comes (`visit.start(vantage)`).
+  The first shot is from the tower's own eyes; then the village shots as
+  built; then the camera goes back to the head, turned to look after the
+  giant (`Beacons.lookToward`). Coming down ends the guided part
+  (`enter1` + `outHead` goes straight to `done`): the second guided ride is
+  gone (`startRide2` deleted; the `ride2`/`lock2`/`enter2` stages remain
+  for old saves and the dev jump). The stable still starts the next time
+  you're home, among the wreckage.
+- **With the guide away at the tower,** nothing swoops at it and it isn't
+  moved; it is shown at the tower's foot, reaching, and its thought bubble
+  is hidden while it has a mood. A save already past the tower gets the
+  visit on load, the old way, from the yard.
+- **The story HUD is hidden during the visit.** The tower's own mouse hint
+  still shows, and nothing stops you pressing the tower's exit during it.
+- **The ring opens** (`src/giant/ring.ts`, rough): on arriving, before it
+  settles, the giant lets a dark spirit go; it drops into the ring and a
+  dark violet forcefield spreads over the ground inside (overlay pass, laid
+  on the ground's slope). The spirit, the tower spirit's shape in ink with
+  pale eyes, hangs over it and watches you. Step on to the field and seven
+  black arms come up round you and reach for your shoulders. **They don't
+  take you anywhere:** there is no dungeon to be pulled into. Nothing asks
+  first, there's no sound, and the guide doesn't try the field.
+- **A tower on the way:** the dungeon is now looked for outward from a
+  tower first (five nearest 300-1200 m from the yard; to a point 130 m
+  beside it, kept 75 m off it by a new `keepOff` argument to `route`, then
+  350-650 m on). Ten seeds: eight pass a tower (70 to 135 m off), one has
+  a route but no tower (`survey4`), one has no route at all (`42`: no
+  candidate site passes even the laxest test; it still falls back to a
+  straight line through water). `hilda` is now 1.9 km by tower 83.
+  Finding it takes 0.8 to 4.9 s, once per seed (cache key is now v4).
+- **Whole slice, live, on `hilda`:** 101 footfalls, none in water; the
+  giant arrived, opened the ring and went dormant. Perf in the sandbox is
+  unchanged (5.3 ms average, p99 9.1, 582 draw calls); not measured during
+  the visit or the walk.
+- **Slice 1 is now complete as a rough cut.** Open: seed `42`; the pull
+  down and the dungeon itself (next slice); the guide in the rucksack and
+  as the pointer; what the stable and lasso become now the village is
+  wrecked; the swath existing before the giant walks it.
+
+### Camera and the tower room (2026-10-01)
+The camera slipped into a tower's room through the doorway when you walked or
+rode away with it behind you, and watched you from behind the wall. The room
+is now open to the camera only while you're in it or on its threshold
+(`clampCamera` passes `sealed` to `solidAt` once the focus is outside the
+shell); otherwise the door boulder is solid, doorway included, and the camera
+pulls in to just in front of it and eases back out. Chosen over fading the
+rock (a landmark that size going see-through reads worse than a short
+pull-in).
+
+### The snatching, re-shot (2026-10-01)
+Owner: in their seed the trees hid the crows taking the spirits. Asked for it
+slower and clearer: follow one crow down, see the grab, pull out to the
+scene, a longer shot of the guide, a shot up among the crows, then back to
+the tower's view.
+
+- **One crow goes first, alone, and the camera goes with it** (`Visit.film`):
+  cut in 15 m behind it 0.45 s into a 4.2 s dive on the furthest house,
+  swinging out side-on as it comes in; hold on the grab; then straight up
+  over the print and back to 44 m above the lane's far end, looking down the
+  wrecks to the giant's legs while the other four dive (0.55 s apart, 2.6 s
+  down). One move, no cut. The old fixed close-up from beyond the house is
+  gone: that was the shot the trees blocked.
+- **Trees:** the side-on spot is chosen from 36 candidates round the spirit
+  by clearance from standing trunks (`VisitDeps.tree`, the colliders'
+  `nearestTree`, which already leaves out trees a print has flattened), both
+  where the camera stands and along its look. The crane rises over the print
+  itself, where nothing stands. Chase and scene shots are in the air.
+- **Then:** the guide, 5 s (was 2.6), drifting in; 6.5 s circling the head
+  with the flock at their height (56 m out, slower than they fly, so they
+  pass); 4.5 s drawing straight back to the tower's head as the giant sets
+  off. The circle is timed to end on the tower's side of the head, so the
+  pull-back never passes through the giant. `cinematic()` now returns a
+  `fov` (36 to the head's 42 over the pull-back) and `Beacons.lookToward`
+  takes a height, so the hand-over to the head's view has no jump.
+- **Length:** 29.8 s from when it stops (was about 16); the whole visit is
+  52 s from the tower. `busy` is by the clock now, not by its steps.
+- The yard version (old saves) has the same shots plus the miss at the
+  guide before the sad shot, and pulls back to the wide side view. **Not
+  shot this pass.**
+- Shot on `hilda`, `fjord`, `42` at 16.6 h from the tower
+  (`node scripts/visit.mjs <dir> tower fine`). Seen on `42`: trees standing
+  in the house prints in the wide shot; not looked into.
+
+## The sleeping giant's collision, redone (2026-10-01)
+Owner: "the hit box is bad, I can phase right into it."
+
+- **Why it leaked (by reading, not reproduced):** `push` tested one point
+  0.9 m above the feet against each boulder's ellipsoid and skipped any
+  boulder whose surface there faced mostly up *or down*. Under an overhang
+  (below a boulder's widest point) the normal faces down, so nothing pushed
+  and you walked in. Pushing out of one boulder could also push into its
+  neighbour.
+- **First try, a baked height map (solid from the top down), was wrong:**
+  the boulders overhang a long way at the base, so it made an invisible
+  wall metres outside the rock. Owner's review: that, and flying sinks into
+  the top boulder.
+- **Now the boulders as drawn** (`Giant.shell` / `cut`): each is its
+  ellipsoid *with the pebble's lumps* (`pebbleRadius`, the same noise the
+  mesh is built from; they move the surface up to 14% of a boulder, metres
+  on the big ones, which the old 0.96 shrink ignored). `cut` gives where a
+  vertical line enters and leaves a boulder. `surface` is the highest top
+  within a step (0.6 m) of the feet. `push` calls stone a wall when it is
+  above that step and below head height (1.7 m), so you can walk in under
+  an overhang until your head meets it; sides steeper than about 45 degrees
+  are walls; a body found inside is put out by the nearest way.
+- **Flying** lands on it and is stopped by its sides (`Giant.land`, in
+  `world.landmarks`).
+- The camera still doesn't know about it, nor do wild creatures; its trees
+  aren't solid.
+- **Not tested in play** (the owner asked to stop the slow headless
+  probing); it typechecks. Fallback if it still feels bad: the owner's
+  idea, an invisible forcefield that shimmers and bumps you back.
+
+### The village runs; a crow for every spirit; crows keep out of the giant (2026-10-01)
+Owner: spirits left in a house when it's trodden on read as crushed ("too
+scary"). Asked for: they see/hear it, panic, run to the middle of town; a
+reaction when the first house goes; then the crows, with the taking seen
+better. Also: crows fly through the giant; and as many crows as spirits,
+with two or three more spirits. (This replaces parts of the note above.)
+
+- **Eight spirits, eight crows.** Every other house has two living in it
+  (`Village.spirits` / `home` / `taken`; a house no longer owns a spirit). No
+  spare crows; the yard version (old saves) has a ninth, for the miss at the
+  guide. No new houses: the lane and plots are worldgen and weren't touched.
+- **Nobody is in a house when it goes.** At 1.75 of the giant's steps
+  (`FRIGHT`) everyone runs (`Village.panic`, `Spirit.haste` 7.5-8.7 m/s, out
+  to the lane and along it) to `Visit.gather`: the lane point nearest half
+  way that is furthest from every footfall. The giant's feet fall 14.5 m
+  either side of the lane, so it wades over them and treads on nobody.
+  `Village.smash` no longer leaves a spirit in the boards.
+- **New shots:** the run, from down in the lane 17 m short of the huddle,
+  the giant coming behind (replaces the low shot from the yard); their faces
+  for 2.5 s after the first house goes, starting (`Spirit.flinch`) at each
+  smash. **The second house is heard and felt there, not seen**: that bends
+  the older rule that every house is seen going. The other houses keep
+  their shots.
+- **The snatching is all at the huddle now.** The camera rides the first
+  crow down as before and settles 14 m off, three-quarters on to their
+  faces (they turn toward it: `Visit.watch`), and stays while the other
+  seven come, 0.65 s apart; it cranes out as the last go and tilts up after
+  the lights to the giant's head. Then the guide, the flock, the pull-back
+  as before. 52.8 s from the tower on `hilda` and `fjord`.
+- **Crows and the giant.** Two causes. The flock wheeled round its head,
+  but its hump and the trees on it stand higher than its head: the wheel's
+  middle is now lifted over the highest perch. And dives and climbs went
+  straight through its body: `Birds.clear` (set by `Visit`) lifts any point
+  on a dive or climb over a dome on the giant (44 by 27 m, sloping off to
+  twice that), eased at both ends so they still leave and arrive exactly.
+  The chase camera gets the same. Not covered: lift-off from the perches
+  and the flight back to roost at the ring.
+- **Rough:** the carried light is far bigger than the spirit it was; eight
+  crows on one spot overlap; in the flock shot the giant's head is mostly
+  below frame now the wheel is higher. Yard version run once on `hilda`
+  (no errors, reload restores 5 wrecks, 8 lights).
+
+### The tower hand-over, and the village's run to the pasture (2026-10-01)
+Owner: the cut from the tower's view to the giant was bad (too soon, and the
+camera "phases through the tower"); the huddle didn't read ("a weird
+formation", the run not in shot). Asked for: 10 s to look round, no way out
+of the head that first time, a smooth move to the giant; the village seen
+panicking, running somewhere, standing naturally, looking up at it. Offered
+the stable area as the place.
+
+- **The tower.** The giant now comes 10 s after you settle in the head (was
+  2.5; cut to 7 s on 2026-10-01, asked for). `Beacons.holdIn` (set in main while that first visit is pending or
+  running) takes away the way down, the ember flight and Esc. The first
+  shot is from the head's own eye point (`Beacons.eyeToward`; it was the
+  head's centre, inside the rock) at the head's fov, and the blend into it
+  starts from last frame's camera, not the orbit camera parked at the door
+  (that was the swing through the tower), over 2.4 s (`camBlendDur`).
+- **They run to the pasture** (`Visit.gather`; no pasture: the old spot on
+  the lane). The giant's route already keeps 14 m off it; on four seeds
+  its nearest footfall is 32-69 m away and it stops 53-83 m off, so they
+  stand and look up at it. Up to 148 m from the far house, so:
+  **`LEAD_IN` is 10 steps (was 4)**: the giant starts about 240 m beyond the
+  first house (in the lake, on `hilda`), and the visit is **65 s** from the
+  tower (was 53). Saves from before get six more prints on restore.
+- **The run** (`Village.panic`): the one with furthest to go bolts first;
+  each of the others stares until the runners are 7 m short of its door,
+  then goes with them, each a little to one side, all at about 11 m/s: a
+  pack that grows down the lane and arrives together in 13 s.
+- **Shots:** from the tower until step 2.6; a doorstep at the far end (they
+  start at the footfall, bolt at 3.15); the camera running backwards ahead
+  of the pack, low, the giant over them (`Visit.chase`); once they're
+  there, over their heads at the giant; the first house; their faces.
+- **Standing:** eight hand-placed spots in twos and threes, some forward,
+  some back, jittered per spirit; they look up at its head (`Visit.watch`).
+- **Not done / rough:** nobody was played through the hold (scripted runs
+  only); runners have no collision (on `fjord` they pass close by your
+  cabin); in an old save with the stable built they'd run through the
+  fence; the yard version ran once without errors and wasn't looked at.
+- **Tweaks (2026-10-01):** the chase shot is cut after 6 s (`CHASE`); they
+  still run the full 13 s, seen from the wide view, then over their heads
+  once there. Crows no longer drop straight down: a stoop levels out
+  `SKIM` (18 m) short of its mark, skims it and goes on level before it
+  climbs (both Béziers share the tangent, and the eases keep it moving
+  through the mark). A dive now waits at its mark (`then: 'dive'`) rather
+  than taking a frame of the wheel. The spirit is carried **as itself**
+  (`Spirit.carried` = the crow's `grip`, arms up); only once the crow is
+  back on the wheel does the light come up round it (`Bird.glow`, 0.6 s)
+  and the spirit hide (`Village.drop`). Every visit shot is kept `FLOOR`
+  (0.6 m) off the ground.
+- **Later the same day:** the giant comes up slowly (`Giant.emerge`, 9 s,
+  100 m, eased) as it sets off, instead of standing there at once: out of
+  the lake on `hilda`, out of the ground on a dry seed (not looked at).
+  The snatching is now: down with the lead crow, its pickup, a beat, three
+  more half a second apart (`SEEN_TAKEN` = 4), then a **cut** to the guide.
+  The crane-out and `sceneCam` are gone. The rest are still taken, unseen,
+  and `cue().aloft` waits until the last is up with the flock.
+
+## Ambient soundtrack (2026-10-01)
+
+- **What:** `src/audio/ambience.ts` mixes the first audio pack behind the
+  synthesised effects: one tonal bed (`bed_woods` everywhere, `bed_home`
+  at home), day/night air, a night layer, and a warm pluck every 20-60 s.
+  Each is a bus with its own gain (`Ambience.gains`, and "Ambient sound" in
+  the panel). New places are rows in `BEDS`, new state layers rows in
+  `LAYERS`, and what they read is `AmbienceState`, filled in main.ts.
+- **Same context as `Sfx`**, so the same first-gesture unlock, but its own
+  bus straight to the output: through the effects' compressor a chop would
+  pump the music.
+- **MP3, not the pack's WAVs** (150 MB; 4.6 MB as shipped). MP3 pads both
+  ends with silence, which would click at the seam, so `scripts/audio.mjs`
+  writes each loop with 0.5 s of its own tail in front and head behind and
+  the game loops a window exactly one period long inside that. Checked: the
+  step across the seam after decoding is the size of an ordinary step
+  between samples. The WAVs stay out of the repo; rerun the script on a new
+  pack, and keep `len` in the tables equal to what it prints.
+- **Memory:** a decoded loop is about 40 MB a minute, so loops are fetched
+  at start (small) but decoded when first wanted and dropped 45 s after
+  they fall silent. Day in the woods holds about 70 MB, night at home about
+  100. Not tried on a phone.
+- **State:** night is `env.sky.night` (the palette's own keyframes, so the
+  sound turns with the picture). Home is `atHome()` in main.ts: the cabin
+  is lit and you're within 55 m (70 to leave) of the hearth, or of the
+  village lane until `giantGone`. During the giant's visit (`visit.busy`)
+  the bed, the night layer and the plucks fade out over 4 s and only the
+  air stays; they come back after.
+- **Starting mix:** master 0.5, bed 0.7, air 1 (as made: it is meant to be
+  barely there), night layer 0.7, plucks 0.6 (each also 0.6-1 at random,
+  panned a little). By ear these are untested: nobody has listened yet.
+- **Not done:** beds for the highlands, bog, glimmerwood, hollows and
+  towers (the woods bed plays there); riding/flying/giant layers; stingers;
+  a mute control; whether the wrecked village should ever sound like home
+  again is a story question, left open.
+
+## Expressions: how she and the guide take the giant (2026-10-01)
+Owner: after the village is smashed she walks out of the tower with her
+default smirk. She had no expressions at all (the grin was fixed in
+`FACE_FRAG`), and the guide's mood was cleared the moment the giant left.
+
+- **Her face has moods.** `CharacterRig.mood`: `'scared' | 'sad' | 'set' |
+  null`, eased into `uMood` (sad, worried, frightened, set) in `FACE_FRAG`.
+  Sad: brows' inner ends up, a small centred frown, head and eyes down
+  (round eyes get heavy outer lids). Scared: brows up, bigger eyes (round:
+  smaller pupils), mouth a small "o". Set: the grin flattened to a short
+  line. Both eye types. Still paint in the head shader, no geometry.
+- **Who sets it** (main.ts, after `visit.update`): while the giant is here
+  she mirrors the guide (scared, then sad as the lights go up). Once it's
+  gone she is **sad within ~65 m of the lane** (85 to leave) and **set
+  everywhere else**. The grin doesn't come back; nothing built yet earns it
+  (first rescue is the obvious place).
+- **The guide stays `'down'`** after the giant: frown and heavy lids, but no
+  shiver or reaching, its bubbles still show, and it still brightens for
+  pats and celebrations.
+- Dev: `?mood=sad|scared|set` holds her face. `node scripts/face.mjs <dir>
+  [eyes=round]` shoots each mood close and at play distance; `after` shoots
+  the two of them in the wrecked village and her away from it.
+- Not done: no other story beats drive her face yet (lighting the hearth,
+  the gift, pats, the tower lighting, the ring).
+
+## After the giant: the guide walks home, and the stable waits (2026-10-01)
+Owner: when you leave the tower after the visit, the guide should walk
+sullenly back to the village (forgetting its bike), do its own thing for a
+few minutes, and only start on the stable once you're in the village.
+
+- **Two new journey stages** between `enter1` and `done`: `trudge` and
+  `grieve` (saved like the rest, and they're checkpoints).
+- **`trudge`:** it walks `journey.toHome` backwards, a 9 m stretch at a time,
+  at 1.8 m/s (`TRUDGE`; its trot is 3.1). It never stops on the way (it did, for 2-4 s every
+  14-26 s, and glanced at you: the owner read that as waiting for them, so
+  the stops are gone). It doesn't lead, wait or look at you. Its little bike stays
+  parked at the tower. More than ~95 m from you it speeds up (to 14 m/s by
+  130 m), so if you ride ahead it's about a minute behind you into the yard
+  rather than five. A reload mid-walk puts it in the village (`grieve`).
+- **`Spirit.sullen`** is the look: barely lifts its feet, bent forward, arms
+  hanging, eyes on the ground, lids lower, and no pleased glance at you.
+  On top of the `'down'` mood main.ts already sets. Pats and acts override it.
+- **`grieve`:** `GRIEVE` = 180 s from reaching the yard. It goes between the
+  wrecked houses (a spot in the lane abreast of each, 12-24 s, standing or
+  sitting, looking at the wreck), and one time in n+1 sits by its own fire.
+  Can be patted. The timer starts over on a reload.
+- **The stable** starts when the 180 s are up *and* you're within 32 m of
+  the cabin or the lane (`inVillage`), on the ground. Away, nothing happens
+  however long you're gone. The pointer no longer calls you home for it
+  (`guide()` returns null from `trudge` until the stable has begun).
+- Checked with `scripts/trudge.mjs` on `hilda` (stages and close shots of
+  the walk and the village). Not looked at: the walk as you'd see it from
+  beside it in motion, night, a seed with no village (it would only sit by
+  its fire), and whether 180 s feels right.
+- **Fixes the same day:** trudging, its body sank into the ground (the
+  forward bend drops the seat's front edge, and with no hop to hide it the
+  flat seat cut into any slope): the body is now lifted by the bend and by
+  the higher of the ground just ahead and behind. And the guide floated
+  over footprints: `Story.floorAt` didn't know about them. It now adds
+  `StoryDeps.dent` (`trail.prints.offset`), so the guide and flying
+  logs/stones sit in a print. The village's own spirits still use plain
+  `gen.height` (they're gone by the time there are prints).
+
+## The guide's close-up at the tower, kept clear (2026-10-01)
+Owner: on `hildax` the guide's reaction shot after the snatching was blocked
+(by the tower, they thought).
+
+- **Why:** at the tower the journey has the guide by the doorway, facing in.
+  The close-up is from 4.3 m in front of wherever it faces, so the camera
+  was in or against the rock. Nothing checked that shot for rock or trees.
+- **Fix: move the guide, not the camera** (`Visit.placeGuide`). When the
+  giant stops (the camera is at the village for the next 10 s) the guide is
+  put out at the foot of the tower on the giant's side, facing the giant,
+  and held there until the visit ends (`Visit.stage` overrides the
+  journey's want each frame; the journey takes it back afterwards and it
+  walks to the doorway again). Of 44 spots round that side it takes the one
+  with most room: no rock at the guide, the camera, between them or just
+  behind the camera (`VisitDeps.solid`, `Beacons.solidAt` sealed), trunks
+  clear of both and of the look, dry, and near level. The shot itself is
+  unchanged, and it now faces what it's grieving.
+- `visit.start` takes the tower as a second argument (main passes the head's).
+- Shot on `hildax`, `hilda`, `42` from the tower: clear on all three. The
+  headless run never had the guide at the doorway, so the owner's blocked
+  frame itself wasn't reproduced (before: rock filling the left of frame).
+- Not done: the yard version of the shot (old saves) has no such check.
+- **Air turned down (owner, after playing):** too much day and night as
+  made, so the air bus starts at 0.3 (about -10 dB), not 1. If it's still
+  too much, the files want remaking quieter and duller, not more gain cut.
+
+## The giant and the tower you watch it from (2026-10-01)
+
+Nothing tied the giant's line to the home tower, and you watch the visit from
+its head with the guide at its foot. On `hildax` the walk-off trod 12 m from
+the tower; on `fjell` the giant rose out of the ground underneath it. Three
+rules now, all still pure functions of the seed:
+
+- **The lane is side-on to the tower** (`findVillage`). The site search asks
+  `homeHint` (towers.ts: the home tower's own hilltop search, before there is
+  a village) where the tower will go, and a lane within `LANE_OFF` (40°) of
+  that line, either way, loses up to 40 points. A preference, not a ban: on
+  `hildax` only one lane fits and it stays 17° off. `homeSpot` has the same
+  preference from its side (-90), but usually has no other hill to choose:
+  the tower's candidates tend to sit in one direction, which is why the lane
+  is the thing that turns.
+- **The way to the ring keeps 120 m off the home tower** (`HOME_CLEAR`, a
+  `keepOff` circle for `WorldGen.route`), and the home tower is never the
+  tower the way goes by. If no way exists at 120 m the search runs again at
+  60, then 0, rather than falling to the straight-line last resort (seed `6`
+  did, straight over the tower).
+- **No footfall within 55 m of it**, and the four steps past the yard count
+  it (80 m) among the things not to tread on (`visitRoute`).
+
+Over 20 seeds the nearest footfall to the home tower is now 56 m (seed `6`,
+the relaxed tier) and otherwise over 100 m. The dungeon cache key went to
+`v5`. Worlds change where the lane turned (`fjell`, `nord`, `troll`); saves
+from after the visit get their prints along the new line.
+
+### The guide's shot at the tower (2026-10-01)
+
+Its close-up during the snatching read as "some spirit, somewhere", and ran
+until the last crow was up (8.6 s on `hilda`, not the 5 s of `SNATCH.sad`).
+
+- **Wide, then in** (`GUIDE` in `visit.ts`): 1.1 s from 17 m back on the
+  close-up's own line (the tower's doorway behind it, the bikes), a 0.5 s
+  push in, 1.5 s on its face. 3.1 s in all.
+- **Its little bike is stood beside it** (`Journey.standBike`, from
+  `placeGuide`), on the side away from the camera. It stays there after.
+- **Then back to the giant** until the last crow is up: from behind the
+  empty pasture, tilting up after the crows (`cue().rise`).
+- **It faces the giant throughout** (`settled` on the staged want). Idle, it
+  turned to look for you every few seconds, up in the tower behind it, and
+  the close-up went round with it: forest behind, no tower.
+- At home (no tower) the shot is as it was.
+- `scripts/visit.mjs ... tower` now runs with bikes on.
+
+## Dungeon 1: the pull down, and a first interior (2026-10-01)
+
+Owner: "the hand pulling thing seems weird and not right. It shouldn't be so
+many hands, and they should follow you around as you walk around on the
+portal. They should come up once and pull ya down, just like the tower (but
+reversed)." And: take a first shot at an interior to be pulled into; no
+theme given. (I read "should follow you around" as "shouldn't": the seven
+arms were pinned to you as you walked, and that's the part that looked
+wrong. If it was meant the other way, it's `Ring.update`.)
+
+### The take (`src/giant/ring.ts`)
+- **Two arms, once.** The seven swaying arms are gone. Walk 3 m in past the
+  field's lip, on your own feet (`mode === 'walk'`, grounded; never on a
+  mount or a bike, as at a tower), and it takes you: hands off, two arms come
+  up out of the field either side of you, arch over and come down on to your
+  chest (0.5 s), hold a beat (0.14 s), and pull you under (0.6 s). They are
+  the tower spirit's own arms (`Arm`, now exported from `beacons.ts`) in ink.
+- They are planted where you stood when it began and never move with you.
+  Their feet are kept inside the field's lip.
+- **The cut** is a flat violet veil (a DOM div, opacity set every frame from
+  `ring.veil` / `dungeon.veil`, so it steps with `advance`): up over the last
+  60% of the pull, down over the first 0.6 s inside.
+- **Coming back** is the reverse (`Ring.emerge`): lifted out through the
+  middle of the field, set down, the arms let go and sink. The field won't
+  take you again until you've stepped off it.
+- The camera keeps its focus where you stood while the ring has you
+  (`ring.heldY`), or it would follow you under the ground.
+- Sound: `Sfx.sink(up)`, a low swallow, no chimes.
+
+### The interior (`src/dungeon/`), a first shot
+**Theme, proposed, not decided:** *the hollow under the ring.* The ring's
+nine stones go on down as columns round a well whose ceiling is the
+forcefield seen from underneath; a passage winds down past a grotto of
+glowcaps into a great cavern with a still pool; up a ramp at the far end,
+framed in an archway you can see from the cavern's mouth, a small warm light
+on a stone. Everything is violet (the dark spirit's colour) except that one
+light and the glowcaps' pale blue. Nothing to solve, no creature needed, and
+the light does nothing: it is a place and a way in and out, to look at.
+
+- **Its own scene** (conflict 5), drawn in place of the world while
+  `dungeon.inside`. It keeps the world's x and z and lies 60 m under the
+  ring, so terrain streaming, creatures and the story carry on overhead and
+  nothing pops when you come back up. The explorer's rig and the dust move
+  into its scene and back.
+- **The plan is 2.5D** (`layout.ts`): free space is `sdf(x, z) < 0`, a
+  smooth union of round rooms and capsule passages with the walls wobbled
+  by noise (the well is left round); a floor height and a clear height
+  blended from the rooms; walls lean in up a quarter ellipse to meet the
+  ceiling as a vault. A pure function of the seed (which side it winds to,
+  where the boulders, stalagmites and glowcaps are, which gap between the
+  ring's stones the way on leaves by).
+- **One set of functions** feeds the mesh (`shell.ts`: grids for floor and
+  ceiling, marching squares swept up the vault for the walls, normals from
+  the plan), collision (`Dungeon.collide`, `floorAt`: you can jump on to
+  boulders), and the camera (`clampCamera`: drawn in along its line to you;
+  only columns and tall stalagmites block it, it looks over the rest).
+- **`main.ts`:** the `WorldQuery` hands everything to the dungeon while
+  you're inside (and `waterLevel` goes to -1e9: it can lie below sea
+  level). No flying, mounting or lasso down there. The world's overlay
+  scene isn't drawn.
+- **Light is pools, not a sun** (`DUNGEON_FRAG`): each glow (the portal,
+  each clump of glowcaps, the warm light) lights what faces it in two hard
+  rings; the rest is the shade tone. Strata up the walls are flat bands with
+  wandering edges. `PostPipeline.render` takes an optional `air` (enclosed
+  fog: short, six bands, no layer pass, no valley mist), and the grade is
+  violet (`DUNGEON_LOOK`). The shared light uniforms are overwritten each
+  frame after the day/night sets them, so the explorer is lit to match.
+- **Being let down:** the same two arms hang from the portal and lower you
+  to the middle of the well (1.6 s), watched from across the well, then let
+  go. A pale double ring in the floor marks the spot; walk off it and back
+  on and they come down for you.
+- **Cost:** about 100k triangles and under 60 draw calls inside.
+- **Dev:** `?dungeon=1` (or `=x,z`, a point of the plan) starts inside;
+  `__ow.enterDungeon()`, `enterDungeon(x, z)`, `leaveDungeon()`,
+  `dungeon()`, `goToRing()`; checkpoint `ring` (`?fresh=1&cp=ring`) stands
+  you by the opened ring in the story; `scripts/dungeon.mjs`.
+- **The way out is a dark round in the well's floor** (2026-10-01), `LIFT_R`
+  across, rimmed in pale stone with a thin ring outside it: two thin pale
+  rings were too easy to miss. The rim glows and breathes once the arms will
+  take you (`uMarkOn`: you've stepped off past `ARM_R`), and is dull while
+  you've only just been set down. All in `DUNGEON_FRAG`; no geometry.
+
+**Checked** on `hilda` only, scripted: the take, the arrival, the walk off
+the mark and back, the lift and the emerge, frame-stepped; eleven stills
+round the cave; one live run in the browser with no console errors.
+
+**Not done / open:**
+- What dungeon 1 *is* (theme, which ability it teaches, the puzzle, what
+  the warm light is). All of it is the owner's to decide.
+- Mounts can't come in: the ring only takes you on foot. The design gates
+  dungeons by mount ability, so how a creature gets down is an open question.
+- Nothing is saved: reload inside and you're back at the cabin.
+- The guide doesn't come, the dark spirit only watches, the cave is silent
+  (the ambience is hushed), creatures on a lead stay above.
+- With your back to the rock the camera comes right in and you aren't drawn
+  (rather than seen from inside your hat). Boulders read a little angular
+  under the pooled light. Glowcap halos on walls are plain discs.
+- Other seeds weren't looked at. The layout only varies by side and scatter.
+
+## Dungeon 1: a first mechanic, the mount you find down there (2026-10-01)
+
+Owner, on the interior: "really quite good. we just need some kind of
+mechanics for it now", with four ideas (gather and build; platforming;
+move-this-unlock-that puzzles; help a creature). Then: "I do like the idea
+of going in mountless but discovering/unlocking a mount needed to complete
+the dungeon. I think this might replace the lasso idea (until end game,
+lasso would be a final prize type thing)." The warm light: "A gift for the
+giant? one gift = one crow flying a spirit back to the village? I'm not
+married to this idea, its just ok." What to build: "your call."
+
+**My call: nothing is built in dungeon 1.** With the mount as the key, a
+bridge would do the same job twice. The slice is *help a creature, and it
+becomes the mount the dungeon needs*, with one platforming beat:
+
+1. You come down on foot (the ring never took mounts).
+2. **A rockfall shuts the grotto**, and a rockhopper is shut in behind it
+   (you can see it over the boulders, among the glowcaps). The boulders
+   glint, the game's one "you can use this" signal, if you have the pick.
+   Three blows break a boulder; the first gap frees it. It gets its saddle
+   and is yours down here (E to ride).
+3. **The warm light stands on a ledge** 4.2 m up across the far passage:
+   too high to jump or parachute, and a run at it on the rockhopper is
+   stopped too. Space, its bound, clears it.
+4. Walk into the light and it comes with you, at your shoulder. That is
+   all it does: what it is for isn't decided.
+
+- **A dungeon's creature** is a `Mob` with `below` set, made with
+  `Mobs.adopt`. `Mobs.under` (a `MobCtx` whose ground and walls are the
+  dungeon's; the `gen` in it is a proxy whose `height` is the cave floor)
+  is set while you're down: then only `below` creatures think and are
+  drawn and the world's wait as they are, and the other way round above.
+  It stays down there when you leave.
+- **The ledge** is `Layout.shelf` (a line across the passage; past it the
+  floor is `h` higher). `Dungeon.collide` treats any rise over 0.9 m as a
+  wall from below, and now stops heads at the roof (a bound could reach
+  it). The mesh has the floor run on under it, a separate top sheet drawn
+  back to the line, and a plain face (a stepped height field drew teeth).
+- **The rockfall** is `Layout.plug`, boulders set wall to wall across the
+  grotto's passage, each its own mesh so it can go. The swing is the
+  tower lock's (`Dungeon.action` / `act`, the story's action badge via
+  `story.external`; the sandbox lends a pick).
+- **Saved** per seed (`fjellheim.dungeon1.<seed>`: freed, taken);
+  `?fresh=1` forgets it.
+- **Checked** (`scripts/dungeon.mjs <dir> quest`, `hilda`, scripted): the
+  boulder breaks and the creature is freed; a ridden run at the ledge
+  stays at the bottom; the bound lands on top; the light is taken. The
+  take and leave still pass. Not played by hand.
+
+**Rough / open:**
+- The freed rockhopper only ambles out toward the gap; it doesn't come to
+  you or follow you.
+- No sound from it while shut in, nothing draws you to the grotto but
+  seeing it, and nothing happens when you have the light (no crow, no way
+  marked back). The light isn't carried up out of the dungeon.
+- The other three ideas aren't in: no gathering or building, no pushables,
+  only the one jump.
+- The lasso and the stable are untouched above ground; if dungeons are
+  where mounts come from, phase 3 needs rethinking (owner's "might").
+
+### Dungeon 1: the well's columns (2026-10-01)
+Were nine (r 1.5), one under each of the ring's stones, with the plan's +x
+through a gap. But the passage leaves the well ~15 degrees off +x
+(`halls[0]` runs to (34, 9s)), so a column stood half across its mouth.
+Now four (r 2.3), placed by `Layout` itself at +-60 and +-140 degrees about
+`Layout.door`, the passage's own bearing: the mouth is in the middle of a
+120 degree gap. They no longer line up with the stones above (nothing down
+there showed that they did). The let-down camera and your heading on being
+set down are taken from `door` too; the far pair leave the camera its gap.

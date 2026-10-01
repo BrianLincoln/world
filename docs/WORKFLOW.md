@@ -37,6 +37,35 @@ change goes through this loop:
   bicycle shots. Scripted rides call `__ow.lockInput(yaw)`, because steering
   is camera-relative and re-aiming the camera for a side shot would turn the
   bike.
+- `scripts/giant.mjs <dir> [skyline,walk,gait,close,prints]`: the giant at three
+  distances and four times of day, walking across the view, walking from the
+  side, close up, and (`prints`) the footprints it leaves walking off from
+  the cabin. It shoots from just over the treetops on open ground.
+  `__ow.trail.prints.list` is every print so far.
+- `scripts/village.mjs <dir> [seed=..] [survey]`: the village lane from above,
+  from the yard and from its far end (day, dusk, night), each kind of house
+  at eye level, and a footprint on a house for scale. `survey` lists which
+  of forty seeds get a lane. `__ow.village()` is it (null if none fits).
+- `scripts/visit.mjs <dir> [seed=..] [t=16.6] [after]`: the giant's visit,
+  frame-stepped, a shot every 1.5 s; `after` adds the wrecked lane and a
+  reloaded save; `tower` runs it the real way (from the home tower's head);
+  `trail` fast-forwards the walk to the ring and shoots it.
+  `__ow.visit().start()` runs it from anywhere in the story;
+  `__ow.visit().restore()` jumps to after it (prints, wreckage, giant asleep, ring open).
+- `scripts/dungeon.mjs <dir> [seed=..] [inside,take,leave,quest]`: dungeon 1.
+  `inside` is stills round the cave; `take` walks on to the opened ring and
+  steps through the pull and the arrival; `leave` the lift and the emerge;
+  `quest` breaks the rockfall, rides the rockhopper at the ledge with and
+  without its bound, and takes the light (it prints the state as it goes).
+  `dungeon().debugFree()` frees the creature at once.
+  Needs `npx vite build` first. `__ow.enterDungeon()` is the ring taking
+  you, `enterDungeon(x, z)` stands you at a point of the cave's plan,
+  `leaveDungeon()` brings you up, `dungeon()` is it, `goToRing()` stands you
+  by the ring.
+- `scripts/trudge.mjs <dir> [seed=..]`: the guide after the giant: its walk
+  home from the tower (close up), keeping to itself in the village, and the
+  stable beginning only once the minutes have passed and you're there. It
+  prints the stage as it goes. `?cp=trudge` / `?cp=grieve` start there.
 - Perf with extra URL params: `Q='&mobs=0' node scripts/shots.mjs --no-build --only none --perf --uncapped`.
 
 ### Page hooks (`window.__ow`)
@@ -74,8 +103,10 @@ change goes through this loop:
 deterministic).
 Story and life: `story=0|1` (it's off by default when `t`, `x` or
 `mode=fly` is set), `fresh=1` (forget saves), `journey=<stage>`,
-`stable=<step>`, `debug=1` (keep the panel during the story), `mobs=<density>`,
-`bikes=0`, `drak=0` (the temporary drakitten landing), `eyes=round`.
+`stable=<step>`, `cp=<id>` (with `fresh=1`: any checkpoint in `ui/checkpoints.ts`; the \` key shows a strip to step through them), `debug=1` (keep the panel during the story), `mobs=<density>`,
+`bikes=0`, `drak=0` (the temporary drakitten landing), `eyes=round`,
+`giant=<metres>[,walk]` (stand the giant in view, or walk it across),
+`dungeon=1` or `dungeon=<x>,<z>` (start inside dungeon 1, at a point of its plan).
 
 ## Debugging approach that worked
 When a frame looks wrong, bisect in the page rather than guessing:

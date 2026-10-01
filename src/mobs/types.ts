@@ -37,6 +37,8 @@ export interface Mob {
   happy: number;
   /** Per-species brain + animation scratch. */
   data: any;
+  /** Lives down in a dungeon: it only thinks and is drawn while you're down there too (see Mobs.under). */
+  below?: boolean;
 }
 
 export interface Flock {

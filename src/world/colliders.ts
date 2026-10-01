@@ -155,6 +155,18 @@ export class Colliders {
     return this.nearest('tree', x, z, max, Infinity);
   }
 
+  /** Every standing world tree within `r` m of (x, z), as instance rows (x, y, z, scale, rot, yScale, lean, tone). */
+  treesNear(x: number, z: number, r: number): Float32Array[] {
+    const out: Float32Array[] = [];
+    this.forCells(x, z, r, (c) => {
+      const R = c.treeRows;
+      for (let i = 0; i < R.length; i += INST_STRIDE) {
+        if (Math.hypot(R[i] - x, R[i + 2] - z) < r && !this.busy?.('tree', R[i], R[i + 2])) out.push(R.slice(i, i + INST_STRIDE));
+      }
+    });
+    return out;
+  }
+
   /** Nearest ordinary boulder (not a landmark) up to `maxScale` within `max` m. */
   nearestRock(x: number, z: number, max: number, maxScale: number): PropHit | null {
     return this.nearest('rock', x, z, max, maxScale);

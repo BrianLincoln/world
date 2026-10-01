@@ -1,5 +1,5 @@
 import { hash01 } from '../core/rng';
-import { segDist, WorldGen, TREE_LINE, type PathSeg, type Poi } from './worldgen';
+import { segDist, WorldGen, TREE_LINE, type PathSeg, type Poi, type DungeonSite } from './worldgen';
 
 // Builds everything one quadtree node needs, as flat typed arrays that can be
 // transferred from a worker without copying.
@@ -18,6 +18,8 @@ export interface ChunkRequest {
   size: number;
   /** Skip ground detail (tufts, flowers): used for main-thread colliders. */
   propsOnly?: boolean;
+  /** The dungeon site, found once on the main thread (the search is slow: see WorldGen.dungeon). */
+  dungeon?: DungeonSite | null;
 }
 
 /** Instance layout (8 floats): x, y, z, scaleXZ, rotY, scaleY, lean, tone. */

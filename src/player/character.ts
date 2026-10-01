@@ -91,6 +91,12 @@ function blob(hex: string, parent: THREE.Object3D, sx: number, sy: number, sz: n
   return m;
 }
 
+export type Mood = 'scared' | 'sad' | 'set';
+/** Face weights per mood: (sad, worried, frightened, set). */
+const MOODS: Record<Mood | 'none', [number, number, number, number]> = {
+  none: [0, 0, 0, 0], scared: [0, 0.5, 1, 0], sad: [1, 1, 0, 0], set: [0, 0.3, 0, 1],
+};
+
 // ----------------------------------------------------------------- poses
 
 const JOINTS = [
@@ -388,6 +394,15 @@ export class CharacterRig {
 
   /** Freeze idle head turns and blinks (for tuning the face). */
   holdStill = false;
+
+  /**
+   * How she feels (the story sets it; null = her usual grin). 'scared': brows
+   * up, eyes wide, mouth a small "o". 'sad': worried brows, a frown, head and
+   * eyes down. 'set': the grin gone to a flat line, brows a little knit.
+   * It eases between them (FACE_FRAG's uMood).
+   */
+  mood: Mood | null = null;
+  private moodW = new THREE.Vector4();
 
   /** 'dot' = solid ink ovals, 'round' = whites with small pupils. */
   get eyeType(): 'dot' | 'round' {
@@ -1102,8 +1117,12 @@ export class CharacterRig {
     this.hips.position.y = HIP_Y + P.hipY;
     this.hips.rotation.set(P.hipX, P.hipYaw, P.hipRoll);
     this.spine.rotation.set(P.spX, P.spYaw, P.spRoll);
+    // Mood: (sad, worried, frightened, set). Sad hangs her head.
+    const mw = this.moodW, md = MOODS[this.mood ?? 'none'], mk = e(this.mood === 'scared' ? 12 : 4);
+    mw.set(mw.x + (md[0] - mw.x) * mk, mw.y + (md[1] - mw.y) * mk, mw.z + (md[2] - mw.z) * mk, mw.w + (md[3] - mw.w) * mk);
+    (this.face.uniforms.uMood.value as THREE.Vector4).copy(mw);
     if (this.holdStill) this.head.rotation.set(0, 0, 0);
-    else this.head.rotation.set(P.hdX, P.hdYaw, P.hdRoll);
+    else this.head.rotation.set(P.hdX + 0.16 * mw.x * (this.w.ground / sum), P.hdYaw * (1 - 0.6 * mw.x), P.hdRoll);
     this.thighL.rotation.set(P.thL, 0, P.thLz);
     this.thighR.rotation.set(P.thR, 0, P.thRz);
     this.kneeL.rotation.x = P.knL;
@@ -1166,7 +1185,7 @@ export class CharacterRig {
     }
     const still = 1 - sat(speed / 2.5);
     const lx = this.glance.x * still + THREE.MathUtils.clamp(this.turn * 0.06, -0.12, 0.12) + P.hdYaw * 0.2;
-    const ly = this.glance.y * still - 0.01 * (1 - still);
+    const ly = this.glance.y * still - 0.01 * (1 - still) - 0.05 * mw.x;
     if (this.holdStill) this.look.set(0, 0);
     else {
       const k = e(28);

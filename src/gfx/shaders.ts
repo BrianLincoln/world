@@ -5,6 +5,7 @@
 // the standard matrices for us).
 
 import { SAPLING } from '../world/harvest';
+import { PRINT_GLSL } from '../world/prints';
 
 export const COMMON = /* glsl */ `
 precision highp float;
@@ -43,10 +44,12 @@ layout(location = 0) out vec4 gColor;
 layout(location = 1) out vec4 gND;
 // Props store half-length normals so post passes can tell them from ground;
 // creatures (uIsProp = 2) store 0.62 so outlines can treat them gently.
+// The giant (uIsProp = 3) stores 0.8: it layers like terrain (anything over
+// 0.71 does) and the composite fogs all of it as one flat card.
 uniform float uIsProp;
 void writeG(vec3 col, float emissive, vec3 nWorld, vec3 viewPos) {
   gColor = vec4(col, emissive);
-  float tag = uIsProp > 1.5 ? 0.62 : uIsProp > 0.5 ? 0.5 : 1.0;
+  float tag = uIsProp > 2.5 ? 0.8 : uIsProp > 1.5 ? 0.62 : uIsProp > 0.5 ? 0.5 : 1.0;
   gND = vec4(normalize((viewMatrix * vec4(nWorld, 0.0)).xyz) * tag, -viewPos.z);
 }
 `;
@@ -54,6 +57,7 @@ void writeG(vec3 col, float emissive, vec3 nWorld, vec3 viewPos) {
 // ------------------------------------------------------------------ terrain
 
 export const TERRAIN_VERT = /* glsl */ `
+${PRINT_GLSL}
 in vec4 aBiome;
 out vec3 vWorld;
 out vec3 vN;
@@ -69,6 +73,10 @@ void main() {
   float push = clamp(length(wp0.xyz - cameraPosition) / 400.0, 0.0, 8.0);
   if (p.y < 0.0) p.y -= push * min(1.0, -p.y * 2.0);
   vec4 wp = modelMatrix * vec4(p, 1.0);
+  // The giant's footprints are pressed in here, not built into the chunk.
+  float lift = printLift(soleSdf(wp.xz, printAt(wp.xz)));
+  wp.y += lift;
+  vH += lift;
   vWorld = wp.xyz;
   vN = normal;
   vBiome = aBiome;
@@ -81,6 +89,9 @@ void main() {
 export const TERRAIN_FRAG = /* glsl */ `
 ${COMMON}
 ${GBUF_OUT}
+${PRINT_GLSL}
+uniform vec3 cPrintWarm;
+uniform vec3 cPrintEarth;
 in vec3 vWorld;
 in vec3 vN;
 in vec4 vBiome;
@@ -186,10 +197,43 @@ void main() {
   bool snow = h > snowLine && slope < 0.8;
   if (snow) { c = cSnow; grass = false; }
 
+  // A footprint: a floor still warm from the giant (rose, glowing faintly
+  // at night, cooling back to grass as it walks on), bare squashed earth up
+  // the walls and over the lip, and a normal that follows the hollow.
+  float em = snow ? -0.55 : 0.0;
+  bool printShade = false;
+  bool printGlow = false;
+  vec4 pr = printAt(vWorld.xz);
+  float ps = soleSdf(vWorld.xz, pr);
+  if (ps < 4.5) {
+    float l0 = printLift(ps);
+    vec2 sg = vec2(soleSdf(vWorld.xz + vec2(0.3, 0.0), pr), soleSdf(vWorld.xz + vec2(0.0, 0.3), pr));
+    n = normalize(vec3(n.x - (printLift(sg.x) - l0) / 0.3, n.y, n.z - (printLift(sg.y) - l0) / 0.3));
+    // The wall that faces away from the light, and the crescent of shadow
+    // it throws across the floor: what makes it read as a hole.
+    vec2 outw = normalize(sg - ps + 1e-5);
+    float toSun = dot(outw, normalize(uLightDir.xz + 1e-5));
+    float reach = 0.5 + 2.4 * (1.0 - uLightDir.y);
+    printShade = ps < 0.3 && ps > -1.4 - reach * smoothstep(0.3, 0.95, toSun) && toSun > 0.3;
+    float warm = ceil(printWarmth(pr) * 4.0) / 4.0;
+    float wob = (nz2.g - 0.5) * 0.7;
+    if (ps < -1.3 + wob * 0.5) {
+      if (warm > 0.0) {
+        c = mix(cPrintEarth, cPrintWarm, warm);
+        grass = false;
+        // Self-lit after dark (0.5 and up skips the night grade): a string of warm lights.
+        if (uNight * warm > 0.3) { em = 0.5 + 0.12 * warm; c *= 0.5 + 0.3 * warm; printGlow = true; }
+        else em = -0.6 * warm;
+      }
+    } else if (ps < 1.0 + wob) { c = cPrintEarth; grass = false; em = 0.0; }
+  }
+
   vec3 lightBand = toonLight(n);
   lightBand = mix(lightBand, mix(uMidCol, uLightCol, 0.6), smoothstep(350.0, 1300.0, dist));
   // Cast shadows drop the ground into the shade band, like a hill's far side.
   lightBand = mix(lightBand, uShadeCol, groundShadow(vWorld.xz, dist));
+  if (printShade) lightBand = uShadeCol * 0.94;
+  if (printGlow) lightBand = printShade ? vec3(0.8) : vec3(1.0);
   vec3 col = c * lightBand;
   // Contact shadow under the explorer: a flat ellipse in the shade tone.
   // uPlayerFeet.y is the ground under them; it shrinks as they rise.
@@ -207,7 +251,7 @@ void main() {
     col = mix(col, cStroke * lightBand, s * 0.8);
   }
   // Snow caps resist the monochrome grade: they stay the brightest thing.
-  writeG(col, snow ? -0.55 : 0.0, n, vView);
+  writeG(col, em, n, vView);
 }
 `;
 
@@ -231,6 +275,13 @@ uniform float uHeightRef;
 uniform sampler2D uHarvest;
 uniform float uHarvestGrid;
 uniform float uHarvestChan;
+// World props (uPrintHide = 1) that stood where the giant has trodden are gone.
+uniform float uPrintHide;
+${PRINT_GLSL}
+bool trodden(vec3 base) {
+  if (uPrintHide < 0.5 || aI1.z > 5.0) return false;
+  return soleSdf(base.xz, printAt(base.xz)) < 1.0;
+}
 float harvestScale(vec3 base) {
   if (uHarvestGrid <= 0.0 || aI1.z > 5.0) return 1.0;
   ivec2 c = ivec2(floor(base.xz / uHarvestGrid));
@@ -272,7 +323,7 @@ void main() {
   vec3 base = (modelMatrix * vec4(aI0.xyz, 1.0)).xyz;
   gGrow = harvestScale(base);
   // Tone > 1.5: drawn elsewhere (beacon towers), here only for shadows.
-  if (gGrow <= 0.0 || aI1.w > 1.5) { gl_Position = vec4(0.0, 0.0, 2.0, 1.0); return; }
+  if (gGrow <= 0.0 || aI1.w > 1.5 || trodden(base)) { gl_Position = vec4(0.0, 0.0, 2.0, 1.0); return; }
   float sc = aI0.w * gGrow;
   float sy = aI1.y;
   vLocal = position;
@@ -340,7 +391,7 @@ uniform float uShadowReach;
 void main() {
   vec3 base = (modelMatrix * vec4(aI0.xyz, 1.0)).xyz;
   gGrow = harvestScale(base);
-  if (gGrow <= 0.0) { gl_Position = vec4(0.0, 0.0, 2.0, 1.0); return; }
+  if (gGrow <= 0.0 || trodden(base)) { gl_Position = vec4(0.0, 0.0, 2.0, 1.0); return; }
   float hN;
   vec3 p = propPose(position, base, hN);
   vec3 w = (modelMatrix * vec4(p + aI0.xyz, 1.0)).xyz;
@@ -983,6 +1034,8 @@ uniform float uBlink;
 uniform float uFace[${FACE_PARAMS.length}];
 /** Animated gaze (idle glances, heading), added to lookX/lookY. */
 uniform vec2 uLook;
+/** How she feels, each 0..1: (sad, worried, frightened, set). All 0 = the usual grin. */
+uniform vec4 uMood;
 ${FACE_DEFINES}
 
 // Approximate signed distance to an ellipse, in the same units as p.
@@ -1019,12 +1072,13 @@ void main() {
   float ink = lw * 1.3;
   float white = 0.0;
   if (!round) {
-    vec2 bq = m - vec2(0.3, 0.02);
+    // Worried: the brows' inner ends go up. Frightened: the whole brow does.
+    vec2 bq = m - vec2(0.3, 0.02 + uMood.y * ((0.3 - m.x) * 1.5 + 0.015) + uMood.z * 0.05);
     float brow = abs(length(bq) - 0.24) - lw * 0.9;
     brow = max(max(brow, abs(m.x - 0.3) - 0.075), -bq.y);
     col = mix(col, uBrow * mix(lit, uLightCol, 0.5), fill(brow, aa));
-    vec2 r = vec2(0.058, max(0.092 * open, lw));
-    col = mix(col, uInk, fill(ell(m, vec2(0.3, 0.07), r), aa));
+    vec2 r = vec2(0.058, max(0.092 * open, lw)) * (1.0 + 0.22 * uMood.z);
+    col = mix(col, uInk, fill(ell(m, vec2(0.3, 0.07 - 0.012 * uMood.x), r), aa));
   } else {
     // All values come from FACE_PARAMS (debug panel: Player → Face).
     vec2 c = vec2(F_eyeSpacing, F_eyeHeight);
@@ -1033,13 +1087,17 @@ void main() {
     float ct = cos(F_eyeTilt), st = sin(F_eyeTilt);
     vec2 me = c + mat2(ct, st, -st, ct) * (m - c);
     float d = open > 0.0 ? sell(me, c, r, F_eyeSquareness) : 1.0;
+    // Sad: heavy upper lids, lowest at the outer corners.
+    if (uMood.x > 0.0) d = max(d, m.y - (c.y + r.y * (1.0 - 0.7 * uMood.x) - 0.55 * uMood.x * (m.x - c.x)));
     white = fill(d, aa);
     col = mix(col, uWhite * mix(uLightCol, vec3(1.0), 0.55 - 0.25 * uNight), white);
     // Pupils share one look direction (not mirrored), so they never cross.
     vec2 lk = vec2(F_lookX, F_lookY) + uLook;
-    lk = clamp(lk, -max(r - vec2(F_pupilWidth, F_pupilTall * open) * 1.1, 0.0), max(r - vec2(F_pupilWidth, F_pupilTall * open) * 1.1, 0.0));
+    // (Frightened: the pupils shrink.)
+    vec2 pr = vec2(F_pupilWidth, F_pupilTall * open) * (1.0 - 0.35 * uMood.z);
+    lk = clamp(lk, -max(r - pr * 1.1, 0.0), max(r - pr * 1.1, 0.0));
     vec2 pc = vec2(sign(p.x) * c.x, c.y) + lk;
-    float pupil = ell(p, pc, vec2(F_pupilWidth, F_pupilTall * open));
+    float pupil = ell(p, pc, pr);
     col = mix(col, uInk, fill(max(pupil, d), aa));
     if (F_outline > 0.0) col = mix(col, uInk, fill(abs(d) - max(F_outline, aa * 0.5), aa));
     if (open <= 0.0) col = mix(col, uInk, fill(max(abs(p.y - c.y) - lw * 0.7, abs(m.x - c.x) - r.x * 0.85), aa));
@@ -1059,13 +1117,22 @@ void main() {
   float mhw = round ? F_mouthWidth : 0.205;
   float k = round ? F_mouthCurve : 0.9;
   float kc = round ? F_mouthCurl : 4.0;
+  // The grin gives way to how she feels: sad, a centred frown; set, a short
+  // flat line; frightened, it closes up to a small open "o".
+  float grin = 1.0 - clamp(uMood.x + uMood.z + uMood.w, 0.0, 1.0);
+  mcx = mcx * grin + 0.015 * uMood.w;
+  mhw = mhw * grin + 0.125 * uMood.x + 0.11 * uMood.w;
+  k = k * grin - 3.4 * uMood.x;
+  kc *= grin;
+  my += 0.03 * uMood.x;
   float x1 = mcx + mhw;
-  float dx = p.x - (mcx - 0.075);
+  float dx = p.x - (mcx - 0.075 * grin);
   float curl = max(0.0, p.x - (x1 - 0.08));
   float fy = my + k * dx * dx + kc * curl * curl;
   float slope = 2.0 * k * dx + 2.0 * kc * curl;
   float mouth = abs(p.y - fy) / sqrt(1.0 + slope * slope) - max(round ? F_mouthLine : 0.0088, aa * 0.5);
   mouth = max(mouth, abs(p.x - mcx) - mhw);
+  if (uMood.z > 0.0) mouth = min(mouth, ell(p, vec2(0.0, my), vec2(0.05, 0.062) * uMood.z));
   col = mix(col, uInk, fill(mouth, aa));
 
   if (!gl_FrontFacing) n = -n;
@@ -1428,5 +1495,275 @@ void main() {
     }
   }
   writeG(col, em, n, vView);
+}
+`;
+
+// ------------------------------------------------------------------ the giant
+
+// Landscape that walks: pebble boulders coloured by the terrain's own rule
+// stack (stone, turf on the tops, snow above a wavy line), with real conifers
+// on its shoulders. Boulders are instanced; the trees are plain meshes on its
+// bones. The caps are measured in each boulder's rest pose (aUp), so turf and
+// snow ride with the stone instead of sliding as it leans.
+// aPart = (seed, 1 = the head, turf line, snow line): lines are cap heights
+// in -1..1 (bottom to top of the boulder at rest), 9 = none.
+export const GIANT_VERT = /* glsl */ `
+in float aKind;
+in vec4 aPart;
+in vec3 aUp;
+out vec3 vN;
+out vec3 vView;
+out vec3 vObj;
+out vec3 vUnit;
+out float vKind;
+out float vCap;
+flat out vec4 vPart;
+void main() {
+#ifdef USE_INSTANCING
+  mat4 m = modelMatrix * instanceMatrix;
+#else
+  mat4 m = modelMatrix;
+#endif
+  mat3 m3 = mat3(m);
+  vec3 sc = vec3(length(m3[0]), length(m3[1]), length(m3[2]));
+  vUnit = position;
+  vObj = position * sc + aPart.x * 37.0;
+  vCap = dot(position, aUp) / max(length(aUp), 1e-4);
+  // Boulders are squashed spheres: normals need the inverse scale.
+  vN = normalize(m3 * (normal / (sc * sc)));
+  vKind = aKind;
+  vPart = aPart;
+  vec4 vp = viewMatrix * (m * vec4(position, 1.0));
+  vView = vp.xyz;
+  gl_Position = projectionMatrix * vp;
+}
+`;
+
+export const GIANT_FRAG = /* glsl */ `
+${COMMON}
+${GBUF_OUT}
+in vec3 vN;
+in vec3 vView;
+in vec3 vObj;
+in vec3 vUnit;
+in float vKind;
+in float vCap;
+flat in vec4 vPart;
+uniform vec3 cStone;
+uniform vec3 cTurf;
+uniform vec3 cMoss;
+uniform vec3 cSnow;
+uniform vec3 cFoliage;
+uniform vec3 cTrunk;
+uniform vec3 cInk;
+/** How much of its own (cold) colour survives the monochrome grade. */
+uniform float uKeep;
+/** Eyelids: 0 = wide open, 1 = shut. It lives at about half. */
+uniform float uLid;
+// The towers' and spirits' eyes: tall rounded rectangles, set high.
+const vec2 EYE_SIZE = vec2(0.13, 0.27);
+vec2 eyeUV(vec3 d, vec3 c) {
+  vec3 r = normalize(cross(vec3(0.0, 1.0, 0.0), c));
+  vec3 u = cross(c, r);
+  return vec2(dot(d, r), dot(d, u)) / EYE_SIZE;
+}
+float eyeR(vec2 q) {
+  vec2 a = abs(q);
+  return pow(pow(a.x, 5.0) + pow(a.y, 5.0), 0.2);
+}
+void main() {
+  vec3 n = normalize(vN);
+  int k = int(vKind + 0.5);
+  float dist = length(vView);
+  vec3 c;
+  float em = -uKeep;
+  bool unlit = false;
+  if (k == 0) c = cFoliage;
+  else if (k == 1) c = cTrunk;
+  else {
+    vec4 nz = texture(uNoise, vObj.xz / 46.0 + vObj.y / 71.0);
+    vec4 nz2 = texture(uNoise, vObj.xz / 11.0 - vObj.y / 17.0);
+    // Each pebble a slightly different stone.
+    c = cStone * (0.95 + 0.1 * fract(vPart.x * 7.31));
+    float edge = (nz.g - 0.5) * 0.34 + (nz2.r - 0.5) * 0.1;
+    if (vCap + edge > vPart.z) c = nz.b + (nz2.g - 0.5) * 0.3 > 0.56 ? cMoss : cTurf;
+    if (vCap + edge * 0.8 > vPart.w) { c = cSnow; em = -0.6; }
+    if (vPart.y > 0.5) {
+      vec3 d = normalize(vUnit);
+      if (d.z > 0.4) {
+        for (int i = 0; i < 2; i++) {
+          vec2 q = eyeUV(d, normalize(vec3(i == 0 ? -0.3 : 0.3, 0.2, 0.93)));
+          if (eyeR(q) < 1.0) {
+            // Heavy lids: stone drawn down over the eye, a line along the edge.
+            float lid = 1.0 - 2.0 * uLid;
+            c = q.y > lid ? cStone * 0.9 : cInk;
+            if (abs(q.y - lid) < 0.07) c = cInk;
+            if (q.y <= lid) { unlit = true; em = -0.85; }
+          }
+        }
+      }
+    }
+  }
+  vec3 band = toonLight(n);
+  // Far off it flattens like the far ranges: one tone, a painted card.
+  band = mix(band, mix(uMidCol, uLightCol, 0.6), smoothstep(350.0, 1300.0, dist));
+  writeG(unlit ? c : c * band, em, n, vView);
+}
+`;
+
+// ------------------------------------------------------------------ the dungeon (src/dungeon/)
+// A cave has no sun. Its light is pools: each glow lights what faces it in
+// two hard rings (near, nearer), and everything else is the shade tone. The
+// shell colours itself (floor, strata up the walls, ceiling); props bring
+// their own colour in aCol.
+
+export const DUNGEON_VERT = /* glsl */ `
+in vec3 aCol;
+out vec3 vN;
+out vec3 vView;
+out vec3 vWorld;
+out vec3 vCol;
+void main() {
+  vec4 w = modelMatrix * vec4(position, 1.0);
+  vWorld = w.xyz;
+  vN = normalize(mat3(modelMatrix) * normal);
+  vCol = aCol;
+  vec4 vp = viewMatrix * w;
+  vView = vp.xyz;
+  gl_Position = projectionMatrix * vp;
+}
+`;
+
+export const DUNGEON_GLOWS = 12;
+
+export const DUNGEON_FRAG = /* glsl */ `
+${COMMON}
+${GBUF_OUT}
+in vec3 vN;
+in vec3 vView;
+in vec3 vWorld;
+in vec3 vCol;
+// xyz = where, w = reach (negative: a warm light).
+uniform vec4 uGlows[${DUNGEON_GLOWS}];
+uniform int uGlowN;
+uniform vec3 uOrigin;
+uniform float uShell;
+uniform vec3 cFloor;
+uniform vec3 cFloor2;
+uniform vec3 cWallA;
+uniform vec3 cWallB;
+uniform vec3 cWallC;
+uniform vec3 cCeil;
+uniform vec3 cMark;
+uniform vec3 cWarm;
+uniform vec3 uFeet;
+uniform float uMark;
+uniform float uMarkOn;
+uniform vec3 cMarkDark;
+uniform float uGlint;
+void main() {
+  vec3 n = normalize(vN);
+  vec3 lp = vWorld - uOrigin;
+  float wob = texture(uNoise, vWorld.xz * 0.011).r;
+  float wob2 = texture(uNoise, vWorld.xz * 0.004 + 0.37).g;
+  vec3 base = vCol;
+  bool ground = false;
+  int mark = 0;
+  if (uShell > 0.5) {
+    if (n.y > 0.55) {
+      ground = true;
+      // Worn, paler patches on the floor, as the meadow has darker ones.
+      base = wob2 > 0.56 ? cFloor2 : cFloor;
+      // Where the arms take you back up: a dark round let into the well's floor,
+      // rimmed in pale stone that glows (brighter once the arms will come for you).
+      float r = length(lp.xz);
+      if (r < uMark) { base = cMarkDark; mark = 1; }
+      else if (r < uMark + 0.3) { base = cMark; mark = 2; }
+      else if (abs(r - uMark - 0.75) < 0.06) base = cMark;
+    } else if (n.y < -0.62) {
+      base = cCeil;
+    } else {
+      // Strata: flat bands up the wall, their edges wandering a little.
+      float h = lp.y + (wob - 0.5) * 2.6 + (wob2 - 0.5) * 5.0;
+      float s = fract(h / 7.5);
+      base = s < 0.36 ? cWallA : s < 0.5 ? cWallC : s < 0.86 ? cWallB : cWallC;
+    }
+  }
+  int level = 0;
+  float warm = 0.0;
+  for (int i = 0; i < ${DUNGEON_GLOWS}; i++) {
+    if (i >= uGlowN) break;
+    vec3 d = uGlows[i].xyz - vWorld;
+    float dist = length(d);
+    float k = dist / abs(uGlows[i].w) * (0.88 + 0.24 * wob);
+    if (k > 1.0 || dot(n, d) < -0.12 * dist) continue;
+    // The near ring is for what the light falls on from above: a glowcap's halo on a wall is one tone.
+    int lv = k < 0.52 && (n.y > 0.3 || i == 0 || uGlows[i].w < 0.0) ? 2 : 1;
+    if (uGlows[i].w < 0.0) warm = max(warm, float(lv));
+    level = max(level, lv);
+  }
+  // A boulder's top catches what light there is.
+  if (uShell < 0.5 && n.y > 0.62) level = max(level, 1);
+  vec3 col = base * (level == 2 ? uLightCol : level == 1 ? uMidCol : uShadeCol);
+  float em = 0.0;
+  if (warm > 0.5) {
+    col = base * (warm > 1.5 ? cWarm : mix(cWarm, uMidCol, 0.45));
+    em = -0.8;
+  }
+  if (mark == 1) col = base;
+  if (mark == 2) { col = base; em = mix(0.12, 0.42 + 0.1 * sin(uTime * 2.2), uMarkOn); }
+  // Something you can use (the rockfall, with a pick in your pack): the same glint as everywhere else.
+  if (uGlint > 0.0) {
+    // (Gentler than on the small things above ground: these are boulders, and it's dim.)
+    vec2 g = glintAmt(n, normalize(-vView), vWorld, uGlint * 0.5);
+    col = mix(col, mix(base, GLINT_COL, 0.6), max(g.x * 0.5, g.y * 0.6));
+  }
+  // Your shadow, a soft blob at your feet.
+  if (ground) {
+    vec2 f = (vWorld.xz - uFeet.xz) / max(0.2, 0.46 - 0.06 * (uFeet.y - vWorld.y));
+    if (dot(f, f) < 1.0 && abs(vWorld.y - uFeet.y) < 2.5) col *= vec3(0.8, 0.78, 0.88);
+  }
+  writeG(col, em, n, vView);
+}
+`;
+
+/** The ring's forcefield from underneath: the well's ceiling, and its light. */
+export const PORTAL_FRAG = /* glsl */ `
+${COMMON}
+${GBUF_OUT}
+in vec3 vN;
+in vec3 vView;
+in vec3 vWorld;
+in vec3 vCol;
+uniform vec3 uOrigin;
+uniform float uR;
+void main() {
+  vec2 p = (vWorld - uOrigin).xz;
+  float r = length(p) / uR;
+  float a = atan(p.y, p.x);
+  float swirl = step(0.5, fract(a * 0.477 - r * 2.2 + uTime * 0.07));
+  float ring = step(0.5, fract(r * 3.0 + uTime * 0.11));
+  vec3 col = mix(vec3(0.5, 0.43, 0.82), vec3(0.72, 0.66, 0.97), 0.55 * swirl + 0.25 * ring);
+  float lip = smoothstep(0.9, 0.94, r);
+  col = mix(col, vec3(0.93, 0.9, 1.0), lip);
+  writeG(col, 0.62 + 0.3 * lip, vec3(0.0, -1.0, 0.0), vView);
+}
+`;
+
+/** Still water: one flat tone, with a few pale streaks lying on it. */
+export const POOL_FRAG = /* glsl */ `
+${COMMON}
+${GBUF_OUT}
+in vec3 vN;
+in vec3 vView;
+in vec3 vWorld;
+in vec3 vCol;
+uniform vec3 cWater;
+uniform vec3 cStreak;
+void main() {
+  float s = texture(uNoise, vWorld.xz * vec2(0.012, 0.085) + vec2(uTime * 0.0035, 0.0)).r;
+  float t = texture(uNoise, vWorld.xz * vec2(0.03, 0.21) - vec2(uTime * 0.005, 0.2)).g;
+  vec3 col = mix(cWater, cStreak, step(0.63, s) * step(0.42, t));
+  writeG(col, -0.35, vec3(0.0, 1.0, 0.0), vView);
 }
 `;
