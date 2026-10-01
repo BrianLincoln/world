@@ -710,8 +710,9 @@ void main() {
 // Instanced creature parts (woffs, crows). Per-vertex colour (aCol.rgb) so a
 // whole creature body is one merged mesh; aCol.a tags where features are
 // painted: 1 = eyes (around uEyeOrigin), 2 = mouth (around uMouthOrigin),
-// 3 = a lamp that glows at night, 4 = glows in its own colour (brighter at night).
-// Per instance: instanceColor = tint, aEye = (lookX, lookY, lids, unused)
+// 3 = a lamp that glows at night, 4 = glows in its own colour (brighter at night),
+// 5 = fire (always bright).
+// Per instance: instanceColor = tint, aEye = (lookX, lookY, lids, iris)
 // where lids 1 = open, 0 = shut, -1 = happy arcs.
 
 export const CREATURE_VERT = /* glsl */ `
@@ -767,6 +768,13 @@ uniform vec3 uMouthW;
 /** Cheek blush: (yaw, pitch, radius x, radius y), mirrored; radius 0 = none. */
 uniform vec4 uBlush;
 uniform vec3 uBlushCol;
+/**
+ * Glossy eyes (> 0): no whites, the whole eye is the pupil colour with two
+ * shining glints (the kawaii look). Per instance, aEye.w picks an iris
+ * colour instead of ink, with a smaller ink pupil inside.
+ */
+uniform float uGloss;
+uniform vec3 uIris;
 uniform vec3 uGlow;
 /** Hearth-spirit warmth glow (0 = none): flattens shading and blooms. */
 uniform float uEmber;
@@ -816,7 +824,29 @@ void main() {
     vec2 me = uEyePos + mat2(ct, st, -st, ct) * (m - uEyePos);
     vec2 q = (me - uEyePos) / uEyeSize;
     float d = (length(q) - 1.0) * min(uEyeSize.x, uEyeSize.y);
-    if (lids > 0.02) {
+    if (lids > 0.02 && uGloss > 0.0) {
+      vec2 r = vec2(uEyeSize.x, uEyeSize.y * lids);
+      vec2 qq = (me - uEyePos) / r;
+      d = (length(qq) - 1.0) * min(r.x, r.y);
+      float e = fillE(d, aa);
+      vec2 lk = vEye.xy * uLookRange;
+      vec2 ec = vec2(sign(p.x) * uEyePos.x, uEyePos.y);
+      vec3 iris = mix(uInk, uIris * mix(uLightCol, vec3(1.0), 0.5), vEye.w);
+      col = mix(col, iris, e);
+      if (vEye.w > 0.0) {
+        vec2 pq = (p - ec - lk * 0.5) / (uPupil * vec2(1.0, max(lids, 0.2)));
+        col = mix(col, uInk, fillE(max((length(pq) - 1.0) * min(uPupil.x, uPupil.y), d), aa) * vEye.w);
+        col = mix(col, uInk, fillE(abs(d) - lw * 0.6, aa));
+      }
+      // Glints sit up and to the same side on both eyes (one light), and
+      // drift a little with the look.
+      vec2 g = (p - ec - lk * 0.3) / uEyeSize.x;
+      float g1 = length((g - vec2(0.3, 0.32 * lids)) / vec2(1.0, max(lids, 0.3))) - 0.3 * uGloss;
+      float g2 = length((g - vec2(-0.12, -0.1 * lids)) / vec2(1.0, max(lids, 0.3))) - 0.13 * uGloss;
+      float gl = fillE(min(g1, g2) * uEyeSize.x, aa) * e;
+      col = mix(col, uWhite * mix(uLightCol, vec3(1.0), 0.7), gl);
+      keep = mix(keep, 0.95, e);
+    } else if (lids > 0.02) {
       // Whites squash shut from the top and bottom.
       vec2 r = vec2(uEyeSize.x, uEyeSize.y * lids);
       vec2 qq = (me - uEyePos) / r;
@@ -857,6 +887,15 @@ void main() {
     // A lamp (bicycles): lit warm at night, like the cabin windows.
     col = mix(col, uGlow, uNight);
     glow = uNight;
+  } else if (tag > 4.5) {
+    // Fire (a drakitten's rocket): hot and bright day or night, and bright
+    // enough to keep its colour through the monochrome grade. Toon bands by
+    // how squarely it faces you, so from any side it reads as a white-hot
+    // core inside a coloured flame.
+    float face = abs(dot(n, normalize(-vView)));
+    col = face > 0.82 ? vec3(1.0, 0.97, 0.9) : face > 0.5 ? mix(vCol.rgb, vec3(1.0, 0.95, 0.85), 0.5) : vCol.rgb;
+    col *= 1.1;
+    glow = 0.85;
   } else if (tag > 3.5) {
     // Bioluminescence (glimmers, moonmoths, lantern hares, storm sparks):
     // its own colour, self-lit; a soft shine by day, a real glow after dark.

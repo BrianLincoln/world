@@ -1250,7 +1250,9 @@ asked for as far as possible). Everything below is a first pass for review.
   (fading in past 250-700 m) with eye markers: lit = white-hot eyes in a big
   ember glow, unlit = two dim embers. Targets: lit towers it can see, plus
   home (from home: every lit tower). Aim snaps to a target within 0.2 rad
-  and eases the view onto it; it glows brighter with a pulsing ring, and the
+  and eases the view onto it, leaning in a little (the FOV narrows 42° → 33°,
+  `AIM_ZOOM`, easing in over ~1 s and back out on losing it or flying) so it
+  reads as a destination; it glows brighter with a pulsing ring, and the
   badge becomes a new `ember` icon (E / click flies). No target, or looking
   well down, the badge is the down arrow (out). Esc is always out.
 - **Stage 4, ember flight**: you become a small ember on a cubic arc (up and
@@ -1696,3 +1698,325 @@ asked for as far as possible). Everything below is a first pass for review.
   leave you pushed out the near side if you stop inside. The hollows'
   walls are steep enough to facet at far LODs. Feel passes on every mount
   still wanted; sound for the new tricks.
+
+## The far-off pointer and the spirit's earshot (2026-09-30)
+
+Playtest: walk far from the cabin at the start and you still heard the
+spirit, with no idea where or what it was. Two changes:
+
+- `story/pointer.ts`: an HTML arrowhead (icons' fill and ink), off screen on
+  an inset edge pointing out, on screen over the target pointing down. It
+  only shows after 15 s away (`DELAY`), so the opening walk down the path,
+  and stepping off for a look round, stay unprompted. The goal comes from
+  `Journey.guide()`, which falls back to `Story.guide()`. It's the spirit for
+  most steps (it's always where the job is), the tower door at a lock, and
+  the cabin while the stable waits. It's null while gathering, resting, or
+  herding without a creature on a lead. It's hidden during cutscenes and
+  the tower view.
+- The spirit's sounds (the `Spirit` sound hook, and every chirp in story.ts
+  and journey.ts through `Story.chirp`) fade with distance: full within 50 m, silent by
+  110 m (`EARSHOT`, via `Story.voice` and `Sfx.level`). A hard 45 m cutoff
+  was tried first, but it silenced the hint where the spirit stops at its
+  yard edge (45 m from the cabin) and calls you back from further out.
+- The journey's gift and lock stages had no idle hint (story.ts only hints
+  while it has the spirit, and the journey borrows it), so at a tower the
+  spirit just pointed silently. `Journey.nudge` now runs the same hint (walk
+  over, tug your coat, call, point) after 20 s without progress while you're
+  within 40 m. The enter stages are left to the tower ushering.
+- At an open tower (journey `enter1`/`enter2`) the spirit ushers you in
+  rather than just pointing. `Journey.byDoorway` stands it just outside the
+  doorway's edge (0.3 sx + 0.9 m across, stepped out of rock), and
+  `Want.usher` (the doorway) drives a cycle in spirit.ts (`USHER_CYCLE`).
+  Turned between you and the opening, it holds the near arm out to you, sweeps
+  it round into the doorway with a hop, holds it, then drops it. It chirps on
+  the first three sweeps only. The 'up' bubble stays. `scripts/usher.mjs`
+  shoots it.
+- Journey checkpoints: a reload used to put everyone at the cabin doorstep
+  with the saved stage, so at a tower stage the spirit walked all the way
+  there. The saved stage is now the checkpoint. `Journey.resume()` (after
+  the spawn and bike reset in main.ts) handles each stage. `ride1` starts
+  at the cabin with the spirit by its bike up the path. `ride2`, `lock*` and
+  `enter*` put you 7 m in front of that tower with the gift bike, and the
+  spirit's bike where the ride ended. `wait`, `gift` and `done` spawn as
+  before. A ride always starts over from its start line.
+- At the start of a ride, if there's no free bike within 30 m of you (you
+  walked there, or yours is back home), the spirit conjures one for you
+  (`gift`, which moves it from wherever it was) before it gets on its own.
+- `Journey.jump` now saves the story too, so `?journey=` survives a reload.
+- Phase 3 foreman: the stable's gather and build steps anchor the spirit at
+  `stableBase` (`Stable.base`, the middle bay, 0.8 m in from the open
+  front). `enterStep` sets `Want.fetch` on stable gather steps. That's the
+  nearest world rock or tree from its spot (`Story.source()`, re-picked every
+  3 s as things get taken; trees fall back to `woods`). On build steps it
+  sets `Want.present`. spirit.ts runs a `FOREMAN_CYCLE` (5.2 s): fetch =
+  point at it with a hop and chirp, then face you and beckon; present =
+  both arms wide, looking at the sketch. It chirps on the first three
+  cycles only. The idle hint for these steps is `Spirit.nudge()`: a call and
+  the cycle restarted, plus a glint boost. It no longer walks to you and
+  tugs you to a tree. Gather steps in this phase also show the sketch of
+  the parts they're for. Phase 1 is unchanged.
+
+## The lasso lesson and the first creature's welcome (2026-09-30)
+
+Playtest: with the stable built and the lasso taken, the spirit only stood
+at the gate pointing, leaving you to work out catching on your own. Once the
+first creature was home it cheered from where it stood, still looked like it
+wanted something (the herd step's `lead` defaulted on, so it beckoned and
+called whenever you were off hunting), then walked straight to the hearth
+and sat down. Now:
+
+- **A new `catch` step kind** (phase1.ts, before `herd`): done once a creature
+  that doesn't live here yet is on your lead (`Story.leadingHome`). `herd`
+  now names its `catch` step. With nothing on a lead for 2.5 s (you let go),
+  it goes back to catching, like build falls back to gather.
+- **The lesson's creature** (herd.ts `lesson()`): during `catch` a single
+  calm stelk is spawned 19-28 m out from the gate, in a ±70° arc, on flat
+  dry ground, clear of the fence and cabin, within the spirit's yard. It's
+  spawned out of view if possible, and anywhere after ~8 s of trying. It's
+  respawned if it's lost (despawned or more than 90 m off). `flock.data.calm`
+  (stelk.ts) shrinks its scare radius to 3 m (6 m if you run or ride up) and
+  its flee to ~10 m, and stops it wandering off to new grass. That makes it
+  catchable for small kids. Calm is cleared once the lesson's over.
+  `Story.quarry` is a creature you let go of if there is one (walk up and
+  lead it again), otherwise the lesson's stelk.
+- **The pantomime** (`Want.lasso`, `LASSO_CYCLE` 4.8 s in spirit.ts): the
+  spirit leads you out and stops 10 m short of the creature, on the gate
+  side, never inside the fence. There it turns to the creature and whirls
+  a little rope loop overhead (a torus in the rope's colour, on its right
+  hand; the other arm is out for balance). It flings the loop in a lob that
+  opens out, drops over the creature's head and fades. Then it turns to you
+  with a hop ("now you"). It chirps on the first three throws only. The
+  bubble shows the lasso. The pointer leads to the spirit, as for any step.
+- **Leading it home**: the herd step now ushers (`Want.usher` = the gate),
+  stood at `gateOut`, with `lead: false`, so no more beckon-and-call while
+  you're away. The gate also swings open for the spirit whenever it's
+  walking (`Spirit.travelling`), so it never walks through a shut gate.
+- **Praise** (`onDone: 'praise'`, `Spirit.praise()`): it runs over to you
+  (from within 30 m), then does a big jump with two spins, arms up,
+  sparkles, three hearts (`hooks.hearts` → `Story.hearts`) and a coo, and
+  keeps its happy eyes for a few seconds. It replaces the welcome's own
+  celebrate.
+- **Then quiet**: the `ranch` rest step in phase 3 doesn't chirp on entry.
+  The spirit stands at `fenceView` (just outside the fence) watching the
+  pasture for 30 s, then potters as usual (yard spots, gate, stable front,
+  and the fire now and then). Later arrivals still get the plain celebrate.
+- Bug fixed on the way: act timings tested `t - dt < k && t >= k`, which can
+  miss `k` entirely to float rounding (it did for the hearts at 0.5 s at a
+  steady 1/30 s step). Acts now compare against the time before the frame
+  (`passed(k)`). Pat coos used the same test and are fixed too.
+- `scripts/lesson.mjs` shoots it all (the twirl, throw, ushering, cheer,
+  afterwards). `scripts/stablerun.mjs` now lassoes the quarry the spirit
+  shows it instead of spawning its own.
+
+### Riding before it's yours
+- Changed my mind on "led but not ridden": a lassoed creature can be ridden
+  bareback at once (`Mobs.mountable` no longer needs `stabled`). `stabled`
+  now just means *yours*: the saddle (already drawn only when `stabled`),
+  coming home, and not going wild when left behind.
+- Riding one counts as leading it home: `Story.leadingHome` and the gate's
+  opener list (`gateFor`) include a ridden, unstabled mob, so the herd step
+  doesn't fall back to "catch one" while you're on it.
+- Ridden in through the gate, the welcome skips the hop, the `species.reset`
+  and the new pasture spot (the rider's brain is in charge; `reset` would
+  clear a beast's ride state `gs`). Climbing off resets it as usual.
+
+## Drakitten (rocket cat)
+
+- **`mobs/drakitten.ts`**, a `Beast` flier. Kawaii proportions (head as wide
+  as the body), two-piece dragon wings (arm + hand; the arm's Euler order
+  is `ZYX` so folded wings stand on edge along the flank), hook tail, tabby
+  stripes as separate shell batches shown only on the tabby coat.
+- **Base changes (`beast.ts`)**: a `Draw` can take a per-mob `THREE.Color`
+  instead of the coat tint (wing membranes, flame, whiskers per coat);
+  `d.s.coat` records the coat index (-1 rare); fliers' resting is the
+  overridable `resting()`; `findSpot` is protected.
+- **Shader**: creature looks can have `gloss` eyes (no whites, pupil-colour
+  eye with two glints; `aEye.w` swaps ink for `iris`, used for the dark
+  coat's gold eyes) and paint tag 5 = fire (always emissive 0.85, toon
+  bands by facing so it reads as a white-hot core in any view).
+- **Rocket (`movement.ts`)**: `fly.rocket {speed, climb, burn, cool}`. In
+  the air Shift burns instead of sprinting; thrust drives along the heading
+  even with the stick released; heat builds over `burn` s, then it's
+  overheated until below 0.35. Flight collision is sub-stepped (0.5 m).
+  `GallopState.rocket/heat/overheat`, fx `ignite`/`fizzle` (`rocketWork`
+  in `main.ts`: smoke burst, sputter). Smoke trail: `MobCtx.trail` →
+  `smokePuffs` (140 pool).
+- **Arrivals**: non-initial herds pick a visible spot 50-170 m off and
+  start 260 m beyond it out of view; they cruise high in a V at ~40 m/s,
+  then flip butt-down (`upr`) and descend no faster than a 5 m/s² burn can
+  stop, landing on pads 2.4 m apart. A herd moving on (`walk`) hops the
+  same way. Flock mode `arrive` until all are down.
+- **TEMP**: `main.ts` lands a crew in the cabin's front yard 2.5 s after
+  load (`?drak=0` off; skipped with `capture`). `__ow.drakArrive()`.
+  Remove before shipping.
+- **Script**: `scripts/drakitten.mjs <dir> [land|look|ride]`.
+- **Next**: rocket sound; a heat gauge; a perf pass with several crews in view.
+- **Wurm: snake steering and wall climbing (`movement.ts`).** New trait
+  `snap`: Snake controls, relative not camera-relative. `GallopState.crawl`
+  (W or a turn sets it, S clears it) keeps it going with no stick held; a
+  press of stick x past 0.5 (edge on `stickX`) turns the heading exactly
+  90°. Accel 45 / brake 60 m/s², so `turn`/`gather`/`brake` don't apply.
+  Speeds 6.5 / 11.5. With the mouse idle `main.ts` swings the camera behind
+  (rate 5) so left/right stay the wurm's. On a wall a turn reverses
+  up/down. The body follows the head's recorded trail by arc length, so a
+  turn shows as a right-angle kink running down the body. Trail bug fixed
+  on the way: it used to lay a point only when the head moved more than
+  `TRAIL_STEP` in one frame, so below ~7 m/s trail[0] just dragged along
+  and the tail cut straight across to a stale point; now points are laid
+  every `TRAIL_STEP` from the last one laid. Climbing: new
+  `WorldQuery.climbTop` (chunk cabins via `Colliders.cabinTop`, the story
+  cabin via its `surface` with no step limit). A grounded clinger pushing
+  into something whose top is more than 0.5 m above its feet enters
+  `GallopState.wall = 1` (`climbWall`): xz held at the face, the stick
+  into the wall climbs, away climbs down, sideways shuffles along it; it
+  pulls over onto whatever is `radius` past the lip once level with it.
+  Walking off a drop of more than 1.2 m enters `wall = -1` (nose down the
+  face) instead of snapping to the ground. The wurm pitches its head along
+  its own trail when ridden (vertical on a wall) and counter-tilts the
+  seat by 55% of the saddle segment's pitch so the rider hugs it rather
+  than lying flat. Trees and landmarks aren't climbable (no top to crest).
+
+## Direction change: the giant (2026-09-30, docs only, no game code yet)
+
+The owner changed the story and core loop. `DESIGN.md` has the direction
+("The giant" sections), the open questions and a numbered list of conflicts
+with what's built. This entry is the how: what the code already gives us,
+what's missing, and the first slice. Nothing below is built.
+
+### Docs vs code, found while reading everything
+- `README.md` said "There are no goals; just walk" and listed sandbox keys
+  only. The game has had a story since phase 1. Fixed.
+- `DESIGN.md` said "ten more creatures" and "the thirteen"; `beasts.ts`
+  makes eleven (the drakitten), so fourteen with floof, crow and stelk.
+  Fixed. `CLAUDE.md` said "ten wilder kinds" too. Fixed.
+- `docs/WORKFLOW.md` "Where to pick up" listed chimney smoke and colliders,
+  both long done, and its URL params left out `story`, `fresh`, `journey`,
+  `stable`, `mobs`, `bikes`, `drak`, `debug`. Fixed.
+- This file's early sections ("No goals", "No collisions" under known
+  issues, the "What I'd do next" list) are stale but they're the log as it
+  was written. Left alone; later entries supersede them.
+- `mobs/types.ts`'s header comment says a mob can be ridden only once
+  stabled. `Mobs.mountable` takes any tamed mob (bareback riding). The
+  comment is stale; the code and DESIGN.md agree.
+- **The drakitten TEMP demo is still live** (`drakDemoT` in `main.ts`): a
+  crew lands in the yard 2.5 s after every load unless `?drak=0` or
+  `capture`. It would ship with a deploy.
+- A lot of this is uncommitted in the working tree (drakitten, the lasso
+  lesson, the pointer, the wurm's snake steering, the usher).
+
+### What the new direction can reuse
+- **Scripted events with the camera taken:** `cinematic()` on beacons,
+  journey and story feed one camera slot in `main.ts` with an eased blend;
+  `busy` freezes input. The giant event is another provider.
+- **Guaranteed, seeded set pieces:** `storySite.ts` (start area),
+  `towers.ts` (a network grown so it always connects), `WorldGen.route`
+  (A* paths that avoid water, the cabin, POIs). The trail and dungeon sites
+  are the same kind of thing: authored order, seeded placement.
+- **Terrain that story shapes:** the brook and the pasture are carved or
+  eased into `height()`; `storyBlock` keeps scatter off the set. Footprints
+  can press into `height()` the same way.
+- **Props removed without rebuilding chunks:** the harvest flag texture
+  hides any tree or rock by cell; `Story.knockTree` lays a tree flat.
+  Flattened trees in a footprint are that.
+- **Locked building:** `build.ts` (sketch, slots, the snap-in pop) with the
+  cabin and stable as `Buildable`s, phases as step tables (`PhaseDef`).
+  Village growth and the giant's cabin are more tables and more parts.
+- **Pictograms:** `icons.ts` bubbles and badges. **Gestures:** the spirit's
+  `Want`s (point, usher, fetch, present, lasso pantomime).
+- **Ability keys:** `MountTrait` (`diver`, `cling`, `thicket`, `mudder`,
+  `ability: phase | burrow | charge`), fliers, tag-4 glow.
+- **A walk-in room with its own collider and camera clamp:** the tower's
+  door boulder (`towerRock.ts`, `Beacons.clampCamera`). The only interior
+  precedent besides the story cabin's cutaway.
+- **Effects:** `Puffs` (opaque toon dust and steam), emissive + bloom for
+  warm glow, ground contact discs (`uMobShadow`), the ground shadow mask.
+
+### What's missing
+- A village (worldgen room for it, small houses, several spirits at once:
+  `Spirit` is a single instance today, lent between story and journey).
+- The guide off its 45 m leash (`Spirit.range`).
+- Any dungeon: room kit, room colliders, a camera that works under a roof,
+  pushables, water levels, darkness, the backward generator.
+- Phase- and burrow-proof walls, and a no-fly rule or lids.
+- An emote wheel (input, touch UI, rig poses) and creature reactions.
+- A small-gap creature.
+- Carry limits and upgrades (nothing caps logs or stones today; the lasso
+  is a fixed 24 m).
+
+### The giant, technically (a plan to check against screenshots)
+- **Body:** a skeleton of Object3Ds posed in code and drawn as instanced
+  parts, like the creatures, but in the *terrain's* look rather than the
+  creature shader: boulder meshes for limbs, a turf back, real conifer
+  instances on the shoulders, the snow rule on its head. It should write
+  the G-buffer as terrain does (normal length 1.0) **so the layer-fog pass
+  treats it as a ridge** and flattens it to one tone at distance. That is
+  the single most important trick for scale; if it's tagged as a prop it
+  will fog per pixel and look like a toy.
+- **Far LOD:** past the chunk range, a silhouette card in the overlay
+  scene, as the tower camera draws far towers.
+- **The warm load:** emissive ≥ 0.5 so the grade and the night can't cool
+  it, feeding bloom. Spirits in hand are instanced glow blobs.
+- **Gait:** slow (a step every ~2 s), foot IK onto `height()`, heavy
+  follow-through in the shoulder trees (they already sway by instance).
+  Each footfall emits: a `Puffs` ring, a camera dip (the landing spring in
+  `orbitCamera`), a thump with distance falloff, and harvest-flag knocks
+  for trees under the sole.
+- **Its shadow:** the ground shadow mask only reaches 180 m and takes prop
+  casters; the giant needs its own cheap term in the terrain shader (a few
+  capsules projected along the key light), which is also what darkens the
+  yard before the reveal.
+- **Footprints:** a seeded list of prints along the authored trail
+  (`WorldGen`, pure, same in workers). Each presses a sole-shaped hollow
+  with a raised rim into `height()` (only near the trail, so the cost stays
+  off ordinary chunks), blocks scatter inside, and marks the terrain's
+  per-vertex biome data so the fragment shader paints the warm floor with a
+  hard edge. Steam is one `Puffs` pool on the nearest few. Night glow is a
+  low emissive on the floor. Warmth (0..1 by distance along the trail from
+  the giant) drives colour, steam and what grows in it.
+- **Budget:** the giant must fit the frame budget while a village's worth
+  of debris is flying. Measure with the perf script before polishing.
+- **Verify the way everything else is:** a `scripts/giant.mjs` that
+  frame-steps the event and shoots each beat, plus far, dusk and night
+  shots of the giant on the skyline and of a trail going over a hill,
+  compared against `/inspo` 1, 3 and 4.
+
+### Giant slice 1 (agreed with the owner; start here)
+The smash, the taking and the footprint trail, ending at a sealed dungeon
+entrance. **The dungeon is not in this slice.** DESIGN.md has the player's
+view ("Giant slice 1" under Player Sequence), the look brief ("The giant:
+how it has to look") and the owner's answers to the conflicts. Build in
+this order, and show the owner screenshots at the end of each step before
+going on; the look is the point.
+1. **The giant on the skyline, standing and walking, at three distances
+   and three times of day.** No story. If this isn't beautiful nothing else
+   matters, and it proves the fog-layer trick above.
+2. **Footprints:** six prints over a rise near the cabin, fresh to cool,
+   day and night.
+3. **A minimal village:** a few intact spirit houses near the cabin, each
+   with a spirit (`Spirit` is a single instance today). Size, count and
+   whether the start site needs more room are not decided: propose, with
+   shots, and ask.
+4. **The scripted event,** fired once the hearth is lit (the end of phase
+   1 as built): the tells, the reveal, the wade through the *other* houses
+   (the house you repaired is not smashed), the taking, the guide missed,
+   the giant leaving. Camera taken, input off, under about 40 s.
+5. **The trail** from the village to a seeded spot some way off, ending at
+   a dungeon entrance sealed by a translucent forcefield (alpha only exists
+   in the overlay pass; see `story/overlay.ts`). The guide tries it and
+   can't open it. That's the end of the slice.
+6. **A script** (`scripts/giant.mjs`) that frame-steps the event and
+   shoots each beat, plus perf with the event running.
+
+Decided and affecting this slice: the giant is cold, not an ice giant; the
+guide will ride in the rucksack and become the direction pointer, replacing
+`story/pointer.ts` (how it points is proposed in DESIGN.md, not yet agreed;
+not required for this slice).
+
+Not decided, so ask rather than guess: how the giant carries the spirits;
+what happens to phases 2 and 3 (bike, towers, stable) in the new order
+beyond "the giant comes right after the hearth"; whether the smashed
+houses stay wrecked; what opens the forcefield.
+
+Later slices: the dungeon (its own enclosed scene, big rooms, tight
+camera, first one gated by the bog hag's dive), rescue and return, village
+growth, the emote wheel, side content, the finale.

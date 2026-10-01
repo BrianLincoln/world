@@ -61,6 +61,8 @@ const WALK_SLOPE = 1.15;
 const STEP_UP = 0.5, BODY_H = 1.7;
 /** Aim snaps to a lit tower within this angle of the middle of the view (rad). */
 const AIM_CONE = 0.2;
+/** The head view's field of view (deg), and how far it narrows onto a tower you're aimed at. */
+const VIEW_FOV = 42, AIM_ZOOM = 9;
 const RES = new THREE.Vector2();
 /** Being slurped in and out (s). */
 const IN_REACH = 0.3, IN_PULL = 0.45, IN_RISE = 0.85;
@@ -793,10 +795,12 @@ export class Beacons {
   }
 
   /** While you're the head (or rising into it / dropping out), where the camera is and looks. */
-  viewCam(): { pos: THREE.Vector3; at: THREE.Vector3 } | null {
+  viewCam(): { pos: THREE.Vector3; at: THREE.Vector3; fov: number } | null {
     const s = this.slurp;
     if (!s || (s.phase !== 'rise' && s.phase !== 'view' && s.phase !== 'fly')) return null;
-    if (s.phase === 'fly') return this.flyCam(s);
+    // Aimed at a tower, the view leans in on it a little: that's somewhere you can go.
+    const fov = VIEW_FOV - AIM_ZOOM * THREE.MathUtils.smoothstep(this.zoomK, 0, 1);
+    if (s.phase === 'fly') return { ...this.flyCam(s), fov };
     const t = s.tower, h = t.head;
     // You are the head: it turns all the way round with your look, and the
     // eye rides round with it, just in front of the face.
@@ -816,7 +820,7 @@ export class Beacons {
     this.camPos.y = THREE.MathUtils.lerp(from.y, eye.y, Math.pow(k, 0.7));
     const doorLook = new THREE.Vector3(t.door.x, t.door.y, t.door.z);
     this.camAt.lerpVectors(doorLook, eye.clone().add(look.multiplyScalar(10)), k);
-    return { pos: this.camPos, at: this.camAt };
+    return { pos: this.camPos, at: this.camAt, fov };
   }
 
   // ------------------------------------------------------------ frame
@@ -1530,6 +1534,7 @@ export class Beacons {
     // Walk into the room of a lit tower, well in, and it takes you up.
     if (!this.slurp && !this.free && near && this.lit.has(near.id) && mode === 'walk' && grounded && near.id !== this.disarmed && this.inRoom(near, b.pos.x, b.pos.y, b.pos.z, 0.55)) {
       this.slurp = { tower: near, phase: 'reach', t: 0, from: b.pos.clone(), camFrom: new THREE.Vector3() };
+      this.zoomK = 0;
       this.d.sfx.whoosh();
     }
     const s = this.slurp;
@@ -1543,6 +1548,8 @@ export class Beacons {
     const high = new THREE.Vector3(db.x, db.y + db.sy * 0.72, db.z);
     const chest = b.pos.clone().setY(b.pos.y + 1.0);
     let hands = 0; // how far the arms reach down (0..1)
+    const zoomTo = s.phase === 'view' && this.aim ? 1 : 0;
+    this.zoomK += (zoomTo - this.zoomK) * (1 - Math.exp(-(zoomTo > this.zoomK ? 2.2 : 3.5) * dt));
     if (s.phase === 'reach') {
       hands = 1 - Math.pow(1 - Math.min(1, s.t / IN_REACH), 3);
       if (s.t >= IN_REACH) { s.phase = 'pull'; s.t = 0; s.from.copy(b.pos); this.d.setMode('carried'); }
@@ -1590,6 +1597,8 @@ export class Beacons {
   aim: Tower | null = null;
   /** How aimed-at each tower is (eased), for its glow. */
   private aimK = new Map<number, number>();
+  /** How far the head view has leaned in on the aimed tower (eased, 0..1). */
+  private zoomK = 0;
   private view: TowerView;
   private viewK = 0;
   private ember: THREE.Mesh;

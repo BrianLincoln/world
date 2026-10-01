@@ -41,6 +41,8 @@ export class Stable implements Buildable {
   readonly gateOut = new THREE.Vector3();
   readonly gateIn = new THREE.Vector3();
   readonly front = new THREE.Vector3();
+  /** The spirit's spot while it's built: in the middle bay, near the open front. */
+  readonly base = new THREE.Vector3();
   readonly tallyPos = new THREE.Vector3();
 
   constructor(site: StorySite, private puffs: (at: THREE.Vector3, n: number, size: number, spread: number) => void) {
@@ -114,6 +116,8 @@ export class Stable implements Buildable {
     this.gateIn.copy(this.local(0, PASTURE_D / 2 - 2.2, 0));
     this.front.copy(hw(new THREE.Vector3(0, 0, hd + 2.6)));
     this.front.y = this.groundAt(this.front.x, this.front.z);
+    this.base.copy(hw(new THREE.Vector3(0, 0, hd - 0.8)));
+    this.base.y = this.groundAt(this.base.x, this.base.z);
     this.root.traverse((o) => { o.matrixWorldAutoUpdate = true; });
   }
 

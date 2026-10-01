@@ -6,7 +6,7 @@ import type { Tower } from '../world/towers';
 import type { WorldGen } from '../world/worldgen';
 import type { Sfx } from './audio';
 import type { BeaconEvent, Beacons } from './beacons';
-import type { Story } from './story';
+import type { Guide, Story } from './story';
 import { makeSolidMaterial } from '../gfx/materials';
 import { Puffs } from '../gfx/puffs';
 
@@ -27,7 +27,8 @@ import { Puffs } from '../gfx/puffs';
 //           (the stable, see phase3.ts) begins.
 //
 // From `ride1` on, the gift bike always turns up again outside the cabin.
-// Which stage you're at is saved per seed.
+// Which stage you're at is saved per seed, and is the checkpoint a reload
+// resumes from (resume()).
 
 export type Stage = 'wait' | 'gift' | 'ride1' | 'lock1' | 'enter1' | 'ride2' | 'lock2' | 'enter2' | 'done';
 export const STAGES: Stage[] = ['wait', 'gift', 'ride1', 'lock1', 'enter1', 'ride2', 'lock2', 'enter2', 'done'];
@@ -54,6 +55,8 @@ const CABIN_R = 340;
 const LITTLE = 0.55, BESIDE = 1.5;
 /** How far ahead of you it likes to ride, and how far before it stops to wait (m). */
 const AHEAD = 10, WAIT_AT = 24;
+/** Seconds at a stage without progress before the spirit comes and tugs your coat (as at home), and within what distance (m). */
+const HINT_AFTER = 20, HINT_NEAR = 40;
 
 /** Rides the spirit's bike along a path, keeping a little ahead of you. */
 class Leader {
@@ -151,6 +154,7 @@ export class Journey {
   private atCabin = false;
   private turn = 0;
   private callT = 0;
+  private hintT = 0;
   private tmp = new THREE.Vector3();
 
   constructor(private d: JourneyDeps) {
@@ -188,6 +192,7 @@ export class Journey {
     if (s === this.stage) return;
     this.stage = s;
     this.t = 0;
+    this.hintT = 0;
     this.save();
   }
 
@@ -195,6 +200,7 @@ export class Journey {
 
   private event(e: BeaconEvent, t: Tower) {
     if (e === 'arrived') this.towerBike(t);
+    this.hintT = 0;
     const target = this.stage === 'lock1' || this.stage === 'enter1' ? this.home : this.stage === 'lock2' || this.stage === 'enter2' ? this.next : null;
     if (!target || t.id !== target.id) {
       if (e === 'arrived' && this.stage === 'enter2') this.setStage('done');
@@ -266,6 +272,7 @@ export class Journey {
         if (this.conj) break;
         // Then it points at it: yours.
         this.want(at, k.pos, 'point', 'bike');
+        this.nudge(dt, at, k.pos);
         if (riding === k) {
           this.spirit.celebrate();
           this.setStage('ride1');
@@ -300,13 +307,16 @@ export class Journey {
         if (this.d.beacons.isLit(t.id) && !this.d.beacons.busy) { this.setStage(this.stage === 'lock1' ? 'enter1' : 'enter2'); break; }
         // Beside the doorway, pointing at the lock.
         this.want(this.besideDoor(t, 3.2), this.lockAt(t), 'point', 'pick');
+        this.nudge(dt, this.besideDoor(t, 3.2), this.lockAt(t));
         break;
       }
       case 'enter1':
       case 'enter2': {
         const t = this.stage === 'enter1' ? this.home : this.next;
         if (this.d.beacons.busy && !this.d.beacons.inside) break; // the tower's spirit is still climbing
-        this.want(this.besideDoor(t, 3.6), new THREE.Vector3(t.door.x, t.door.y, t.door.z), 'point', 'up');
+        // Right at the side of the doorway, ushering you in.
+        const d = new THREE.Vector3(t.door.x, t.door.y, t.door.z);
+        this.want(this.byDoorway(t), d, 'point', 'up', d);
         break;
       }
       case 'done': {
@@ -323,6 +333,27 @@ export class Journey {
       }
     }
     if (this.sBike && this.stage !== 'ride1' && this.stage !== 'ride2') this.parkSpiritBike(dt);
+  }
+
+  /**
+   * Where the task is (story/pointer.ts): the spirit while it's giving the
+   * bike or leading a ride, the tower's door at a lock, home when the stable
+   * is waiting; otherwise the house's own steps.
+   */
+  guide(leading: boolean): Guide | null {
+    const story = this.d.story;
+    switch (this.stage) {
+      case 'gift': case 'ride1': case 'ride2': return { at: this.spirit.pos, near: 35 };
+      case 'lock1': case 'enter1': case 'lock2': case 'enter2': {
+        const t = this.stage === 'lock1' || this.stage === 'enter1' ? this.home : this.next;
+        const g = t.door.ground;
+        return { at: new THREE.Vector3(g.x, g.y, g.z), near: 45 };
+      }
+      case 'done':
+        if (story.lent) return null;
+        if (story.stableReady) { const st = this.d.gen.story; return { at: new THREE.Vector3(st.x, this.d.gen.height(st.x, st.z), st.z), near: 35 }; }
+    }
+    return story.guide(leading);
   }
 
   /** The gift shot is running: hands off, the camera is the spirit's. */
@@ -355,13 +386,49 @@ export class Journey {
     return { pos, at };
   }
 
-  private want(at: THREE.Vector3, face: THREE.Vector3 | null, pose: 'point' | 'stand', icon: 'bike' | 'pick' | 'up' | null) {
+  private want(at: THREE.Vector3, face: THREE.Vector3 | null, pose: 'point' | 'stand', icon: 'bike' | 'pick' | 'up' | null, usher?: THREE.Vector3) {
     const sp = this.spirit;
     // Far off (you took another way, or flew): it catches up out of sight.
     if (sp.pos.distanceTo(at) > 60 && sp.pos.distanceTo(this.d.body.pos) > 40) sp.teleport(at);
     const w = sp.want;
-    if (w.at.distanceTo(at) > 0.5 || w.icon !== icon || w.pose !== pose) sp.want = { at, face, pose, icon, lead: false };
+    if (w.at.distanceTo(at) > 0.5 || w.icon !== icon || w.pose !== pose || !w.usher !== !usher) sp.want = { at, face, pose, icon, lead: false, usher };
     else w.face = face;
+  }
+
+  /**
+   * Just to the side of tower t's doorway (the same side as besideDoor),
+   * close in against the rock, where an arm swept round points into the
+   * opening. Cached per tower (it steps out until it's clear of rock).
+   */
+  private byDoorway(t: Tower) {
+    if (this.doorSpot?.id === t.id) return this.doorSpot.p;
+    const fx = Math.sin(t.yaw), fz = Math.cos(t.yaw);
+    const bo = t.boulders[1];
+    // The doorway's half width is 0.3 sx (DOOR_SIZE in HEAD_FRAG).
+    const lat = 0.3 * bo.sx + 0.9;
+    const p = new THREE.Vector3(t.door.x + fz * lat + fx * 0.6, 0, t.door.z - fx * lat + fz * 0.6);
+    const q = new THREE.Vector3();
+    for (let i = 0; i < 20; i++) {
+      p.y = this.d.gen.height(p.x, p.z);
+      if (!this.d.beacons.solidAt(q.copy(p).setY(p.y + 0.3)) && !this.d.beacons.solidAt(q.setY(p.y + 0.8))) break;
+      p.x += fx * 0.3;
+      p.z += fz * 0.3;
+    }
+    this.doorSpot = { id: t.id, p };
+    return p;
+  }
+  private doorSpot: { id: number; p: THREE.Vector3 } | null = null;
+
+  /**
+   * Nothing happening for a while with you nearby: the spirit comes over,
+   * tugs your coat toward `at` and points at `face`, calling (the house's
+   * hint, story.ts). Further off, the pointer does the asking.
+   */
+  private nudge(dt: number, at: THREE.Vector3, face: THREE.Vector3) {
+    const sp = this.spirit;
+    if (sp.busy || this.d.beacons.busy || sp.pos.distanceTo(this.d.body.pos) > HINT_NEAR) { this.hintT = 0; return; }
+    this.hintT += dt;
+    if (this.hintT > HINT_AFTER) { this.hintT = 0; sp.hint(at, face); }
   }
 
   /** A spot beside tower t's doorway (to your right as you face it), `out` m out from the rock. */
@@ -409,6 +476,13 @@ export class Journey {
    * the bike, climb on. Returns true while that's still going on.
    */
   private board(dt: number, line: [number, number][]): boolean {
+    // No bike for you here (you walked, or yours is back at the cabin): it
+    // pulls one out of its heart for you first, beside the start of the path.
+    if (!this.conj && !this.d.cycling() && !this.bikeNear() && this.spirit.pos.distanceTo(this.d.body.pos) < 30) {
+      const L = new Leader(line, this.d.gen, 9), p = L.at(9), h = L.heading;
+      const k = this.d.bikes.placeNear('gift', p.x - Math.cos(h) * BESIDE, p.z + Math.sin(h) * BESIDE, h, 0, 5);
+      this.conjure(k, 1);
+    }
     if (!this.sBike) {
       // Its own little bike, out of its heart too, just along the path.
       this.parkAtPath(line, 6);
@@ -420,8 +494,7 @@ export class Journey {
     if (this.boardT < 0.05 && this.stage === 'ride2') this.spirit.greet();
     if (this.spirit.busy) return true;
     // To the bike's left, where you climb on.
-    const at = k.pos.clone().add(new THREE.Vector3(Math.cos(k.heading), 0, -Math.sin(k.heading)).multiplyScalar(-0.7));
-    at.y = this.d.gen.height(at.x, at.z);
+    const at = this.byBike();
     this.want(at, k.pos, 'stand', null);
     if (this.spirit.pos.distanceTo(at) > 0.8 && this.boardT < 12) return true;
     // On it.
@@ -434,8 +507,15 @@ export class Journey {
     k.ridden = true;
     this.holding = true;
     this.boardT = 0;
-    this.d.sfx.chirp(true);
+    this.d.story.chirp(true);
     this.poseRide(0, this.d.body.pos);
+    return false;
+  }
+
+  /** A bike you could climb on within 30 m of you. */
+  private bikeNear() {
+    const b = this.d.body.pos;
+    for (const [key, k] of this.d.bikes.bikes) if (key !== 'spirit' && !k.ridden && k.pos.distanceTo(b) < 30) return true;
     return false;
   }
 
@@ -479,7 +559,7 @@ export class Journey {
     this.spirit.riding = { seat, heading: h, look };
     if (L.waitT > 1.5) {
       this.callT -= dt;
-      if (this.callT <= 0) { this.callT = 3.5; this.d.sfx.chirp(false); }
+      if (this.callT <= 0) { this.callT = 3.5; this.d.story.chirp(false); }
     }
   }
 
@@ -576,7 +656,7 @@ export class Journey {
     this.conj = { bike: k, t: 0, to: k.pos.clone(), heading: k.heading, size };
     k.scale = 0.001;
     this.spirit.celebrate();
-    this.d.sfx.chirp(true);
+    this.d.story.chirp(true);
   }
 
   private updateConjure(dt: number) {
@@ -610,7 +690,7 @@ export class Journey {
       r = 0.4 * (1 - 0.2 * e);
     } else if (t - dt < 1.85) {
       this.sparks.emit(land, 24, 0.12, 3.2);
-      this.d.sfx.chirp(false);
+      this.d.story.chirp(false);
     }
     if (r > 0) {
       this.ball.visible = true;
@@ -644,7 +724,7 @@ export class Journey {
   /** Jump straight to a stage (the panel, ?journey=): finishes phase 1 and sets the world up for it. */
   jump(s: Stage) {
     const story = this.d.story, bz = this.d.beacons;
-    if (!story.done) { story.debugJump('home'); story.done = true; }
+    if (!story.done) { story.debugJump('home'); story.done = true; story.save(); }
     const idx = STAGES.indexOf(s);
     bz.setLit(this.home.id, idx > STAGES.indexOf('lock1'));
     bz.setLit(this.next.id, idx > STAGES.indexOf('lock2'));
@@ -676,13 +756,59 @@ export class Journey {
       this.d.mount(gift);
     } else {
       const t = s === 'lock1' || s === 'enter1' ? this.home : this.next;
-      const [x, z] = front(t, 7);
-      this.d.bikes.move(gift, x + Math.cos(t.yaw) * 3, z - Math.sin(t.yaw) * 3, t.yaw + Math.PI);
-      this.d.place(x, z, t.yaw + Math.PI);
+      this.atTower(t, gift);
       this.spirit.teleport(this.besideDoor(t, 3.2));
       if (s === 'done') this.goHome();
     }
     this.save();
+  }
+
+  /** Stand the explorer in front of tower t, facing it, the gift bike beside them. */
+  private atTower(t: Tower, gift: Bike) {
+    const d = 7, x = t.door.ground.x + Math.sin(t.yaw) * d, z = t.door.ground.z + Math.cos(t.yaw) * d;
+    this.d.bikes.move(gift, x + Math.cos(t.yaw) * 3, z - Math.sin(t.yaw) * 3, t.yaw + Math.PI);
+    this.d.place(x, z, t.yaw + Math.PI);
+  }
+
+  /** The spirit's little bike parked where `line` ends (the tower it rode to). */
+  private parkAtEnd(line: [number, number][]) {
+    this.parkAtPath(line, Math.max(0, new Leader(line, this.d.gen).L - 1));
+  }
+
+  /** The spirit standing at its bike's left, ready to climb on. */
+  private byBike() {
+    const k = this.sBike!;
+    const at = k.pos.clone().add(new THREE.Vector3(Math.cos(k.heading), 0, -Math.sin(k.heading)).multiplyScalar(-0.7));
+    at.y = this.d.gen.height(at.x, at.z);
+    return at;
+  }
+
+  /**
+   * Back after a reload mid-journey: the stage is the checkpoint, and you,
+   * the spirit and both bikes start where it happens rather than everyone
+   * at the cabin (the spirit would walk all the way to a tower). A ride
+   * starts over from its start line, the spirit already by its bike;
+   * at a tower you're in front of it with your bike, the spirit by the
+   * door and its bike where the ride ended. Call after the spawn and the
+   * bike reset (which would undo it).
+   */
+  resume() {
+    const s = this.stage, j = this.d.gen.journey;
+    if (!this.d.story.done || s === 'wait' || s === 'gift' || s === 'done') return;
+    this.leader = null;
+    this.spirit.riding = null;
+    this.boardT = 0;
+    const gift = this.gift();
+    if (s === 'ride1') {
+      // At the cabin (the usual doorstep), your bike at its spot; its own a little way up the path.
+      this.parkAtPath(j.toHome, 6);
+      this.spirit.teleport(this.byBike());
+      return;
+    }
+    const t = s === 'lock1' || s === 'enter1' || s === 'ride2' ? this.home : this.next;
+    this.atTower(t, gift);
+    this.parkAtEnd(t === this.home ? j.toHome : j.toNext);
+    this.spirit.teleport(s === 'ride2' ? this.byBike() : this.besideDoor(t, 3.2));
   }
 
   // ------------------------------------------------------------ save
@@ -693,7 +819,7 @@ export class Journey {
     try {
       const s = localStorage.getItem(this.key()) as Stage | null;
       if (s && STAGES.includes(s)) {
-        // Mid-ride, pick up again from the start of that ride.
+        // Where you pick up again is resume()'s (a ride starts over).
         this.stage = s;
       }
     } catch { /* ignore */ }

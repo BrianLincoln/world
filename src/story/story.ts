@@ -54,6 +54,11 @@ const yields = (hit: number, hp: number) => (hp - hit) % 2 === 0;
 /** How close to the idle spirit the pat is offered, and where you stand to do it (m). */
 const PAT_NEAR = 1.7;
 const PAT_STAND = 0.7;
+/**
+ * How far the spirit's voice carries (m): full up to the first, fading out by
+ * the second. Further off, the pointer (story/pointer.ts) does the calling.
+ */
+const EARSHOT = [50, 110] as const;
 
 interface Target {
   tag: TargetTag;
@@ -87,6 +92,9 @@ interface SaveData {
   done: boolean;
   hour: number;
 }
+
+/** Where the next task is, and how close counts as there (the pointer hides). */
+export interface Guide { at: THREE.Vector3; near: number }
 
 interface Token { bb: Billboard; from: THREE.Vector3; part: PartId; slot: number; t: number; res: Resource }
 
@@ -150,6 +158,12 @@ export class Story {
   hasLasso = false;
   /** How many creatures live at the stable (set by the herd, see story/herd.ts). */
   herdCount: () => number = () => 0;
+  /** The creature the spirit shows you how to catch (herd.ts keeps one grazing near the pasture). */
+  quarry: () => THREE.Vector3 | null = () => null;
+  /** You've a creature on your lead that doesn't live here yet. */
+  leadingHome: () => boolean = () => false;
+  /** How long the herd step has gone with nothing on a lead (s). */
+  private looseT = 0;
   /** The lasso's gift: the spirit pulls it out of its heart (-1 = not running). */
   private giftT = -1;
   private giftBall = new THREE.Mesh(new THREE.IcosahedronGeometry(1, 3), makeSolidMaterial('#ffcf73', 0.8));
@@ -170,6 +184,8 @@ export class Story {
   done = false;
   private idleT = 0;
   private boostT = 0;
+  /** Till the spirit looks again for the nearest rock / tree to point out. */
+  private sourceT = 0;
   private swingT = -1;
   /** Walking in to a tree / rock picked from out of arm's length (s), -1 when not. */
   private stepIn = -1;
@@ -282,12 +298,16 @@ export class Story {
       this.anchors.set('plotSpot', P(-pa.end * 3, 2));
       this.anchors.set('stableSite', stb.local(pa.end * (PASTURE_W / 2 - 2.5), 0, 1.5));
       this.anchors.set('stableFront', stb.front.clone());
+      this.anchors.set('stableBase', stb.base.clone());
       this.anchors.set('roofTop', stb.parts.sroof.centre.clone());
       this.anchors.set('gate', stb.gate.clone().setY(stb.gate.y + 0.8));
       this.anchors.set('gateIn', stb.gateIn.clone());
       // Outside the gate, off to the side so it isn't in your way.
       this.anchors.set('gateOut', P(3.2, PASTURE_D / 2 + 2.4));
       this.anchors.set('fenceSide', P(-PASTURE_W / 4, PASTURE_D / 2, 0.8));
+      // Just outside the fence, looking in over the grass.
+      this.anchors.set('fenceView', P(-PASTURE_W / 4, PASTURE_D / 2 + 1.3));
+      this.anchors.set('pasture', P(0, 0, 0.6));
       this.anchors.set('lasso', this.lasso!.pos.clone());
       this.anchors.set('woods', this.findWoods(gen));
     }
@@ -307,8 +327,9 @@ export class Story {
     this.spirit = new Spirit({
       ground: (x, z) => this.floorAt(x, z),
       route: (a, b) => this.route(a, b),
-      sound: (n) => { if (n === 'excited') d.sfx.chirp(true); else d.sfx[n](); },
+      sound: (n) => this.voice(() => { if (n === 'excited') d.sfx.chirp(true); else d.sfx[n](); }),
       sparkle: (at, n) => this.sparkles.emit(at, n, 0.07, 1.4, undefined, { life: 0.6, rise: 0.4, up: 1.4 }),
+      hearts: (at) => this.hearts(at),
     }, this.anchors.get('hearthSpot')!.clone());
     this.spirit.home = new THREE.Vector3(site.x, 0, site.z);
     this.group.add(this.spirit.group);
@@ -469,7 +490,7 @@ export class Story {
       if (this.spirit.arrived && near && !this.lent) {
         this.giftT = 0;
         this.spirit.celebrate();
-        this.d.sfx.chirp(true);
+        this.chirp(true);
       }
       return;
     }
@@ -498,7 +519,7 @@ export class Story {
       r = 0.36 * (1 - 0.3 * e);
     } else {
       this.sparkles.emit(land, 22, 0.1, 3, undefined, { life: 0.7, rise: 0.4, up: 1.6 });
-      this.d.sfx.chirp(false);
+      this.chirp(false);
       l.show();
       this.dirty = true;
       return;
@@ -854,20 +875,35 @@ export class Story {
       lead: st.lead ?? st.kind !== 'meet',
       settled: st.kind === 'rest',
     };
+    // Building the stable, it runs the job from its spot (phase3.ts).
+    if (this.phase.id === 'stable' && st.kind === 'gather') sp.want.fetch = this.source() ?? sp.want.face ?? undefined;
+    if (this.phase.id === 'stable' && st.kind === 'build') sp.want.present = true;
+    this.sourceT = 3;
+    // A creature on your lead: it waits beside the gate and waves you both in.
+    if (st.kind === 'herd' && this.stable) sp.want.usher = this.stable.gate;
+    this.looseT = 0;
     if (st.kind === 'build') for (const p of st.parts) this.owner(p).showSketch(p);
+    // The stable's sketch is up from the first ask, so the spirit stands in it.
+    if (this.phase.id === 'stable' && st.kind === 'gather') for (const p of st.for) this.owner(p).showSketch(p);
     if (this.phase.id === 'stable') this.stable?.showStakes();
     if (restoring) {
       sp.teleport(this.anchor(st.anchor));
       sp.warmth = sp.warmthTarget = st.warmth;
     }
     if (st.kind === 'rest') this.pot = { out: 0, t: 0, go: 0, stay: restoring ? 20 : 45 };
-    if (st.kind === 'rest' && !restoring) this.d.sfx.chirp(true);
+    if (st.kind === 'rest' && !restoring && this.phase.id === 'stable') {
+      // The first creature's home and it's said so (praise): now it just
+      // stands at the fence a while, watching the newcomer, then potters.
+      sp.want = { at: this.anchor('fenceView').clone(), face: this.anchor('pasture'), pose: 'stand', icon: null, lead: false, settled: true };
+      this.pot.stay = 30;
+    } else if (st.kind === 'rest' && !restoring) this.chirp(true);
   }
 
   private advance() {
     const st = this.step;
     if (st.onDone === 'celebrate') this.spirit.celebrate();
     if (st.onDone === 'greet') this.spirit.greet(this.anchor('doorstep'));
+    if (st.onDone === 'praise') this.spirit.praise();
     this.stepIndex = Math.min(this.stepIndex + 1, this.phase.steps.length - 1);
     this.enterStep();
     this.dirty = true;
@@ -902,6 +938,24 @@ export class Story {
     return parts.reduce((a, p) => a + this.owner(p).remaining(p), 0) - this.tokens.filter((t) => parts.includes(t.part)).length;
   }
 
+  /** How many more of the step's resource it wants: still to gather, or
+   *  still to build in (null for steps that aren't about a resource). */
+  private stillWanted(): number | null {
+    const st = this.step;
+    if (st.kind === 'gather') return Math.max(0, this.remainingFor(st.for) - this.inv[st.resource] - this.pending(st.resource));
+    if (st.kind === 'build') return Math.max(0, this.remainingFor(st.parts));
+    return null;
+  }
+
+  /** How many of the step's resource the whole step takes (null for steps
+   *  that aren't about a resource). */
+  private taskTotal(): number | null {
+    const st = this.step;
+    if (st.kind === 'gather') return st.for.reduce((a, p) => a + this.owner(p).remaining(p), 0);
+    if (st.kind === 'build') return st.parts.reduce((a, p) => a + this.part(p).need, 0);
+    return null;
+  }
+
   /** 0..1 progress through the current step (for the spirit's warming). */
   private progress(): number {
     const st = this.step;
@@ -925,6 +979,7 @@ export class Story {
       case 'pickup': return st.item === 'axe' ? this.hasAxe : st.item === 'pick' ? this.hasPick : this.hasLasso;
       case 'gather': return this.inv[st.resource] + this.pending(st.resource) >= this.remainingFor(st.for) && this.pending(st.resource) === 0;
       case 'build': return st.parts.every((id) => this.part(id).state === 'built');
+      case 'catch': return this.leadingHome();
       case 'herd': return this.herdCount() >= st.count;
       case 'light': return this.cabin.lit;
       case 'rest': return false;
@@ -1173,7 +1228,7 @@ export class Story {
     this.worldBreaks = this.worldBreaks.filter((w) => { if (w.rock.broken && !w.rock.group.visible) { this.group.remove(w.rock.group); return false; } return true; });
     this.regrowth(dt);
     this.cabin.update(dt, d.camera.position, body.pos);
-    this.stable?.update(dt, d.camera.position, [body.pos, ...this.gateFor]);
+    this.stable?.update(dt, d.camera.position, [body.pos, ...this.gateFor, ...(this.spirit.travelling ? [this.spirit.pos] : [])]);
     this.lasso?.update(dt);
     this.updateGift(dt);
     this.updateFloaters(dt);
@@ -1200,6 +1255,17 @@ export class Story {
       this.hud.set(this.inv, this.inv.logs + this.inv.stones > 0, this.opened());
       this.hud.action(this.ramReady ? 'antlers' : this.external, input.held('Mouse0') || input.held('KeyE'), input, 'tap');
       return;
+    }
+
+    // The bubble's tally: how many the task takes (it goes once there are
+    // no more to fetch, or to bring in).
+    this.spirit.want.count = this.stillWanted();
+    this.spirit.want.total = this.taskTotal();
+    // What it points out at goes as you take it: keep to the nearest.
+    if (this.spirit.want.fetch && (this.sourceT -= dt) <= 0) {
+      this.sourceT = 3;
+      const at = this.source();
+      if (at) this.spirit.want.fetch = at;
     }
 
     // Interaction: everything is the one action (E, a click, or the badge
@@ -1330,6 +1396,12 @@ export class Story {
       this.advance();
     }
     if (st.kind === 'rest' && !this.lent) this.restLogic(dt);
+    if (st.kind === 'catch' && !this.lent) this.lesson();
+    // Let go of the lead (or lost it): back to catching one.
+    if (st.kind === 'herd' && !this.complete()) {
+      this.looseT = this.leadingHome() ? 0 : this.looseT + dt;
+      if (this.looseT > 2.5) this.goToStep(st.catch);
+    }
 
     // The spirit warms as things come back to life.
     const next = this.phase.steps[Math.min(this.stepIndex + 1, this.phase.steps.length - 1)];
@@ -1353,7 +1425,14 @@ export class Story {
 
     // Hints: ~20 s without anything useful and the spirit comes to fetch you.
     this.idleT += dt;
-    if (st.hint === 'tug' && !this.lent && this.idleT > HINT_AFTER && !this.spirit.busy && this.stepT > 4) {
+    if (st.hint === 'tug' && !this.lent && this.idleT > HINT_AFTER && !this.spirit.busy && this.stepT > 4 && (this.spirit.want.fetch || this.spirit.want.present)) {
+      // Building the stable, it doesn't come and walk you to a tree: it
+      // calls from its spot and runs through the job again, and what to
+      // take glints (the pointer brings you back from far off).
+      this.spirit.nudge();
+      this.boostT = 8;
+      this.idleT = 0;
+    } else if (st.hint === 'tug' && !this.lent && this.idleT > HINT_AFTER && !this.spirit.busy && this.stepT > 4) {
       const h = this.hintTarget();
       if (h) {
         this.spirit.hint(h.at, h.face);
@@ -1449,6 +1528,21 @@ export class Story {
     this.chipPuffs.emit(at, 4, 0.05, 2.8, undefined, { life: 0.5, rise: -9, drag: 1.5, up: 2.5 });
   }
 
+  /**
+   * Where the stuff for a stable gather step is to be had, seen from the
+   * spirit's spot: the nearest rock, or the nearest tree (else the woods).
+   */
+  private source(): THREE.Vector3 | null {
+    const st = this.step;
+    if (st.kind !== 'gather') return null;
+    const a = this.anchor(st.anchor), c = this.d.colliders;
+    for (const r of [30, 60, 110]) {
+      const h = st.targets === 'tree' ? c.nearestTree(a.x, a.z, r) : c.nearestRock(a.x, a.z, r, Infinity);
+      if (h) return new THREE.Vector3(h.x, this.d.gen.height(h.x, h.z) + (st.targets === 'tree' ? 1.5 : 0.5), h.z);
+    }
+    return st.targets === 'tree' ? this.anchor('woods') : null;
+  }
+
   private hintTarget(): { at: THREE.Vector3; face: THREE.Vector3 | null } | null {
     const st = this.step;
     const sp = this.spirit.want;
@@ -1478,6 +1572,32 @@ export class Story {
     if (st.kind === 'light' && this.d.env.hour < st.readyAt) return null;
     if (st.kind === 'build' && this.inv[st.resource] === 0) return null;
     return { at: sp.at, face: sp.face };
+  }
+
+  /**
+   * The lasso lesson: the spirit goes out toward the creature (leading you,
+   * waiting if you fall behind), stops a good way short so it isn't
+   * spooked, and shows you how: it whirls a loop and flings it at it
+   * (spirit.ts). It follows if the creature wanders, but never leaves the
+   * yard.
+   */
+  private lesson() {
+    const sp = this.spirit;
+    const q = this.quarry();
+    const gate = this.anchor('gateOut');
+    if (!q) {
+      if (sp.want.lasso) sp.want = { at: gate.clone(), face: this.anchor('gate'), pose: 'stand', icon: 'lasso', lead: true };
+      return;
+    }
+    const away = new THREE.Vector3(gate.x - q.x, 0, gate.z - q.z);
+    const at = away.length() < 11 ? gate.clone() : new THREE.Vector3(q.x, 0, q.z).add(away.setLength(10));
+    sp.keepHome(at);
+    // Never inside the fence (the way out to it can cut a corner).
+    if (this.stable?.inside(at.x, at.z, -1.5)) at.copy(gate);
+    at.y = this.d.gen.height(at.x, at.z);
+    if (!sp.want.lasso || sp.want.at.distanceTo(at) > 3) {
+      sp.want = { at, face: q, pose: 'stand', icon: 'lasso', lead: true, lasso: q };
+    }
   }
 
   private restLogic(dt: number) {
@@ -1665,6 +1785,38 @@ export class Story {
     this.hud.dispose();
   }
 
+  /** How loud the spirit is from where you are (0 = out of earshot). */
+  get earshot() { return 1 - THREE.MathUtils.smoothstep(this.spirit.pos.distanceTo(this.d.body.pos), EARSHOT[0], EARSHOT[1]); }
+
+  /** A sound in the spirit's voice, quieter the further off it is. */
+  voice(play: () => void) {
+    const k = this.earshot;
+    if (k <= 0.02) return;
+    this.d.sfx.level = k;
+    play();
+    this.d.sfx.level = 1;
+  }
+
+  /** A chirp from the spirit. */
+  chirp(excited = false) { this.voice(() => this.d.sfx.chirp(excited)); }
+
+  /**
+   * Where the task is, for the far-off pointer (story/pointer.ts): the
+   * spirit, which always waits at (or leads you to) the next job. Nothing
+   * while you're gathering (trees and rocks are anywhere), resting, or out
+   * catching a creature; leading one, the pasture gate.
+   */
+  guide(leading: boolean): Guide | null {
+    if (!this.d.active || this.lent) return null;
+    const st = this.step;
+    switch (st.kind) {
+      case 'gather': case 'rest': return null;
+      case 'herd': return leading && this.stable ? { at: this.stable.gate, near: 30 } : null;
+      case 'meet': return { at: this.spirit.pos, near: Math.max(st.radius, 30) };
+      default: return { at: this.spirit.pos, near: 30 };
+    }
+  }
+
   // ------------------------------------------------------------ test hooks
 
   /** Where the explorer should head next (for scripted playthroughs). */
@@ -1676,6 +1828,7 @@ export class Story {
       case 'meet': return this.anchor(st.near);
       case 'pickup': return st.item === 'axe' ? this.axe.pos : st.item === 'pick' ? this.pick.pos : this.lasso!.pos;
       case 'herd': return null;
+      case 'catch': return this.quarry();
       case 'gather': {
         if (this.phaseIndex === 0) return st.targets === 'tree' ? nearest(this.trees.filter((t) => t.standing)) : nearest(this.rocks.filter((r) => !r.broken));
         const h = this.hintTarget();

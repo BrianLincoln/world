@@ -18,6 +18,7 @@ import type { Mob, MobCtx } from './mobs/types';
 import { Floof } from './mobs/floof';
 import { Stelk } from './mobs/stelk';
 import { makeBeasts } from './mobs/beasts';
+import type { Drakitten } from './mobs/drakitten';
 import type { BeastData } from './mobs/beast';
 import { OrbitCamera } from './player/orbitCamera';
 import { DebugUI } from './ui/debug';
@@ -29,6 +30,7 @@ import { Beacons } from './story/beacons';
 import { Journey, STAGES, type Stage } from './story/journey';
 import { Herd } from './story/herd';
 import { PHASE3 } from './story/phase3';
+import { Pointer } from './story/pointer';
 import { Colliders } from './world/colliders';
 import { Terrain } from './world/terrain';
 import { SEA_LEVEL, WorldGen } from './world/worldgen';
@@ -75,6 +77,7 @@ const world: WorldQuery = {
     beacons?.collide(pos, vel, r);
   },
   ramp: (x, z, r, maxRise) => colliders.ramp(x, z, r, maxRise),
+  climbTop: (x, z, r) => Math.max(colliders.cabinTop(x, z, r), storyHost?.story?.surface(x, z, Infinity, r, Infinity) ?? -Infinity),
   wetland: (x, z) => gen.bog(x, z),
   forest: (x, z) => gen.forestDensity(x, z, gen.height(x, z)),
   landmarks: (pos, vel, r) => beacons?.collide(pos, vel, r),
@@ -93,7 +96,10 @@ scene.add(puffs.group);
 const mudPuffs = new Puffs('#8a7458', 40, 0, 0.6);
 const glowPuffs = new Puffs('#c9f4ff', 30, 0.8, 0.9);
 const sparkPuffs = new Puffs('#d6f0ff', 30, 0.9, 0.9);
-scene.add(mudPuffs.group, glowPuffs.group, sparkPuffs.group);
+// Drakitten rocket smoke: round storybook puffs that hang in the air a while.
+const smokePuffs = new Puffs('#f3ece3', 140, 0, 0.45);
+scene.add(mudPuffs.group, glowPuffs.group, sparkPuffs.group, smokePuffs.group);
+const SMOKE = { life: 1.1, rise: 0.35, drag: 2.2, up: 0.15 };
 rig.onPuff = (at, n, size, spread) => puffs.emit(at, n, size, spread);
 
 // Creatures: wild flocks, the lasso, leads and riding.
@@ -117,6 +123,7 @@ const mobCtx: MobCtx = {
     beacons?.collide(pos, vel, r);
   },
   puff: (at, n, size, spread) => puffs.emit(at, n, size, spread),
+  trail: (at, size) => smokePuffs.emit(at, 1, size, 0.35, undefined, SMOKE),
 };
 let riding: Mob | null = null;
 const hand = new THREE.Vector3();
@@ -134,7 +141,9 @@ function mount(m: Mob) {
   mobs.mount(m);
   // The newer mounts read their ride state (abilities) off the mode.
   const gs = rideMode.gallopState;
-  gs.phase = gs.burrow = gs.charge = gs.static = gs.depth = gs.cool = 0;
+  gs.phase = gs.burrow = gs.charge = gs.static = gs.depth = gs.cool = gs.rocket = gs.heat = gs.wall = gs.stickX = 0;
+  gs.overheat = false;
+  gs.crawl = false;
   if (m.data && 'gs' in m.data) (m.data as BeastData).gs = gs;
   player.set('ride', ctx);
   riding = m;
@@ -154,7 +163,7 @@ function dismount() {
   riding = null;
   if (burrowHid) { rig.root.visible = true; burrowHid = false; }
   const gs = rideMode.gallopState;
-  gs.phase = gs.burrow = gs.charge = 0;
+  gs.phase = gs.burrow = gs.charge = gs.rocket = gs.wall = 0;
   mobs.dismount(m);
   player.set('walk', ctx);
 }
@@ -291,6 +300,8 @@ function makeJourney() {
   if (journey) scene.add(journey.group);
   makeHerd();
 }
+/** The far-off pointer to the next task (story only). */
+const pointer = storyHost.active ? new Pointer() : null;
 // Phase 3: the creatures living at the stable (story only).
 let herd = null as Herd | null;
 function makeHerd() {
@@ -298,7 +309,7 @@ function makeHerd() {
   herd = storyHost!.active && story?.stable ? new Herd({ mobs, story, sfx: storyHost!.sfx, saveKey: seedText, camera, ctx: mobCtx, puffs: (at, n, size, spread) => puffs.emit(at, n, size, spread) }) : null;
   if (story) story.herdCount = () => herd?.count ?? 0;
   // In the story the lasso is the spirit's gift, and a creature is only
-  // rideable once it's been brought home to the stable.
+  // yours (saddled, and it comes home) once it's been brought to the stable.
   mobs.rules.stable = !!storyHost!.active;
 }
 if (params.has('fresh')) try { localStorage.removeItem(`fjellheim.herd.${seedText}`); } catch { /* ignore */ }
@@ -387,6 +398,8 @@ if (params.has('dist')) orbit.targetDistance = parseFloat(params.get('dist')!);
 const ctx: MoveContext = { input: input.state(), camYaw: 0, camPitch: 0, dt: 0, world };
 // ?journey=<step>: straight to a phase 2 step (after the spawn and the bike reset, which would undo it).
 if (params.get('journey') && STAGES.includes(params.get('journey') as Stage)) journey?.jump(params.get('journey') as Stage);
+// Otherwise, mid-journey: back at the stage's checkpoint (a tower, the start of a ride).
+else if (!params.has('x')) journey?.resume();
 // ?stable=<step>: straight to a phase 3 step.
 if (params.get('stable')) stableJump(params.get('stable')!);
 if (params.get('mode') === 'fly') {
@@ -414,6 +427,7 @@ function setSeed(s: string) {
   towerDebug.setGen(gen);
   beacons.setGen(gen, s);
   makeJourney();
+  journey?.resume();
   const u = new URL(location.href);
   u.searchParams.set('seed', s);
   history.replaceState(null, '', u);
@@ -681,6 +695,12 @@ function frame(ts?: number) {
       if (ev.type === 'bump') orbit.bump(Math.min(1.5, ev.impact * 0.1));
     }
     beastWork(riding, dt);
+    // A snake steerer turns in right angles: with the mouse idle the camera
+    // swings round behind it, so left and right stay its left and right.
+    if (riding.species.mount?.trait?.snap && lookIdle > 0.5 && !rideMode.gallopState.wall) {
+      const d = Math.atan2(Math.sin(body.heading + Math.PI - orbit.yaw), Math.cos(body.heading + Math.PI - orbit.yaw));
+      orbit.yaw += d * (1 - Math.exp(-5 * dt));
+    }
     // A gallop kicks up dust behind.
     const gs = rideMode.gallopState;
     if ((riding.species.name === 'stelk' || (riding.species.verb && !riding.species.mount.fly)) && body.grounded && gs.wet < 0.5 && gs.speed > 12 && gs.burrow <= 0) {
@@ -719,6 +739,7 @@ function frame(ts?: number) {
   mudPuffs.update(dt);
   glowPuffs.update(dt);
   sparkPuffs.update(dt);
+  smokePuffs.update(dt);
   if (storyHost?.story) {
     storyHost.story.external = beacons.action(mode);
     // No pats in the middle of a cutscene.
@@ -726,6 +747,11 @@ function frame(ts?: number) {
   }
   storyHost?.story?.update(dt, input, mode);
   journey?.update(dt);
+  // Far from the task: a small arrowhead shows the way.
+  if (pointer && storyHost?.story) {
+    const g = journey ? journey.guide(mobs.leading) : storyHost.story.guide(mobs.leading);
+    pointer.update(dt, camera, body.pos, g, !beacons.busy && !beacons.inside && !journey?.busy && !storyBusy);
+  }
   // Patting the spirit: from behind, the explorer's back hides it all, so
   // with the mouse idle the camera eases round to the patting side.
   const patYaw = storyHost?.story?.patCamYaw ?? null;
@@ -799,7 +825,7 @@ function frame(ts?: number) {
   if (vc) {
     camera.position.copy(vc.pos);
     camera.lookAt(vc.at);
-    camera.fov = 42;
+    camera.fov = vc.fov;
     camera.updateProjectionMatrix();
     camera.updateMatrixWorld();
   }
@@ -833,6 +859,12 @@ function frame(ts?: number) {
       `${player.current.name} · ${p.x.toFixed(0)}, ${p.y.toFixed(0)}, ${p.z.toFixed(0)} · ${env.hour.toFixed(1)}h · seed ${seedText}\n` +
       `creatures ${mobs.stats.drawn}/${mobs.stats.mobs} drawn · ${mobs.stats.flocks} flocks · ${mobs.tamed.length} tamed · bikes ${bikes.stats.drawn}/${bikes.stats.bikes}`;
   });
+  // TEMP (testing the drakittens): a crew rockets in and lands in front of
+  // you a moment after the world's up. ?drak=0 turns it off.
+  if (drakDemoT >= 0 && !terrain.busy && (drakDemoT += dt) > 2.5) {
+    drakDemoT = -1;
+    drakArrive(16);
+  }
   if (veil && !terrain.busy && ++readyFrames > 10) {
     veil.classList.add('gone');
     setTimeout(() => veil?.remove(), 1000);
@@ -901,6 +933,7 @@ function beastWork(m: Mob, dt: number) {
   const gs = rideMode.gallopState;
   const b = player.body;
   const sp = m.species.mount;
+  if (sp.fly?.rocket) rocketWork(m, dt);
   if (!sp.trait) return;
   trickDir.set(Math.sin(b.heading), 0, Math.cos(b.heading));
   const behind = v3.set(b.pos.x - trickDir.x * m.species.radius, b.pos.y + 0.2, b.pos.z - trickDir.z * m.species.radius);
@@ -928,6 +961,26 @@ function beastWork(m: Mob, dt: number) {
     const nose = m.species.radius + 0.4;
     if (story?.knockTree(b.pos, trickDir, nose + gs.speed * dt * 1.6 + 0.6, 0.7)) orbit.bump(0.7);
     if (mobs.shove(b.pos, trickDir, m.species.radius + 1.6, CHARGE_RUN * 0.5, m)) orbit.bump(0.5);
+  }
+}
+
+/**
+ * A drakitten's rocket, ridden: a burst of smoke and a kick of the camera
+ * as it lights, a steady trail of smoke puffs while it burns (the mob lays
+ * those itself, see Drakitten.think), and when it overheats a sad little
+ * sputter of darker puffs until it cools.
+ */
+let sputterT = 0;
+function rocketWork(m: Mob, dt: number) {
+  const gs = rideMode.gallopState;
+  const b = player.body;
+  const back = v3.set(b.pos.x - Math.sin(b.heading) * m.species.radius, b.pos.y + m.species.centreY - 0.1, b.pos.z - Math.cos(b.heading) * m.species.radius);
+  if (gs.fx === 'ignite') { smokePuffs.emit(back, 7, 0.3, 2.4, undefined, SMOKE); orbit.bump(0.7); }
+  if (gs.fx === 'fizzle') { puffs.emit(back, 6, 0.2, 1.6); orbit.bump(0.4); }
+  sputterT -= dt;
+  if (gs.overheat && sputterT <= 0) {
+    sputterT = 0.3 + Math.random() * 0.3;
+    mudPuffs.emit(back, 1, 0.14, 0.4, undefined, { life: 0.8, rise: 0.8, drag: 2, up: 0.4 });
   }
 }
 
@@ -979,8 +1032,13 @@ function updateAimHud() {
     const verb = riding.species.verb;
     const swim = sp.trait?.diver && rideMode.gallopState.wet > 0.5 ? ' · <b>C</b> dive · <b>Space</b> rise' : '';
     const space = sp.trait?.ability === 'charge' ? (rideMode.gallopState.static >= 0.3 ? 'charge' : 'leap') : verb ?? 'leap';
-    if (!sp.fly) tips.push(`${e} · <b>Shift</b> gallop${sp.leap || sp.trait?.ability ? ` · <b>Space</b> ${space}` : ''}${swim}${storyHost?.story?.ramReady ? ' · <b>Click</b> knock it down' : ''}`);
-    else tips.push(sp.walk ? `${e} · <b>Space</b> take off / climb · <b>C</b> descend` : `${e} · <b>Space</b> climb · <b>C</b> descend`);
+    if (sp.trait?.snap) tips.push(`${e} · <b>A</b>/<b>D</b> turn · <b>${rideMode.gallopState.crawl ? 'S</b> stop' : 'W</b> go'} · <b>Shift</b> hurry`);
+    else if (!sp.fly) tips.push(`${e} · <b>Shift</b> gallop${sp.leap || sp.trait?.ability ? ` · <b>Space</b> ${space}` : ''}${swim}${storyHost?.story?.ramReady ? ' · <b>Click</b> knock it down' : ''}`);
+    else {
+      const gs = rideMode.gallopState;
+      const rocket = sp.fly.rocket ? (gs.overheat ? ' · <i>rocket cooling…</i>' : ' · <b>Shift</b> rocket') : '';
+      tips.push((sp.walk ? `${e} · <b>Space</b> take off / climb · <b>C</b> descend` : `${e} · <b>Space</b> climb · <b>C</b> descend`) + rocket);
+    }
   }
   touch?.setContext({
     ride: next ? (mounted ? 'Switch' : 'Ride') : mounted ? 'Hop off' : null,
@@ -995,6 +1053,24 @@ function updateAimHud() {
 
 let veil = document.getElementById('veil');
 let readyFrames = 0;
+let drakDemoT = params.get('drak') === '0' || params.has('capture') ? -1 : 0;
+/**
+ * A crew of three drakittens (pink, dark, tabby) rockets in and lands in
+ * the cabin's front yard if you're at the cabin, else `d` m in front of you.
+ */
+function drakArrive(d = 16, n = 3) {
+  const b = player.body;
+  const st = gen.story;
+  const home = Math.hypot(b.pos.x - st.x, b.pos.z - st.z) < 70;
+  const x = home ? st.x + Math.sin(st.rot) * 11 : b.pos.x + Math.sin(b.heading) * d;
+  const z = home ? st.z + Math.cos(st.rot) * 11 : b.pos.z + Math.cos(b.heading) * d;
+  const f = mobs.spawnFlockAt('drakitten', x, z, mobCtx, n);
+  if (!f) return false;
+  const sp = f.species as Drakitten;
+  f.members.forEach((m, i) => sp.setCoat(m, i % 3));
+  sp.arrive(f, mobCtx);
+  return true;
+}
 if (params.has('capture')) { veil?.remove(); veil = null; }
 requestAnimationFrame(frame);
 
@@ -1094,9 +1170,10 @@ window.__ow = {
     return !!best;
   },
   /** The ride state of the newer mounts (abilities), for probes. */
-  rideState: () => { const g = rideMode.gallopState; return { speed: +g.speed.toFixed(1), phase: +g.phase.toFixed(2), burrow: +g.burrow.toFixed(2), charge: +g.charge.toFixed(2), static: +g.static.toFixed(2), depth: +g.depth.toFixed(2) }; },
+  rideState: () => { const g = rideMode.gallopState; return { speed: +g.speed.toFixed(1), phase: +g.phase.toFixed(2), burrow: +g.burrow.toFixed(2), charge: +g.charge.toFixed(2), static: +g.static.toFixed(2), depth: +g.depth.toFixed(2), rocket: +g.rocket.toFixed(2), heat: +g.heat.toFixed(2), overheat: g.overheat }; },
   /** Drop a flock of `n` right at (x, z). */
   spawnAt: (name: string, x: number, z: number, n?: number) => mobs.spawnFlockAt(name, x, z, mobCtx, n),
+  drakArrive,
   /** Phase 3 (shots/tests): `n` fresh creatures of a species, lassoed inside the pasture so they come to live there. */
   bringHome: (name: string, n = 1) => {
     const st = storyHost?.story?.stable;

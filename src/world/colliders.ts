@@ -246,6 +246,17 @@ export class Colliders {
     return best;
   }
 
+  /** Highest cabin (walls + roof) under a circle, however tall, or -Infinity: what a clinger climbs. */
+  cabinTop(x: number, z: number, r: number): number {
+    if (!this.enabled) return -Infinity;
+    let best = -Infinity;
+    this.forCells(x, z, r, (c) => {
+      const C = c.cabins;
+      for (let k = 0; k < C.length; k += 8) best = Math.max(best, cabinSurface(C, k, x, z, r));
+    });
+    return best;
+  }
+
   /** Does a circle overlap a bush? (Bushes aren't solid; this is for placing things.) */
   inBush(x: number, z: number, r: number): boolean {
     let hit = false;

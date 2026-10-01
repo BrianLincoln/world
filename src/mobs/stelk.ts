@@ -539,14 +539,17 @@ export class Stelk implements Species {
     for (const m of M) near = Math.min(near, Math.hypot(m.pos.x - player.pos.x, m.pos.z - player.pos.z));
     const fast = Math.hypot(player.vel.x, player.vel.z) > 7 || player.mode === 'ride';
     // Wary, not skittish: they let you walk quite close, but not run up.
-    const scare = fast ? 20 : 10;
+    // A calm one (the stable's lasso lesson, story/herd.ts) lets you come
+    // right up, and if you do startle it, it only trots a few steps off.
+    const scare = fd.calm ? (fast ? 6 : 3) : fast ? 20 : 10;
     if (fd.alarm || near < scare) {
       if (fd.mode !== 'flee') {
         fd.mode = 'flee';
         // Away from you, onto good ground if there is some.
-        if (!this.findSpot(ctx.gen, f.centre, player.pos, rnd, f.target, 60, 110)) {
+        if (!this.findSpot(ctx.gen, f.centre, player.pos, rnd, f.target, fd.calm ? 8 : 60, fd.calm ? 14 : 110)) {
           const a = Math.atan2(f.centre.x - player.pos.x, f.centre.z - player.pos.z);
-          f.target.set(f.centre.x + Math.sin(a) * 70, 0, f.centre.z + Math.cos(a) * 70);
+          const r = fd.calm ? 10 : 70;
+          f.target.set(f.centre.x + Math.sin(a) * r, 0, f.centre.z + Math.cos(a) * r);
         }
       }
       fd.fleeT = 4 + rnd() * 3;
@@ -577,7 +580,7 @@ export class Stelk implements Species {
       }
       return;
     }
-    fd.relocate -= dt;
+    if (!fd.calm) fd.relocate -= dt;
     if (fd.relocate < 0) {
       // Wander on to fresh grass.
       if (this.findSpot(ctx.gen, fd.spot, null, rnd, f.target, 30, 90)) fd.mode = 'walk';
@@ -744,7 +747,8 @@ export class Stelk implements Species {
     const wGal = THREE.MathUtils.clamp(g - 1, 0, 1);
     const wWalk = THREE.MathUtils.clamp(1 - g, 0, 1);
     const freq = speed < 3.2 ? 0.45 + speed * 0.3 : speed < 7 ? 1.41 + (speed - 3.2) * 0.07 : Math.min(2.7, 1.68 + (speed - 7) * 0.04);
-    const moving = THREE.MathUtils.clamp(speed / 1.0, 0, 1);
+    // In the air the stride stops: no running on nothing.
+    const moving = THREE.MathUtils.clamp(speed / 1.0, 0, 1) * (1 - d.air);
     d.stride += dt * freq * moving;
     const duty = wWalk * 0.64 + wTrot * 0.46 + wGal * 0.36;
     const sweep = (wWalk * 0.34 + wTrot * 0.44 + wGal * 0.72) * moving;

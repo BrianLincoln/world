@@ -34,8 +34,8 @@ export interface Site {
 interface Draw {
   b: PartBatch;
   o: THREE.Object3D;
-  /** Takes the coat tint (else drawn white = its own vertex colours). */
-  tint: boolean;
+  /** Takes the coat tint (else drawn white = its own vertex colours), or a colour of its own per mob. */
+  tint: boolean | THREE.Color;
   eye: boolean;
   /** 0 always, 1 only when tamed (saddle, bridle), 2 only on a rope (collar). */
   when: 0 | 1 | 2;
@@ -275,7 +275,7 @@ export abstract class Beast implements Species {
 
   // ------------------------------------------------------------ helpers for build
 
-  protected draw(d: BeastData, b: PartBatch, o: THREE.Object3D, opts: { tint?: boolean; eye?: boolean; when?: 0 | 1 | 2 } = {}) {
+  protected draw(d: BeastData, b: PartBatch, o: THREE.Object3D, opts: { tint?: boolean | THREE.Color; eye?: boolean; when?: 0 | 1 | 2 } = {}) {
     d.draws.push({ b, o, tint: opts.tint ?? true, eye: !!opts.eye, when: opts.when ?? 0 });
     return o;
   }
@@ -381,7 +381,7 @@ export abstract class Beast implements Species {
     return this.cfg.habitat(this.site(ctx.gen, x, z, ctx.night ?? 0));
   }
 
-  private findSpot(ctx: MobCtx, from: THREE.Vector3, away: THREE.Vector3 | null, rnd: () => number, out: THREE.Vector3, rMin: number, rMax: number, tries = 14) {
+  protected findSpot(ctx: MobCtx, from: THREE.Vector3, away: THREE.Vector3 | null, rnd: () => number, out: THREE.Vector3, rMin: number, rMax: number, tries = 14) {
     let best = Infinity;
     const base = away ? Math.atan2(from.x - away.x, from.z - away.z) : rnd() * Math.PI * 2;
     for (let k = 0; k < tries; k++) {
@@ -450,6 +450,7 @@ export abstract class Beast implements Species {
     const coat = r() < 0.75 ? f.data.coat : Math.floor(r() * this.coats.length);
     const rare = this.rareCoat && r() < this.cfg.rare![1];
     m.tint.copy(rare ? this.rareCoat! : this.coats[coat]).multiplyScalar(0.96 + r() * 0.08);
+    d.s.coat = rare ? -1 : coat;
   }
 
   // ------------------------------------------------------------ brains
@@ -640,6 +641,11 @@ export abstract class Beast implements Species {
     m.grounded = true;
   }
 
+  /** Fliers: settled on the ground rather than drifting (by default, the ones that rest do so by day). */
+  protected resting(m: Mob, ctx: MobCtx, idling: boolean) {
+    return idling && !!this.cfg.flier!.rests && (ctx.night ?? 0) < 0.35 && m.state === 'wild' && m.flock?.data.mode === 'graze';
+  }
+
   /**
    * Fliers: drift in slow loops round where they'd be, rising and sinking;
    * by day the ones that rest settle on the ground with their wings shut.
@@ -647,9 +653,8 @@ export abstract class Beast implements Species {
   private hover(m: Mob, ctx: MobCtx, goal: THREE.Vector3, speed: number, idling: boolean) {
     const d = m.data as BeastData;
     const { dt } = ctx;
-    const fl = this.cfg.flier!;
     const ground = this.floor(ctx, m.pos.x, m.pos.z);
-    const resting = idling && !!fl.rests && (ctx.night ?? 0) < 0.35 && m.state === 'wild' && m.flock?.data.mode === 'graze';
+    const resting = this.resting(m, ctx, idling);
     d.drift += dt;
     let gx = goal.x, gz = goal.z, gy: number;
     if (idling) {
@@ -710,9 +715,11 @@ export abstract class Beast implements Species {
     a.wet += (wetNow - a.wet) * e(4);
     const airborne = !m.grounded && (m.ridden || !!this.cfg.flier);
     a.air += ((airborne ? 1 : 0) - a.air) * e(airborne ? 12 : 8);
-    a.moving = clamp(a.speed / 0.8, 0, 1);
+    // A leaping ground mount stops striding: no running on nothing (fliers keep theirs).
+    const ground = this.cfg.flier ? 1 : 1 - a.air;
+    a.moving = clamp(a.speed / 0.8, 0, 1) * ground;
     const L = this.cfg.strideLen * (1 + a.speed * 0.06);
-    a.stride += (a.speed * dt) / L;
+    a.stride += (a.speed * ground * dt) / L;
     a.cyc = frac(a.stride);
     // Ground pitch under the body.
     if (!this.cfg.flier || m.grounded) {
@@ -777,7 +784,7 @@ export abstract class Beast implements Species {
     const lead = m.state === 'caught' || m.leashed;
     for (const w of d.draws) {
       if (!w.o.visible || (w.when === 1 && !m.stabled) || (w.when === 2 && !lead)) continue;
-      w.b.push(w.o.matrixWorld, w.tint ? m.tint : WHITE, w.eye ? d.eye : undefined);
+      w.b.push(w.o.matrixWorld, w.tint === true ? m.tint : w.tint === false ? WHITE : w.tint, w.eye ? d.eye : undefined);
     }
   }
 

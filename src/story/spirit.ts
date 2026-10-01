@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { makeSolidMaterial } from '../gfx/materials';
 import { colored, lathe, merge, PartBatch, Spring } from '../mobs/parts';
 import type { IconName } from './icons';
 import { bubbleCanvas, tex } from './icons';
@@ -15,6 +16,14 @@ import { Billboard } from './overlay';
 // "says" is posture, gesture, the icon in its bubble and a few sounds.
 
 const R = 0.34;
+/** One ushering sweep and its rest (s). */
+const USHER_CYCLE = 3.4;
+/** One round of the foreman's pantomime (fetch / present) and its rest (s). */
+const FOREMAN_CYCLE = 5.2;
+/** One round of the lasso lesson: twirl, throw, "your turn", rest (s). */
+const LASSO_CYCLE = 4.8;
+/** Its own little loop of rope: whirled overhead, then flung. */
+const LOOP_R = 0.2;
 const COLD = new THREE.Color('#b8c6d8');
 const MID = new THREE.Color('#ecc9ae');
 const WARM = new THREE.Color('#f0924c');
@@ -36,8 +45,26 @@ export interface Want {
   face: THREE.Vector3 | null;
   pose: Pose;
   icon: IconName | null;
+  /** How many of `icon` it still wants (null: not a tally; 0: had all it
+   *  wanted, so no bubble). */
+  count?: number | null;
+  /** How many the whole task takes, shown as "×n" beside the icon. */
+  total?: number | null;
   /** Wait for the explorer to keep up while travelling. */
   lead: boolean;
+  /** Ushering you in: standing beside this doorway (a point in its
+   *  opening), it sweeps an arm from you into it, "after you". */
+  usher?: THREE.Vector3;
+  /** Running the job from its spot: "go and get that" (it points out at
+   *  `fetch`, where the material is, then waves you back to itself: "and
+   *  bring it here"). */
+  fetch?: THREE.Vector3;
+  /** "Build this": it throws its arms wide at the sketch all round it
+   *  (`face`), looking it up and down, then back to you. */
+  present?: boolean;
+  /** "Like this": it whirls a little loop of its own over its head and
+   *  flings it out at this (a creature), then looks round at you. */
+  lasso?: THREE.Vector3;
   /** Nothing to ask for: it just enjoys being there (no pointing; watches
    *  `face`, looks round at you now and then when you're close). */
   settled?: boolean;
@@ -48,6 +75,8 @@ type Act =
   | { kind: 'greet'; t: number }
   /** Hurry to `to` (e.g. out of the cabin), then carry on with the queue. */
   | { kind: 'pat'; t: number }
+  /** Hurry over to you and cheer: you did it. */
+  | { kind: 'praise'; t: number; phase: 'go' | 'cheer' }
   | { kind: 'emerge'; t: number; to: THREE.Vector3 }
   | { kind: 'hint'; t: number; phase: 'go' | 'tug' | 'back' | 'hop'; target: THREE.Vector3; face: THREE.Vector3 | null; hops: number };
 
@@ -57,6 +86,8 @@ export interface SpiritHooks {
   route(from: THREE.Vector3, to: THREE.Vector3): THREE.Vector3[];
   sound(name: 'chirp' | 'coo' | 'excited' | 'whimper' | 'call' | 'tug'): void;
   sparkle(at: THREE.Vector3, n: number): void;
+  /** A few hearts floating up. */
+  hearts?(at: THREE.Vector3): void;
 }
 
 function bodyGeometry(): THREE.BufferGeometry {
@@ -102,6 +133,8 @@ export class Spirit {
   private heartB: PartBatch;
   readonly bubble: Billboard;
   private bubbleIcon: IconName | null = null;
+  private bubbleCount = 0;
+  private bubbleNear = false;
   private bubbleA = 0;
   private bubblePop = 0;
 
@@ -139,6 +172,14 @@ export class Spirit {
   private happyT = 0;
   private whimperT = 3;
   private pointT = 0;
+  private usherT = 0;
+  private foremanT = 0;
+  private lassoT = 0;
+  /** Its own loop of rope for the lasso lesson (hidden otherwise). */
+  private loop = new THREE.Mesh(new THREE.TorusGeometry(LOOP_R, 0.026, 6, 24), makeSolidMaterial('#c9a26b', 0, { keep: 0.6 }));
+  /** Where the flung loop set off from, and where it's headed. */
+  private loopFrom = new THREE.Vector3();
+  private loopTo = new THREE.Vector3();
   private glanceT = 4;
   private beckonT = 0;
   private spin = 0;
@@ -192,6 +233,9 @@ export class Spirit {
     this.heartB = new PartBatch(heartGeometry(), { keep: 0.95 }, 2);
     this.batches = [this.bodyB, this.armB, this.footB, this.heartB];
     for (const b of this.batches) this.group.add(b.mesh);
+    this.loop.visible = false;
+    this.loop.frustumCulled = false;
+    this.group.add(this.loop);
     this.bubble = new Billboard(tex(bubbleCanvas('axe')), 0.95, 44);
     this.bubble.alpha = 0;
 
@@ -209,6 +253,8 @@ export class Spirit {
   }
 
   get busy() { return this.acts.length > 0; }
+  /** On its way somewhere (the pasture gate swings open for it). */
+  get travelling() { return this.moving; }
   get arrived() { return !this.moving && !this.acts.length && this.pos.distanceTo(this.want.at) < 0.6; }
   /**
    * Idle at home with nothing to ask of you (settled: sitting by the fire or
@@ -245,6 +291,9 @@ export class Spirit {
   }
 
   celebrate() {
+    // The last piece landing and the step finishing both cheer, a moment
+    // apart: one jump, not a restarted one.
+    if (this.acts.some((a) => a.kind === 'celebrate' && a.t < 1)) return;
     this.acts = this.acts.filter((a) => a.kind !== 'celebrate');
     this.acts.push({ kind: 'celebrate', t: 0 });
   }
@@ -258,6 +307,16 @@ export class Spirit {
     this.acts.push({ kind: 'hint', t: 0, phase: 'go', target: target.clone(), face: face?.clone() ?? null, hops: 0 });
   }
   cancelActs() { this.acts = []; }
+  /** You did it: it hurries over to you, cheers and throws up hearts. */
+  praise() {
+    this.acts = this.acts.filter((a) => a.kind === 'pat');
+    this.acts.push({ kind: 'praise', t: 0, phase: 'go' });
+  }
+  /** Nothing's happening: start the foreman's pantomime over, with a call. */
+  nudge() {
+    this.foremanT = 0;
+    this.hooks.sound('call');
+  }
 
   /** Walk toward `to` along routed waypoints at `speed`; returns true once there. */
   private travel(to: THREE.Vector3, speed: number, dt: number): boolean {
@@ -290,6 +349,43 @@ export class Spirit {
     this.heading += dh * (1 - Math.exp(-rate * dt));
   }
 
+  /**
+   * The lesson's loop: whirled flat over its hand, then flung out in a lob
+   * that drops over the creature's head, and melts away there (it's only
+   * showing you: the real catch is yours).
+   */
+  private placeLoop(twirl: number, fling: number, at: THREE.Vector3 | null) {
+    const hand = this.arms[0].localToWorld(tv2.set(0, -0.21, 0));
+    const l = this.loop;
+    l.visible = false;
+    if (!at) return;
+    if (twirl > 0.05) {
+      const a = this.t * 13;
+      l.visible = true;
+      l.position.set(hand.x + Math.cos(a) * 0.1, hand.y + 0.03, hand.z + Math.sin(a) * 0.1);
+      l.rotation.set(Math.PI / 2 + Math.sin(a) * 0.25, 0, a);
+      l.scale.setScalar(twirl);
+      this.loopFrom.copy(hand);
+      // Out to the creature (or as far as a little throw goes), round its neck.
+      tv.subVectors(at, hand).setY(0);
+      const d = Math.min(14, tv.length());
+      this.loopTo.copy(hand).addScaledVector(tv.normalize(), d);
+      this.loopTo.y = this.hooks.ground(this.loopTo.x, this.loopTo.z) + 1.1;
+      return;
+    }
+    if (fling > 0) {
+      const k = THREE.MathUtils.clamp(((this.lassoT % LASSO_CYCLE) - 1.95) / 0.7, 0, 1);
+      const drop = THREE.MathUtils.clamp(((this.lassoT % LASSO_CYCLE) - 2.65) / 0.3, 0, 1);
+      if (drop >= 1) return;
+      l.visible = true;
+      l.position.lerpVectors(this.loopFrom, this.loopTo, THREE.MathUtils.smootherstep(k, 0, 1) * 0.3 + k * 0.7);
+      l.position.y += Math.sin(k * Math.PI) * (0.6 + this.loopFrom.distanceTo(this.loopTo) * 0.12) - drop * 0.5;
+      l.rotation.set(Math.PI / 2 + Math.sin(k * 9) * 0.15 * (1 - k), 0, this.t * 16 * (1 - k * 0.8));
+      // It opens out wide in flight, then settles and fades.
+      l.scale.setScalar((1 + k * 2.2) * (1 - drop));
+    }
+  }
+
   update(dt: number) {
     if (dt <= 0) return;
     this.t += dt;
@@ -303,6 +399,13 @@ export class Spirit {
     let lookAt: THREE.Vector3 | null = this.player;
     let pose: Pose = w.pose;
     let armsUp = 0, beckon = 0, reach = 0, pointAt: THREE.Vector3 | null = null;
+    /** The ushering arm's sweep, 0 (out to you) .. 1 (into the doorway), and how much it's showing. */
+    let usher = 0, usherOn = 0;
+    /** The foreman's arms-wide "build this", 0..1. */
+    let present = 0;
+    /** The lasso lesson: whirling overhead (0..1), and the throw's arm (0..1). */
+    let twirl = 0, fling = 0;
+    let faceAt: THREE.Vector3 | null = null;
     let speed = 3.1;
     let happy = false;
     let bounce = 0;
@@ -315,6 +418,10 @@ export class Spirit {
       pose = 'sit';
       lookAt = ride.look;
     } else if (act) {
+      /** Did the act just pass `k` seconds? (From the time before this frame:
+       *  `t - dt` can round to just past `k` and miss it.) */
+      const t0 = act.t;
+      const passed = (k: number) => t0 < k && act.t >= k;
       act.t += dt;
       if (act.kind === 'celebrate') {
         this.vel.multiplyScalar(Math.exp(-10 * dt));
@@ -331,7 +438,7 @@ export class Spirit {
         if (act.t < PAT.end) {
           patted = 1;
           for (const b of PAT.beats) {
-            if (act.t - dt < b && act.t >= b) {
+            if (passed(b)) {
               this.squash.v -= 2.4;
               this.hooks.sound('coo');
               this.hooks.sparkle(this.headTop(tv2).setY(tv2.y + 0.12), 2);
@@ -341,11 +448,38 @@ export class Spirit {
           armsUp = 1;
           bounce = 1;
           this.spin = act.t > PAT.end + 0.25 && act.t < PAT.end + 0.85 ? (act.t - PAT.end - 0.25) / 0.6 : 0;
-          if (act.t - dt < PAT.end) {
+          if (passed(PAT.end)) {
             this.hooks.sound('excited');
             this.hooks.sparkle(tv2.set(this.pos.x, this.pos.y + R * 2.4, this.pos.z), 6);
           }
           if (act.t > PAT.end + PAT.joy) { this.acts.shift(); this.happyT = 2.5; this.spin = 0; }
+        }
+      } else if (act.kind === 'praise') {
+        if (act.phase === 'go') {
+          // Over to you (not all the way from across the valley: from far
+          // off it cheers where it is).
+          speed = 5.2;
+          this.moving = true;
+          lookAt = this.player;
+          tv2.set(this.player.x - this.pos.x, 0, this.player.z - this.pos.z);
+          const stop = tv2.clone().setLength(Math.max(0, tv2.length() - 1.6));
+          tv2.set(this.pos.x + stop.x, 0, this.pos.z + stop.z);
+          const there = toPlayer < 2.2 || toPlayer > 30 || this.travel(tv2, speed, dt);
+          if (there || act.t > 7) { act.phase = 'cheer'; act.t = 0; this.moving = false; }
+        } else {
+          // A big jump for joy, two spins, hearts and sparkles, and then
+          // a long happy look at you.
+          this.vel.multiplyScalar(Math.exp(-10 * dt));
+          faceAt = this.player;
+          happy = true;
+          armsUp = act.t < 2.3 ? 1 : 0;
+          bounce = act.t < 2.3 ? 1 : 0.3;
+          this.spin = act.t > 0.4 && act.t < 1.6 ? ((act.t - 0.4) / 1.2) * 2 : 0;
+          if (passed(0.05)) this.hooks.sound('excited');
+          if (passed(0.5)) this.hooks.hearts?.(this.headTop(tv2).setY(tv2.y + 0.2));
+          if (passed(1.7)) this.hooks.sound('coo');
+          if (Math.floor(act.t / 0.5) !== Math.floor((act.t - dt) / 0.5) && act.t < 2.3) this.hooks.sparkle(tv2.set(this.pos.x, this.pos.y + R * 2.4, this.pos.z), 4);
+          if (act.t > 3.4) { this.acts.shift(); this.happyT = 4; this.spin = 0; }
         }
       } else if (act.kind === 'greet') {
         this.vel.multiplyScalar(Math.exp(-8 * dt));
@@ -425,6 +559,62 @@ export class Spirit {
           const glancing = near && this.glanceT < 1.8;
           if (glancing && this.glanceT + dt >= 1.8) this.happyT = Math.max(this.happyT, 1.4);
           lookAt = glancing ? this.player : w.face;
+        } else if (w.usher && toPlayer < 30) {
+          // Ushering: turned between you and the doorway, it holds a hand
+          // out to you, sweeps it round into the opening with a little hop,
+          // holds it there looking at you, then lets it drop and goes again.
+          const c = (this.usherT += dt) % USHER_CYCLE;
+          usherOn = c < 2.3 ? 1 : 0;
+          usher = THREE.MathUtils.smootherstep(c, 0.45, 1.05);
+          bounce = c > 0.95 && c < 1.45 ? 0.5 : 0;
+          if (c - dt < 1.0 && c >= 1.0 && this.usherT < USHER_CYCLE * 3) this.hooks.sound('chirp');
+          tv2.set(this.player.x - this.pos.x, 0, this.player.z - this.pos.z).normalize();
+          tv.set(w.usher.x - this.pos.x, 0, w.usher.z - this.pos.z).normalize();
+          faceAt = tv2.addScaledVector(tv, 0.45).add(this.pos);
+          lookAt = usher > 0.5 && c < 1.7 ? w.usher : this.player;
+        } else if (w.lasso && toPlayer < 30) {
+          // The lasso lesson: turned to the creature, it whirls a loop over
+          // its head, flings it out at it, then looks round at you with a
+          // hop ("now you").
+          const c0 = this.lassoT % LASSO_CYCLE;
+          const c = (this.lassoT += dt) % LASSO_CYCLE;
+          const passed = (k: number) => c0 < k && c >= k;
+          const first = this.lassoT < LASSO_CYCLE * 3;
+          if (c < 2.95) {
+            faceAt = w.lasso;
+            lookAt = w.lasso;
+            twirl = THREE.MathUtils.smoothstep(c, 0.2, 0.5) * (c < 1.95 ? 1 : 0);
+            fling = c >= 1.95 ? 1 - THREE.MathUtils.smoothstep(c, 2.6, 2.95) : 0;
+            bounce = c > 0.5 && c < 1.9 ? 0.25 : 0;
+            if (first && passed(1.95)) this.hooks.sound('chirp');
+          } else if (c < 4.3) {
+            faceAt = this.player;
+            bounce = c < 3.5 ? 0.55 : 0;
+            if (passed(3.0)) this.happyT = Math.max(this.happyT, 0.9);
+          }
+        } else if ((w.fetch || w.present) && toPlayer < 45) {
+          // The foreman: it stays put and runs the job with its arms.
+          const c = (this.foremanT += dt) % FOREMAN_CYCLE;
+          const first = this.foremanT < FOREMAN_CYCLE * 3;
+          if (w.fetch) {
+            // Turn and point out at where the stuff is, with a hop and a
+            // chirp; then round to you, waving you back in to itself.
+            if (c > 0.5 && c < 2.1) {
+              pointAt = lookAt = w.fetch;
+              bounce = c > 0.7 && c < 1.2 ? 0.6 : 0;
+              if (first && c - dt < 0.75 && c >= 0.75) this.hooks.sound('chirp');
+            } else if (c > 2.4 && c < 3.6) {
+              faceAt = this.player;
+              beckon = 1;
+            }
+          } else if (w.face && c > 0.4 && c < 2.2) {
+            // Arms flung wide at the sketch round it, glancing up it.
+            faceAt = this.player;
+            present = THREE.MathUtils.smoothstep(c, 0.4, 0.7) * (1 - THREE.MathUtils.smoothstep(c, 1.9, 2.2));
+            lookAt = c < 1.5 ? w.face : this.player;
+            bounce = c > 0.6 && c < 1.1 ? 0.5 : 0;
+            if (first && c - dt < 0.65 && c >= 0.65) this.hooks.sound('chirp');
+          }
         } else {
           // Idle at the spot: glance at the target and point now and then.
           this.pointT -= dt;
@@ -443,7 +633,10 @@ export class Spirit {
     if (ride) this.pos.copy(ride.seat).setY(ride.seat.y - 0.05);
     else this.pos.y += (gy - this.pos.y) * e(20);
     const rest = w.settled && !act && !this.moving;
-    this.face(this.moving ? null : (act?.kind === 'hint' && act.phase === 'tug') || act?.kind === 'pat' ? this.player : (pointAt ?? (pose === 'warm' || rest ? w.face : lookAt)), dt);
+    this.face(this.moving ? null : (act?.kind === 'hint' && act.phase === 'tug') || act?.kind === 'pat' ? this.player : (faceAt ?? pointAt ?? (pose === 'warm' || rest ? w.face : lookAt)), dt, faceAt ? 3 : 6);
+    if (!faceAt) this.usherT = 0;
+    if (!(w.fetch || w.present) || act || this.moving) this.foremanT = 0;
+    if (!w.lasso || act || this.moving) this.lassoT = 0;
     if (ride) this.heading = ride.heading;
     if (this.hold !== null) this.heading = this.hold;
 
@@ -495,6 +688,18 @@ export class Spirit {
       tv.subVectors(pointAt, this.pos);
       pointArm = 0;
     }
+    // Ushering: the arm on the doorway's side, horizontal (x = -pi/2) with
+    // z its bearing (0 = straight ahead, + toward the +x side), swept from
+    // toward you to toward the doorway.
+    let usherArm = -1, usherZ = 0;
+    if (usherOn && w.usher) {
+      const h = this.heading, dx = w.usher.x - this.pos.x, dz = w.usher.z - this.pos.z;
+      const door = Math.atan2(dx * Math.cos(h) - dz * Math.sin(h), dx * Math.sin(h) + dz * Math.cos(h));
+      const you = Math.atan2((this.player.x - this.pos.x) * Math.cos(h) - (this.player.z - this.pos.z) * Math.sin(h), (this.player.x - this.pos.x) * Math.sin(h) + (this.player.z - this.pos.z) * Math.cos(h));
+      usherArm = door >= 0 ? 0 : 1;
+      const lim = (a: number) => THREE.MathUtils.clamp(a, -2.1, 2.1);
+      usherZ = THREE.MathUtils.lerp(lim(you * 0.85), lim(door), usher);
+    }
     for (let k = 0; k < 2; k++) {
       const s = k ? -1 : 1;
       let x = 0.15, z = s * 0.35;
@@ -505,6 +710,18 @@ export class Spirit {
       if (reach) { x = -1.45 + Math.sin(this.t * 14) * 0.15; z = s * 0.15; }
       if (beckon && k === 0) { x = -1.2; z = 2.0 + Math.sin(this.t * 10) * 0.55; }
       if (k === pointArm && !armsUp && !reach) { x = -1.5; z = 0.25; }
+      // Presenting: both arms out wide and a little up, palms open.
+      // Whirling: the right arm straight up, circling; the left out for balance.
+      if (twirl && !armsUp && !reach) {
+        if (k === 0) { x = THREE.MathUtils.lerp(x, -0.35 + Math.sin(this.t * 13) * 0.3, twirl); z = THREE.MathUtils.lerp(z, 2.75 + Math.cos(this.t * 13) * 0.22, twirl); }
+        else { x = -0.3; z = s * 0.9; }
+      }
+      // Thrown: the arm follows through out toward the creature.
+      if (fling && k === 0 && !armsUp && !reach) { x = -1.55; z = 0.2; }
+      if (present && !armsUp && !reach) { x = THREE.MathUtils.lerp(x, -1.05 + Math.sin(this.t * 5 + k) * 0.06, present); z = THREE.MathUtils.lerp(z, s * 2.0, present); }
+      // Out to you low, palm up; into the doorway a little raised.
+      if (k === usherArm && !reach) { x = -1.25 - usher * 0.4; z = usherZ; }
+      else if (usherArm >= 0 && !reach) { x = 0.1; z = s * 0.3; }
       if (this.sit > 0.5 && !pointAt) { x = -0.5; z = s * 0.45; }
       if (this.sit > 0.5 && rest) { x = -1.05 + Math.sin(this.t * 1.3 + k * 1.7) * 0.08; z = s * 0.3; }
       if (patted) { x = -0.95 + Math.sin(this.t * 13 + k * 2) * 0.12; z = -s * 0.28; }
@@ -553,6 +770,7 @@ export class Spirit {
     bl.w = 0.08 * blush;
 
     this.root.updateMatrixWorld(true);
+    this.placeLoop(twirl, fling, w.lasso ?? null);
     for (const b of this.batches) b.begin();
     this.bodyB.push(this.body.matrixWorld, this.tint, this.eye);
     this.heartB.push(this.heart.matrixWorld, this.heartTint);
@@ -562,11 +780,23 @@ export class Spirit {
 
     // Thought bubble with what it wants next (hidden while travelling).
     // Only up close: from across the yard the pantomime does the talking.
-    const close = toPlayer < 5.5;
-    const icon = !close ? null : act?.kind === 'celebrate' || (act?.kind === 'pat' && act.t > PAT.end) ? 'heart' : this.moving || this.waiting ? null : w.icon;
+    // "Close" covers every build zone (you can build from 7 m), with a
+    // little slack before it lets go so the edge doesn't flicker.
+    this.bubbleNear = toPlayer < (this.bubbleNear ? 9.5 : 8);
+    // A tally that's reached 0 has nothing left to ask for (the last of it
+    // is flying in; the heart comes next).
+    const want = w.count === 0 ? null : w.icon;
+    const icon = !this.bubbleNear ? null : act?.kind === 'celebrate' || (act?.kind === 'pat' && act.t > PAT.end) ? 'heart' : this.moving || this.waiting ? null : want;
+    const count = icon === w.icon ? w.total ?? w.count ?? 0 : 0;
     if (icon !== this.bubbleIcon && this.bubbleA < 0.05) {
       this.bubbleIcon = icon;
-      if (icon) { this.bubble.texture = tex(bubbleCanvas(icon)); this.bubblePop = 1; }
+      this.bubbleCount = count;
+      if (icon) { this.bubble.texture = tex(bubbleCanvas(icon, count)); this.bubblePop = 1; }
+    } else if (icon && icon === this.bubbleIcon && count !== this.bubbleCount) {
+      // The tally changes in place, with a little bob.
+      this.bubbleCount = count;
+      this.bubble.texture = tex(bubbleCanvas(icon, count));
+      this.bubblePop = Math.max(this.bubblePop, 0.5);
     }
     const showB = icon !== null && icon === this.bubbleIcon ? 1 : 0;
     this.bubbleA += (showB - this.bubbleA) * e(showB ? 6 : 10);

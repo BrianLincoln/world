@@ -7,10 +7,12 @@ import type { Mob, MobCtx } from './types';
 // The woolly wurm: a huge, friendly, fuzzy caterpillar, banded like a
 // humbug, with a round smiling face and two bobbly feelers. Its body is a
 // chain of fluffy segments that follows the head's path over the ground,
-// humping along in a slow inchworm wave. It lives in the hollows and on
-// steep rocky slopes. Ridden, it is very slow, but it clings to whatever
-// it's on: it crawls straight up cliffs and ravine walls and over boulders,
-// and never falls off a ledge.
+// humping along in an inchworm wave. It lives in the hollows and on steep
+// rocky slopes. Ridden, it steers like a snake: quick, and straight onto
+// the new line with no slide, the body following the head's exact path
+// round every corner. And it clings to whatever it's on: up cliffs and
+// ravine walls, over boulders, up a cabin wall, over the roof and down the
+// other side, and never falls off a ledge.
 
 const SEGS = [0.75, 0.72, 0.74, 0.72, 0.68, 0.62, 0.55, 0.47, 0.38];
 const GAP = 0.82;
@@ -50,10 +52,10 @@ export class Wurm extends Beast {
       name: 'wurm', radius: 0.9, centreY: 0.72, flockSize: [1, 1],
       mount: {
         name: 'wurm', radius: 0.7,
-        walk: { speed: 2.2, sprint: 4.2, takeoff: 0 },
-        swim: 0.5, gather: 1,
-        // Slow, but it clings: straight up walls, over boulders, never falls.
-        trait: { cling: true, slopeDrag: 0, turn: 0.9, mudder: true, brake: 8 },
+        walk: { speed: 6.5, sprint: 11.5, takeoff: 0 },
+        swim: 0.5,
+        // Snake steering, and it clings: straight up walls, over boulders, never falls.
+        trait: { cling: true, snap: true, slopeDrag: 0, mudder: true },
       },
       amble: 0.5, travel: 0.7, flee: 1.8, wary: [5, 9], space: 3, spread: 4,
       habitat: (s) => {
@@ -122,15 +124,26 @@ export class Wurm extends Beast {
     if (!trail.length || trail[0].distanceTo(m.pos) > 3) this.straighten(m, d);
     // Ground under the ground-walking wild ones; wherever the ridden one clings.
     const feet = m.ridden ? m.pos.y : this.floor(ctx, m.pos.x, m.pos.z);
-    if (trail[0].distanceTo(tv.set(m.pos.x, feet, m.pos.z)) > TRAIL_STEP) {
-      trail.unshift(tv.clone());
+    // trail[0] is the head, live; behind it, points laid down every
+    // TRAIL_STEP of the way it has come (measured from the last one laid, so
+    // the path is kept however little it moves each frame).
+    trail[0].set(m.pos.x, feet, m.pos.z);
+    if (trail.length < 2 || trail[0].distanceTo(trail[1]) >= TRAIL_STEP) {
+      trail.unshift(trail[0].clone());
       const n = Math.ceil((SEGS.length * GAP) / TRAIL_STEP) + 4;
       if (trail.length > n) trail.length = n;
-    } else trail[0].copy(tv);
+    }
     // The inchworm wave: humps roll back down the body as it goes.
     const wave = (k: number) => Math.max(0, Math.sin(a.stride * Math.PI * 2 - k * 0.9)) * 0.22 * a.moving;
-    // The head: pitched with the ground (all the way up a wall), a friendly wobble.
-    const pitch = d.pitch.step(-a.slope - a.joy * 0.3 + (a.caught ? Math.sin(m.stateT * 4) * 0.2 : 0), 30, 9, a.dt);
+    // The head: pitched along its own path (all the way up a wall, or nose
+    // down one), else with the ground; a friendly wobble.
+    let lean = -a.slope;
+    if (m.ridden) {
+      this.along(trail, 0.5, tv);
+      const dy = trail[0].y - tv.y, dxz = Math.hypot(trail[0].x - tv.x, trail[0].z - tv.z);
+      if (dy * dy + dxz * dxz > 0.04) lean = -Math.atan2(dy, dxz);
+    }
+    const pitch = d.pitch.step(lean - a.joy * 0.3 + (a.caught ? Math.sin(m.stateT * 4) * 0.2 : 0), 60, 14, a.dt);
     d.body.position.y = SEGS[0] * 1.1 + wave(0) + a.joy * 0.3;
     d.body.rotation.set(pitch + a.graze * 0.2 + Math.sin(t * 0.8) * 0.04, a.lookYaw * 0.7, Math.sin(t * 1.1) * 0.06 + a.alert * Math.sin(t * 0.6) * 0.12);
     // The rest follow the trail, each looking toward the one in front.
@@ -149,6 +162,9 @@ export class Wurm extends Beast {
       prev.copy(o.position);
       o.updateMatrixWorld(true);
     }
+    // Up a wall the rider leans in to hug it rather than lying flat out.
+    d.seat.rotation.x = -segs[SADDLE_SEG - 1].rotation.x * 0.55;
+    d.seat.updateMatrixWorld(true);
     d.s.lids = a.graze > 0 ? 0.55 : undefined;
   }
 }

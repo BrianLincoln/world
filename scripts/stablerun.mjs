@@ -1,9 +1,9 @@
 // Scripted playthrough of phase 3 (the stable) with real key presses:
-//   node scripts/stablerun.mjs <outdir> [seed=hilda] [--no-shots]
+//   node scripts/stablerun.mjs <outdir> [seed=hilda] [from=<step>] [--ride] [--no-shots]
 // Starts with phase 2 done, walks home to trigger it, then follows the
 // director's goal: gathers from world trees and rocks, builds the footing,
-// frame, roof and fence, takes the lasso, lassoes a stelk and leads it in
-// through the gate. Then reloads the page and checks the save came back.
+// frame, roof and fence, takes the lasso, lassoes the stelk the spirit shows it and leads it in
+// through the gate (--ride: climbs on bareback and rides it in). Then reloads the page and checks the save came back.
 // Prints the timeline; exits 1 if it doesn't get there. Needs a build.
 import { chromium } from 'playwright';
 import http from 'node:http'; import fs from 'node:fs'; import path from 'node:path';
@@ -12,6 +12,7 @@ const args = process.argv.slice(2);
 const out = args[0] ?? 'shots/stablerun';
 const seed = args.find((a) => a.startsWith('seed='))?.slice(5) ?? 'hilda';
 const shots = !args.includes('--no-shots');
+const ride = args.includes('--ride');
 const from = args.find((a) => a.startsWith('from='))?.slice(5);
 fs.mkdirSync(out, { recursive: true });
 const server = http.createServer((req, res) => {
@@ -86,21 +87,23 @@ while (Date.now() - t0 < 600000) {
     if (!seen.has(st.step)) { seen.add(st.step); await hold(false); await W(1200); await shot(`${String(seen.size).padStart(2, '0')}-${st.step}`); }
   }
   if (st.step === 'ranch') break;
-  if (st.step === 'herd') {
+  if (st.step === 'catch' || st.step === 'herd') {
     await hold(false);
     if (!lassoed) {
-      // A small herd of stelks grazing outside the pasture: turn to one and throw.
-      const at = await ev(() => {
-        const ow = window.__ow, s = ow.story(), b = ow._body.pos;
-        const out = s.stable.gateOut.clone().sub(s.stable.gate).setY(0).normalize();
-        const x = b.x + out.x * 14, z = b.z + out.z * 14;
-        ow.spawnAt('stelk', x, z, 2);
-        return { x, z };
-      });
-      if (!at) break;
-      await W(500);
+      // The lesson's stelk grazing out past the gate (the spirit's showing
+      // us): walk to within throwing range of it, turn to it and throw.
+      for (let i = 0; i < 200; i++) {
+        const q = await ev(() => { const q = window.__ow.story().quarry(); return q && { x: q.x, z: q.z }; });
+        if (!q) { await W(250); continue; }
+        const b = await ev(() => { const p = window.__ow._body.pos; return { x: p.x, z: p.z }; });
+        if (Math.hypot(q.x - b.x, q.z - b.z) < 14) break;
+        await steer(q.x, q.z);
+        await hold(true);
+        await W(150);
+      }
+      await hold(false);
       for (let i = 0; i < 40 && !lassoed; i++) {
-        const m = await ev(() => { const ow = window.__ow; const w = [...ow.mobs.all()].find((q) => q.state === 'wild'); return w ? { x: w.pos.x, y: w.pos.y, z: w.pos.z } : null; });
+        const m = await ev(() => { const q = window.__ow.story().quarry(); return q ? { x: q.x, y: q.y, z: q.z } : null; });
         if (!m) break;
         await ev(([x, y, z]) => { const b = window.__ow._body.pos; window.__ow.view(Math.atan2(b.x - x, b.z - z), 0.12, 6); }, [m.x, m.y, m.z]);
         await W(120);
@@ -111,13 +114,23 @@ while (Date.now() - t0 < 600000) {
       log(`lassoed=${lassoed} rideable=${await ev(() => window.__ow.mobs.tamed.some((q) => q.stabled))}`);
       await shot('lassoed');
       if (!lassoed) break;
+      if (ride) {
+        await ev(() => window.__ow.mountNearest());
+        await W(1500);
+        const r = await ev(() => { const m = window.__ow.mobs.tamed.find((q) => q.ridden); return m ? { sp: m.species.name, stabled: m.stabled } : null; });
+        log(`bareback=${JSON.stringify(r)}`);
+        await shot('bareback');
+        if (!r) break;
+      }
     }
     // Lead it in through the gate to the middle of the pasture.
     const g = await ev(() => {
       const s = window.__ow.story(), b = window.__ow._body.pos;
       const goal = s.stable.local(0, -2);
+      // The first waypoint we aren't already standing on.
       const r = s.route(b, goal);
-      return { x: r[0].x, z: r[0].z };
+      const w = r.find((p) => Math.hypot(p.x - b.x, p.z - b.z) > 0.8) ?? r[r.length - 1];
+      return { x: w.x, z: w.z };
     });
     const d = await steer(g.x, g.z);
     await hold(d > 0.6);

@@ -16,7 +16,7 @@ export type Anchor =
   | 'hearthSpot' | 'hearthSeat' | 'hearth' | 'door' | 'doorstep' | 'stumpSpot' | 'axe' | 'seat' | 'grove'
   | 'yard' | 'cabin' | 'roof' | 'bank' | 'stones' | 'chimneySpot' | 'chimney' | 'far' | 'lookout' | 'pickSpot' | 'pick' | 'rocks'
   // Phase 3: the stable and its pasture.
-  | 'plotSpot' | 'stableSite' | 'stableFront' | 'roofTop' | 'gate' | 'gateIn' | 'gateOut' | 'lasso' | 'woods' | 'fenceSide';
+  | 'plotSpot' | 'stableSite' | 'stableFront' | 'stableBase' | 'roofTop' | 'gate' | 'gateIn' | 'gateOut' | 'lasso' | 'woods' | 'fenceSide' | 'fenceView' | 'pasture';
 
 /** Interactable groups a step can switch on (they glint while it's active). */
 export type TargetTag = 'axe' | 'pick' | 'tree' | 'rock' | 'hearth' | 'lasso';
@@ -42,7 +42,7 @@ interface StepBase {
   /** Repeat-the-hint behaviour after ~20 s without progress. */
   hint: 'tug' | 'none';
   /** The spirit's reaction as the step completes. */
-  onDone?: 'celebrate' | 'greet';
+  onDone?: 'celebrate' | 'greet' | 'praise';
 }
 
 export type StepDef =
@@ -56,8 +56,12 @@ export type StepDef =
   | (StepBase & { kind: 'build'; parts: PartId[]; resource: Resource; gather: string; zone: Anchor; zoneRadius: number })
   /** Light something, possible from `readyAt` o'clock. */
   | (StepBase & { kind: 'light'; targets: TargetTag; readyAt: number })
-  /** Bring creatures home to the pasture until `count` live there. */
-  | (StepBase & { kind: 'herd'; count: number })
+  /** Lasso a creature: done once one's on your lead. The spirit takes you
+   *  to one and shows you how (story.ts, catch step). */
+  | (StepBase & { kind: 'catch' })
+  /** Bring creatures home to the pasture until `count` live there; back to
+   *  `catch` if you've nothing on a lead. */
+  | (StepBase & { kind: 'herd'; count: number; catch: string })
   /** Nothing to ask for: the spirit potters (fire, yard, fire). At `doneAt`
    *  o'clock the story lets go of the clock. */
   | (StepBase & { kind: 'rest'; doneAt: number });

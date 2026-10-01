@@ -14,6 +14,8 @@ export class Sfx {
   private echo: GainNode | null = null;
   private noiseBuf: AudioBuffer | null = null;
   muted = false;
+  /** Loudness of the next sounds (0..1): the story sets it round the spirit's voice for distance. */
+  level = 1;
   /** Fire crackle loop level (0..1), set every frame from distance to the hearth. */
   crackle = 0;
   private crackleT = 0;
@@ -64,7 +66,7 @@ export class Sfx {
 
   private env(g: GainNode, t: number, e: Env) {
     const a = e.a ?? 0.005;
-    const p = e.peak ?? 1;
+    const p = Math.max(0.0002, (e.peak ?? 1) * this.level);
     g.gain.setValueAtTime(0.0001, t);
     g.gain.exponentialRampToValueAtTime(p, t + a);
     g.gain.exponentialRampToValueAtTime(0.0001, t + a + e.d);

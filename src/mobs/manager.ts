@@ -65,8 +65,9 @@ export class Mobs {
   };
   /**
    * `lasso`: you have one (in the story, only once the spirit has given it).
-   * `stable`: a tamed creature must be brought home to the stable before it
-   * can be ridden (the story); otherwise it's saddled as soon as it's tamed.
+   * `stable`: a tamed creature is only yours (saddled, and it comes home)
+   * once it's been brought to the stable (the story); otherwise that's as
+   * soon as it's tamed. Either way it can be ridden straight away.
    */
   readonly rules = { lasso: true, stable: false };
   readonly flocks = new Map<string, Flock>();
@@ -252,9 +253,9 @@ export class Mobs {
   }
 
   /** Debug: drop a fresh flock of a species right here (crows land, floofs hover, stelks graze). */
-  spawnFlockAt(name: string, x: number, z: number, ctx: MobCtx, n?: number) {
+  spawnFlockAt(name: string, x: number, z: number, ctx: MobCtx, n?: number): Flock | null {
     const sp = this.species.find((s) => s.name === name);
-    if (sp) this.launch(sp, ctx, true, new THREE.Vector3(x, this.gen.height(x, z), z), n);
+    return sp ? this.launch(sp, ctx, true, new THREE.Vector3(x, this.gen.height(x, z), z), n) : null;
   }
 
   // ------------------------------------------------------------ interaction
@@ -315,7 +316,7 @@ export class Mobs {
     let best: Mob | null = null;
     let bd = range;
     for (const m of this.tamed) {
-      if (m.ridden || !m.stabled) continue;
+      if (m.ridden) continue;
       const d = Math.hypot(m.pos.x - p.x, m.pos.z - p.z);
       if (d < bd + m.species.radius && m.pos.y - p.y < 4.5 && p.y - m.pos.y < 2.5) { bd = d; best = m; }
     }

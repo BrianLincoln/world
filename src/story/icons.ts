@@ -1,9 +1,10 @@
 import * as THREE from 'three';
 
 // Every icon in the story is drawn here with canvas paths, in the storybook
-// look: flat cream/wood/stone fills, a warm plum ink line, no text. The same
-// canvases feed the HUD (as data URLs) and the in-world billboards (as
-// textures), so an icon always looks the same wherever it appears.
+// look: flat cream/wood/stone fills, a warm plum ink line, no text (bar the
+// bubble's "×n" tally). The same canvases feed the HUD (as data URLs) and the
+// in-world billboards (as textures), so an icon always looks the same
+// wherever it appears.
 
 export type IconName = 'axe' | 'log' | 'stone' | 'flame' | 'heart' | 'home' | 'check' | 'hand' | 'hammer' | 'pick' | 'smash' | 'antlers' | 'up' | 'down' | 'ember' | 'bike' | 'finger' | 'mouse' | 'mouseDown' | 'fingerDown' | 'pat' | 'lasso' | 'stable' | 'creature';
 
@@ -687,9 +688,10 @@ export function slotCanvas(name: IconName, filled: boolean): HTMLCanvasElement {
   return c;
 }
 
-/** The spirit's thought bubble with an icon inside. */
-export function bubbleCanvas(name: IconName): HTMLCanvasElement {
-  const key = 'b:' + name;
+/** The spirit's thought bubble with an icon inside, and "×n" beside it when
+ *  it wants several of something. */
+export function bubbleCanvas(name: IconName, count = 0): HTMLCanvasElement {
+  const key = 'b:' + name + ':' + count;
   let c = cache.get(key);
   if (!c) {
     const [cc, g] = canvas();
@@ -715,11 +717,23 @@ export function bubbleCanvas(name: IconName): HTMLCanvasElement {
     g.fill();
     ink(g, 6);
     g.save();
-    g.translate(68, 54);
-    g.scale(0.58, 0.58);
+    if (count > 0) {
+      g.translate(52, 54);
+      g.scale(0.4, 0.4);
+    } else {
+      g.translate(68, 54);
+      g.scale(0.58, 0.58);
+    }
     g.translate(-64, -64);
     DRAW[name](g);
     g.restore();
+    if (count > 0) {
+      g.fillStyle = INK;
+      g.textBaseline = 'middle';
+      g.textAlign = 'center';
+      g.font = `700 ${count > 9 ? 22 : 28}px ui-rounded, "Trebuchet MS", system-ui, sans-serif`;
+      g.fillText('×' + count, count > 9 ? 91 : 89, 57);
+    }
     cache.set(key, (c = cc));
   }
   return c;

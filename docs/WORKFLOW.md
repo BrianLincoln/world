@@ -72,6 +72,10 @@ change goes through this loop:
 `seed t x z yaw pitch dist mode=fly y paused=1 palette=<rose|golden|olive|coral|twilight|night> ui=0 capture=1 shadows=0 towers=1 lit=all beacons=0`
 (`capture` disables adaptive resolution and the loading veil so shots are
 deterministic).
+Story and life: `story=0|1` (it's off by default when `t`, `x` or
+`mode=fly` is set), `fresh=1` (forget saves), `journey=<stage>`,
+`stable=<step>`, `debug=1` (keep the panel during the story), `mobs=<density>`,
+`bikes=0`, `drak=0` (the temporary drakitten landing), `eyes=round`.
 
 ## Debugging approach that worked
 When a frame looks wrong, bisect in the page rather than guessing:
@@ -121,7 +125,11 @@ When a frame looks wrong, bisect in the page rather than guessing:
 - Not yet verified on real Intel/AMD integrated hardware.
 
 ## Where to pick up
-See the "What I'd do next" list at the end of `NOTES.md`. The top candidates:
-chimney smoke and birds, rounded deciduous trees (inspo/6), inked line
-wobble and shade hatching, near-camera cast shadows, colliders, then
-boat/glider modes.
+The direction changed on 2026-09-30: see "The giant" in `DESIGN.md` and the
+last entry of `NOTES.md` ("Direction change: the giant"), which ends with the
+recommended first slice. Settle DESIGN.md's "Conflicts to settle" with the
+owner before building on any of them.
+
+Still-open look ideas from the original list: rounded deciduous trees
+(inspo/6), inked line wobble and shade hatching. (Chimney smoke, crows,
+ground cast shadows, colliders and the parachute are done.)

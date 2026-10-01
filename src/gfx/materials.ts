@@ -236,6 +236,9 @@ export interface CreatureLook {
   mouthW?: [number, number, number];
   blush?: [number, number, number, number];
   blushCol?: string;
+  /** Glossy eyes: glint size (0 = ordinary eyes with whites), and the iris colour aEye.w mixes in. */
+  gloss?: number;
+  iris?: string;
   doubleSide?: boolean;
   /** 0..1: soften part-to-part creases in the outline pass (see uSoftCrease). */
   softCrease?: number;
@@ -260,6 +263,8 @@ export function makeCreatureMaterial(o: CreatureLook = {}) {
     uMouthW: { value: new THREE.Vector3(...(o.mouthW ?? [0, 0, 0])) },
     uBlush: { value: new THREE.Vector4(...(o.blush ?? [0, 0, 0, 0])) },
     uBlushCol: { value: col(o.blushCol ?? '#ef9c93') },
+    uGloss: { value: o.gloss ?? 0 },
+    uIris: { value: col(o.iris ?? '#e0b84a') },
     uGlow: PROP_U.uGlow,
     uEmber: { value: 0 },
     uSoftCrease: { value: o.softCrease ?? 0 },

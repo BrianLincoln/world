@@ -27,6 +27,8 @@ export interface WorldQuery {
   landmarks?(pos: THREE.Vector3, vel: THREE.Vector3, radius: number): void;
   /** Highest boulder surface under a circle, for rocks up to `maxRise` tall; -Infinity if none. */
   ramp?(x: number, z: number, radius: number, maxRise: number): number;
+  /** Top of anything built (cabin walls and roofs) under a circle, however tall; -Infinity if none. What a clinger climbs. */
+  climbTop?(x: number, z: number, radius: number): number;
   /** 0..1 bog wetland (mud slows most mounts). */
   wetland?(x: number, z: number): number;
   /** 0..1 forest density. */
@@ -381,11 +383,18 @@ export interface MountSpec {
     turn: number;
     /** How quickly it answers the stick (1/s; default 2.2). Low = floaty. */
     ease?: number;
+    /**
+     * A rocket (the drakitten's): in the air Shift fires it instead of the
+     * sprint, driving it along at `speed` whether you push or not. It heats
+     * as it burns: `burn` seconds of it overheats it and it sputters out
+     * until it has cooled (`cool` seconds from hot to cold).
+     */
+    rocket?: { speed: number; climb: number; burn: number; cool: number };
   };
 }
 
 /** One-frame ability happenings, for presentation (dust, sparks, sound). */
-export type MountFx = 'phase' | 'burrow' | 'emerge' | 'charge' | 'dive' | 'surface' | null;
+export type MountFx = 'phase' | 'burrow' | 'emerge' | 'charge' | 'dive' | 'surface' | 'ignite' | 'fizzle' | null;
 
 /**
  * Traversal traits for the ground mounts beyond the stelk. Each changes how
@@ -408,8 +417,19 @@ export interface MountTrait {
   airTurn?: number;
   /** Gravity multiplier. */
   gravity?: number;
-  /** Clings to whatever it's on: never falls off a ledge, crawls over boulders. */
+  /**
+   * Clings to whatever it's on: never falls off a ledge, crawls over
+   * boulders, and goes straight up cabin walls, over the roof and down the
+   * far side (see `climbWall`).
+   */
   cling?: boolean;
+  /**
+   * Snake steering: once going it crawls on by itself (W or a turn starts
+   * it, S stops it); each press of left / right turns it a right angle on
+   * the spot, from wherever it's facing, at full speed with no slide
+   * (`turn` and `gather` don't apply).
+   */
+  snap?: boolean;
   /** Walks through trees and bushes, and is quicker in the forest. */
   thicket?: boolean;
   /** Bog mud doesn't slow it (everything else with a trait wades). */
@@ -439,6 +459,28 @@ export class RideMode implements MovementMode {
     this.gallopState.speed = f;
   }
 
+  /**
+   * A rocket flier's burn: thrust eases on and off, heat builds while it
+   * burns and bleeds away when it doesn't; overheated, it won't light
+   * again until it's cooled to a third. Returns the thrust (0..1).
+   */
+  private burn(r: NonNullable<MountSpec['fly']>['rocket'], want: boolean, dt: number) {
+    const st = this.gallopState;
+    st.fx = null;
+    if (!r) { st.rocket = 0; return 0; }
+    if (st.overheat && st.heat < 0.35) st.overheat = false;
+    const on = want && !st.overheat;
+    if (on && st.rocket < 0.05) st.fx = 'ignite';
+    st.rocket += ((on ? 1 : 0) - st.rocket) * (1 - Math.exp(-(on ? 5 : 2.5) * dt));
+    if (st.rocket < 0.002) st.rocket = 0;
+    st.heat = THREE.MathUtils.clamp(st.heat + (on ? dt / r.burn : -dt / r.cool), 0, 1);
+    if (on && st.heat >= 1) {
+      st.overheat = true;
+      st.fx = 'fizzle';
+    }
+    return st.rocket;
+  }
+
   private gallop(b: Body, ctx: MoveContext, s: MountSpec): string | null {
     gallopUpdate(this.gallopState, b, ctx, s);
     return null;
@@ -454,6 +496,7 @@ export class RideMode implements MovementMode {
     const floor = (feetY: number) => world.floorHeight ? world.floorHeight(b.pos.x, b.pos.z, feetY, s.radius) : world.groundHeight(b.pos.x, b.pos.z);
 
     if (b.grounded && s.walk) {
+      this.burn(s.fly?.rocket, false, dt);
       const target = input.run ? s.walk.sprint : s.walk.speed;
       const k = 1 - Math.exp(-(wishLen < 0.05 ? 7 : 4.5) * dt);
       b.vel.x += (wish.x * target - b.vel.x) * k;
@@ -481,18 +524,34 @@ export class RideMode implements MovementMode {
     // Flight.
     const f = s.fly;
     if (!f) return null;
-    const speed = input.run ? f.sprint : f.speed;
-    const ease = f.ease ?? 2.2;
-    const kh = 1 - Math.exp(-(wishLen > 0.05 ? ease : Math.min(0.9, ease * 0.4)) * dt);
+    const rk = this.burn(f.rocket, input.run, dt);
+    let speed = input.run && !f.rocket ? f.sprint : f.speed;
+    let ease = f.ease ?? 2.2;
+    let push = wishLen > 0.05;
+    if (rk > 0.01) {
+      // A rocket drives on along the heading even with the stick let go,
+      // and answers it more stiffly the harder it burns.
+      speed = THREE.MathUtils.lerp(speed, f.rocket!.speed, rk);
+      ease = THREE.MathUtils.lerp(ease, 1.6, rk);
+      if (!push) wish.set(Math.sin(b.heading), 0, Math.cos(b.heading));
+      else wish.normalize();
+      push = true;
+    }
+    const kh = 1 - Math.exp(-(push ? ease : Math.min(0.9, ease * 0.4)) * dt);
     b.vel.x += (wish.x * speed - b.vel.x) * kh;
     b.vel.z += (wish.z * speed - b.vel.z) * kh;
-    const vy = input.up ? f.climb : input.down ? -f.climb * 1.3 : -f.sink;
+    const climb = THREE.MathUtils.lerp(f.climb, f.rocket?.climb ?? f.climb, rk);
+    const vy = input.up ? climb : input.down ? -climb * 1.3 : -f.sink * (1 - rk);
     b.vel.y += (vy - b.vel.y) * (1 - Math.exp(-3 * dt));
     this.fp.set(b.vel.x, 0, b.vel.z);
     turnToward(b, this.fp.lengthSq() > 0.25 ? this.fp : wish, f.turn, dt);
     const vyBefore = b.vel.y;
-    b.pos.addScaledVector(b.vel, dt);
-    world.collide?.(b.pos, b.vel, s.radius);
+    // Sub-steps of at most 0.5 m, so a rocket can't skip through a trunk.
+    const steps = Math.max(1, Math.min(30, Math.ceil((Math.hypot(b.vel.x, b.vel.z) * dt) / 0.5)));
+    for (let i = 0; i < steps; i++) {
+      b.pos.addScaledVector(b.vel, dt / steps);
+      world.collide?.(b.pos, b.vel, s.radius);
+    }
     const g = floor(b.pos.y);
     const water = world.groundHeight(b.pos.x, b.pos.z) < world.waterLevel;
     if (s.walk && !water && b.pos.y <= g + 0.02 && vyBefore <= 0.5) {
@@ -537,8 +596,19 @@ export class GallopState {
   static = 0;
   /** Divers: how far under the swimming line (m). */
   depth = 0;
+  /** Clingers on a wall: 1 going up, -1 going down, 0 off it; the way into the wall. */
+  wall = 0;
+  wallX = 0;
+  wallZ = 0;
+  /** Snake steerers: crawling on by itself, and last frame's stick x (for presses). */
+  crawl = false;
+  stickX = 0;
   /** Seconds before Space can do the ability again. */
   cool = 0;
+  /** Rocket fliers: 0..1 thrust now, 0..1 heat, and sputtered out (until it cools). */
+  rocket = 0;
+  heat = 0;
+  overheat = false;
   /** This frame's ability happening. */
   fx: MountFx = null;
 }
@@ -600,10 +670,24 @@ export function gallopUpdate(st: GallopState, b: Body, ctx: MoveContext, s: Moun
   }
   const under = st.burrow > 0;
   const ghost = st.phase > 0 || under;
+  // Snake steering: a press left or right is one right-angle turn.
+  let snake = 0;
+  if (tr?.snap) {
+    const sx = input.x;
+    if (Math.abs(sx) > 0.5 && Math.abs(st.stickX) <= 0.5) snake = Math.sign(sx);
+    st.stickX = sx;
+    if (input.y < -0.5) st.crawl = false;
+    else if (input.y > 0.5 || snake) st.crawl = true;
+  }
+  if (st.wall) { climbWall(st, b, ctx, s, wish, wl, snake); return; }
 
   // Where the rider wants to go, relative to where the mount points.
   let target = 0;
-  if (wl > 0.05) {
+  if (tr?.snap) {
+    if (snake && (b.grounded || deep)) b.heading -= snake * Math.PI / 2;
+    target = st.crawl ? (input.run ? walk.sprint : walk.speed) : 0;
+    if (deep) target = Math.min(target, walk.speed * (s.swim ?? 0.4));
+  } else if (wl > 0.05) {
     let d = Math.atan2(wish.x, wish.z) - b.heading;
     d = Math.atan2(Math.sin(d), Math.cos(d));
     let gait = input.run ? walk.sprint : input.walk ? walk.speed * 0.4 : walk.speed;
@@ -627,7 +711,7 @@ export function gallopUpdate(st: GallopState, b: Body, ctx: MoveContext, s: Moun
     // Brisk up to the canter, then `gather` seconds on to the full gallop.
     const up = target > st.speed;
     const brake = tr?.brake;
-    const accel = up ? (st.speed < walk.speed ? 9 : (walk.sprint - walk.speed) / (s.gather ?? 2)) : wl < 0.05 ? brake ?? 12 : brake ? brake * 1.3 : 16;
+    const accel = tr?.snap ? (up ? 45 : 60) : up ? (st.speed < walk.speed ? 9 : (walk.sprint - walk.speed) / (s.gather ?? 2)) : wl < 0.05 ? brake ?? 12 : brake ? brake * 1.3 : 16;
     st.speed += THREE.MathUtils.clamp(target - st.speed, -accel * dt, accel * dt);
     // Uphill drags, downhill runs on a little.
     if (b.grounded && !under) {
@@ -759,9 +843,27 @@ export function gallopUpdate(st: GallopState, b: Body, ctx: MoveContext, s: Moun
     if (!tr?.cling && b.pos.y - g > Math.max(0.5, hs * dt * 1.6)) {
       b.grounded = false; // ran off a ledge
       b.vel.y = 0;
+    } else if (tr?.cling && b.pos.y - g > 1.2) {
+      // Over the edge of a roof or a sheer drop: it curls over and crawls
+      // down the face rather than dropping.
+      b.pos.x += fx * s.radius * 0.5;
+      b.pos.z += fz * s.radius * 0.5;
+      st.wall = -1;
+      st.wallX = -fx;
+      st.wallZ = -fz;
+      b.vel.y = 0;
     } else {
       b.pos.y = g;
       b.vel.y = 0;
+      // Nose up against a wall taller than a step: up it goes.
+      if (tr?.cling && world.climbTop && target > 0.5) {
+        const top = world.climbTop(b.pos.x + fx * (s.radius + 0.1), b.pos.z + fz * (s.radius + 0.1), s.radius * 0.4);
+        if (top > b.pos.y + 0.5) {
+          st.wall = 1;
+          st.wallX = fx;
+          st.wallZ = fz;
+        }
+      }
     }
   } else if (b.pos.y <= g) {
     b.events.push({ type: 'land', impact: Math.max(0, -vyBefore) });
@@ -769,6 +871,65 @@ export function gallopUpdate(st: GallopState, b: Body, ctx: MoveContext, s: Moun
     b.vel.y = 0;
     b.grounded = true;
   }
+}
+
+/**
+ * A clinger on a wall (a cabin's side, the drop off its roof). It holds to
+ * the face: pushing into the wall climbs, pushing away climbs down, sideways
+ * shuffles along it. At the top it pulls itself over onto the roof; at the
+ * bottom it steps off onto the ground. The head points the way it's going
+ * (up the wall or down it), and presentation reads the body's path.
+ */
+function climbWall(st: GallopState, b: Body, ctx: MoveContext, s: MountSpec, wish: THREE.Vector3, wl: number, snake: number) {
+  const { dt, world, input } = ctx;
+  const walk = s.walk!;
+  const nx = st.wallX, nz = st.wallZ;
+  const r = s.radius;
+  const gait = (input.run ? walk.sprint : input.walk ? walk.speed * 0.4 : walk.speed) * 0.8;
+  const into = wl > 0.05 ? (wish.x * nx + wish.z * nz) : 0;
+  const side = wl > 0.05 ? (wish.z * nx - wish.x * nz) : 0;
+  const floor = (x: number, z: number, y: number) => world.floorHeight ? world.floorHeight(x, z, y, r) : world.groundHeight(x, z);
+  const face = (x: number, z: number) => Math.max(world.climbTop?.(x, z, r * 0.4) ?? -Infinity, world.groundHeight(x, z));
+  let vy = Math.abs(into) > 0.25 ? Math.sign(into) * gait * Math.min(1, wl) : 0;
+  if (s.trait?.snap) {
+    // A snake steerer crawls on the way it's facing; a turn doubles it back.
+    if (snake) st.wall = -st.wall;
+    vy = st.crawl ? st.wall * gait : 0;
+  }
+  // Shuffled off the end of the wall: nothing to hold, so it slides down.
+  if (face(b.pos.x + nx * (r + 0.1), b.pos.z + nz * (r + 0.1)) < b.pos.y - 0.3) vy = -gait;
+  if (vy) st.wall = Math.sign(vy);
+  // Shuffle along the face (the walls hold it off them).
+  if (Math.abs(side) > 0.25 && !s.trait?.snap) {
+    b.pos.x += -nz * side * gait * 0.6 * dt;
+    b.pos.z += nx * side * gait * 0.6 * dt;
+    world.collide?.(b.pos, b.vel, r);
+  }
+  b.pos.y += vy * dt;
+  b.heading = Math.atan2(nx, nz) + (st.wall < 0 ? Math.PI : 0);
+  const fx = Math.sin(b.heading), fz = Math.cos(b.heading);
+  st.speed = Math.abs(vy);
+  b.vel.set(fx * st.speed, 0, fz * st.speed);
+  b.grounded = true;
+  if (vy > 0) {
+    // Over the top: onto whatever is just past the lip, once level with it.
+    const cx = b.pos.x + nx * r, cz = b.pos.z + nz * r;
+    const top = face(cx, cz);
+    if (b.pos.y >= top) {
+      b.pos.set(cx, top, cz);
+      b.pos.y = Math.max(top, floor(cx, cz, top));
+      st.wall = 0;
+      st.speed = gait;
+    }
+  } else {
+    const g = floor(b.pos.x, b.pos.z, b.pos.y);
+    if (b.pos.y <= g) {
+      b.pos.y = g;
+      st.wall = 0;
+      if (vy < 0) st.speed = gait;
+    }
+  }
+  if (!st.wall) b.vel.set(fx * st.speed, 0, fz * st.speed);
 }
 
 /**

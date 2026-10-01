@@ -1,5 +1,6 @@
 import type { Beast } from './beast';
 import { BogHag } from './boghag';
+import { Drakitten } from './drakitten';
 import { Brambler } from './brambler';
 import { Glimmer } from './glimmer';
 import { LanternHare } from './lanternhare';
@@ -17,6 +18,7 @@ import { Wurm } from './wurm';
 //   rockhopper   crags: high, steep, rocky     boghag       bogs and marshy shores
 //   brambler     deep forest                   wurm         the hollows, cliffs
 //   stormback    open downs                    lanternhare  meadows and woodland edges
+//   drakitten    sunny open hillsides and tors
 export function makeBeasts(): Beast[] {
-  return [new Mossback(), new Glimmer(), new Mudsnoot(), new Moonmoth(), new Rockhopper(), new BogHag(), new Brambler(), new Wurm(), new Stormback(), new LanternHare()];
+  return [new Mossback(), new Glimmer(), new Mudsnoot(), new Moonmoth(), new Rockhopper(), new BogHag(), new Brambler(), new Wurm(), new Stormback(), new LanternHare(), new Drakitten()];
 }

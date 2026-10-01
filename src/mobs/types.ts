@@ -74,12 +74,14 @@ export interface MobCtx {
   puff(at: THREE.Vector3, count: number, size: number, spread: number): void;
   /** 0 day .. 1 night (some creatures only come out after dark). */
   night?: number;
+  /** A puff of rocket smoke left hanging in the air (drakittens). */
+  trail?(at: THREE.Vector3, size: number): void;
 }
 
 export type SpeciesName =
   | 'floof' | 'crow' | 'stelk'
   | 'mossback' | 'glimmer' | 'mudsnoot' | 'moonmoth' | 'rockhopper'
-  | 'boghag' | 'brambler' | 'wurm' | 'stormback' | 'lanternhare';
+  | 'boghag' | 'brambler' | 'wurm' | 'stormback' | 'lanternhare' | 'drakitten';
 
 export interface Species {
   readonly name: SpeciesName;

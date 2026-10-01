@@ -4,7 +4,7 @@
 import { chromium } from 'playwright';
 import http from 'node:http'; import fs from 'node:fs'; import path from 'node:path';
 const root = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
-const ALL = ['mossback', 'glimmer', 'mudsnoot', 'moonmoth', 'rockhopper', 'boghag', 'brambler', 'wurm', 'stormback', 'lanternhare'];
+const ALL = ['mossback', 'glimmer', 'mudsnoot', 'moonmoth', 'rockhopper', 'boghag', 'brambler', 'wurm', 'stormback', 'lanternhare', 'drakitten'];
 const [out, names = ALL.join(','), scenes = 'look,ride', extra = ''] = process.argv.slice(2);
 fs.mkdirSync(out, { recursive: true });
 const server = http.createServer((req, res) => {

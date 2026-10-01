@@ -7,6 +7,12 @@ count.** Keep this file lean. Depth lives in:
 - `DESIGN.md`: our shared design doc (pillars, decisions, player sequence).
   Keep it current when a design decision changes; it's not a build log.
   Never build anything from its Parking Lot unless asked.
+  **The story is changing** (2026-09-30) to "The giant": a giant carries
+  off the village's hearth spirits, and you follow its footprints through
+  mount-gated puzzle dungeons. Decided, not built. Read its "Conflicts to
+  settle" before touching the story, and don't resolve one unasked.
+  What to build next is "Giant slice 1" at the end of `NOTES.md`.
+  No combat, no text, nothing scary.
 - `docs/BRIEF.md`: the original request, verbatim, plus how to read `/inspo`.
   Read it before any visual change.
 - `NOTES.md`: stack reasoning, architecture, every major decision, known
@@ -50,12 +56,19 @@ npm run shots    # build + headless GPU screenshots -> shots/   (look at them!)
 - `src/player/`: input → movement modes → character rig; `orbitCamera.ts`.
 - `src/mobs/`: creatures. `manager.ts` (spawning, lasso, leads, shadows),
   `floof.ts`, `crow.ts`, `stelk.ts` (geometry + brain + animation per species),
-  `beast.ts` (shared brain/body for the ten wilder kinds in `beasts.ts`;
+  `beast.ts` (shared brain/body for the eleven wilder kinds in `beasts.ts`;
   their ride traits are `MountTrait` in `movement.ts`),
   `parts.ts` (instanced part batches, fur), `rope.ts`.
 - `src/vehicles/`: bicycles. `bicycle.ts` (geometry, instanced parts,
   skeleton), `bikes.ts` (seeded placement, parking, riding presentation,
   rider IK targets). Movement is `BikeMode`.
+- `src/story/`: `story.ts` (the director: runs phase tables, actions,
+  inventory, save), `phase1.ts` / `phase3.ts` (steps as data), `spirit.ts`
+  (the hearth spirit: wants, gestures, acts), `build.ts` (sketch-and-slots
+  building; `cabin.ts` and `stable.ts` are the buildables), `herd.ts`
+  (creatures that live at the stable), `pointer.ts`, `icons.ts`
+  (pictograms), `overlay.ts`. `src/world/harvest.ts`: felling, smashing,
+  regrowth. `src/world/colliders.ts`: prop collision.
 - `src/story/beacons.ts`: beacon towers at runtime (drawing, the lock,
   freeing the tower spirit = lighting, being slurped in via `CarriedMode`,
   the head view, the tower camera's aim and ember flight, save).
