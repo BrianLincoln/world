@@ -50,6 +50,7 @@ npm run shots    # build + headless GPU screenshots -> shots/   (look at them!)
 
 ## Where things are
 - `src/world/`: `worldgen.ts` (height, biomes incl. bog/glimmerwood/hollows, POIs, paths;
+  `startWoods`: forest grown round the start clearing and the way in, so the cabin is hidden round the bend; the story never plants trees;
   how much is water: `scripts/water.mjs`, about 20% since 2026-10-02),
   `chunkBuilder.ts` (worker: grid, normals, scatter), `terrain.ts`
   (quadtree streaming, LOD, instancing), `towers.ts` (the beacon-tower
@@ -106,7 +107,8 @@ npm run shots    # build + headless GPU screenshots -> shots/   (look at them!)
   `fjellheim.offer1.<seed>`). No guide in it. The giant's side of it is
   `awake` / `mouth` / `gulp` / `grin` / `look` in `giant.ts`; its open
   mouth is a real hole into the hollow of its head (`throat`, `uHeadInv`).
-  Its breath and the steam off its prints show only while it walks.
+  It has no breath clouds (removed 2026-10-02); the only puffs off it are
+  the dust of its footfalls. The steam off its prints shows only while it walks.
   Dev: `?fresh=1&cp=offer`, `__ow.winDungeon()`,
   `__ow.offering().debug('held'|'placed'|'given')`; check a change with
   `scripts/offering.mjs <dir> play,reload,views,mouth` and look at the frames.
@@ -147,7 +149,10 @@ npm run shots    # build + headless GPU screenshots -> shots/   (look at them!)
 - `src/audio/ambience.ts`: the music. One loop for outdoor exploration
   (a test of the musical language: no biome beds, air, night layer or
   plucks until asked), faded in and out over `FADE`, hushed in cutscenes
-  and the dungeon. Volume is `Ambience.gains.music`. On the `Sfx` context
+  and the dungeon. The giant's visit has three pieces of its own, played
+  once each and cross-faded (`CUES`); which one is `Visit.music`, set by
+  the visit's own events; check with `scripts/music.mjs [tower] [real]`.
+  Volume is `Ambience.gains.music` (`scene`: the visit's pieces, times that). On the `Sfx` context
   (`src/story/audio.ts`, the synthesised effects), its own gain. Files are
   `public/audio/*.mp3`, made from the WAV by `scripts/audio.mjs`.
 - `src/ui/debug.ts`: the panel and HUD. `towerDebug.ts`: tower sight lines

@@ -265,6 +265,7 @@ export function makeCreatureMaterial(o: CreatureLook = {}) {
     uLookRange: { value: new THREE.Vector2(...(o.lookRange ?? [0.12, 0.1])) },
     uEyeTilt: { value: o.eyeTilt ?? 0 },
     uBrow: { value: 0 },
+    uSad: { value: new THREE.Vector2() },
     uMouthOrigin: { value: o.mouthOrigin ?? new THREE.Vector3() },
     uMouth: { value: new THREE.Vector3(...(o.mouth ?? [-0.2, 0.2, 1])) },
     uMouthW: { value: new THREE.Vector3(...(o.mouthW ?? [0, 0, 0])) },

@@ -155,8 +155,6 @@ export interface GiantHost {
   ground: (x: number, z: number) => number;
   /** A foot comes down: the ground under its ankle, which foot, and the way it points. */
   onStep?: (at: THREE.Vector3, foot: number, yaw: number) => void;
-  /** It breathes out (walking only): the mouth, and the way it faces. */
-  onBreath?: (at: THREE.Vector3, dir: THREE.Vector3) => void;
 }
 
 export class Giant {
@@ -236,7 +234,6 @@ export class Giant {
   private trees: { mesh: THREE.Mesh; rest: THREE.Quaternion; sx: Spring; sz: Spring }[] = [];
   private lastTop = new THREE.Vector3();
   private topVel = new THREE.Vector3();
-  private breathT = 2;
 
   constructor(private host: GiantHost) {
     const { pelvis, torso, head } = this;
@@ -648,15 +645,6 @@ export class Giant {
       this.hollow.worldToLocal(va.copy(this.gulpAt));
       this.hollowMat.uniforms.uGlowAt.value.set(va.x, va.y, va.z, this.gulp);
       this.mat.uniforms.uHeadInv.value.copy(this.hollow.matrixWorld).invert();
-    }
-
-    this.breathT -= dt;
-    // (Its breath shows only while it walks: standing or sat, the clouds round it were a distraction.)
-    if (this.breathT <= 0 && this.walking && this.under < 0.5) {
-      this.breathT = 5.5;
-      this.head.updateWorldMatrix(true, false);
-      const at = this.head.localToWorld(va.set(0, 0.5, 9.5));
-      this.host.onBreath?.(at, vb.set(Math.sin(this.pelvis.rotation.y), 0, Math.cos(this.pelvis.rotation.y)));
     }
   }
 

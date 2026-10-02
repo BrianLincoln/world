@@ -813,6 +813,8 @@ uniform vec2 uLookRange;
 uniform float uEyeTilt;
 /** 0..1: a set brow. The top of each eye is cut on a slant, low at the inner corner (resolve, not anger: the eye stays wide). */
 uniform float uBrow;
+/** Grief: x = 0..1 heavy lids, cut on the other slant (low at the outer corner); y = a tear's fall from one eye, 0..1 (0 = none). */
+uniform vec2 uSad;
 uniform vec3 uMouthOrigin;
 /** Mouth: (y centre, half width, curve), in radians around uMouthOrigin. */
 uniform vec3 uMouth;
@@ -905,6 +907,7 @@ void main() {
       vec2 qq = (me - uEyePos) / r;
       d = (length(qq) - 1.0) * min(r.x, r.y);
       if (uBrow > 0.0) d = max(d, (me.y - uEyePos.y) - uEyeSize.y * (1.05 - 0.8 * uBrow) - (me.x - uEyePos.x) * 0.55 * uBrow);
+      if (uSad.x > 0.0) d = max(d, (me.y - uEyePos.y) - uEyeSize.y * (1.05 - 0.85 * uSad.x) + (me.x - uEyePos.x) * 0.75 * uSad.x);
       float white = fillE(d, aa);
       col = mix(col, uWhite * mix(uLightCol, vec3(1.0), 0.55 - 0.25 * uNight), white);
       // Pupils share one look direction so they never cross.
@@ -926,6 +929,17 @@ void main() {
     } else {
       float line = max(abs(m.y - uEyePos.y) - lw * 0.8, abs(m.x - uEyePos.x) - uEyeSize.x * 0.85);
       col = mix(col, uInk, fillE(line, aa));
+    }
+    if (uSad.y > 0.0 && p.x > 0.0) {
+      // A tear: wells under the outer corner, rolls down the cheek and is gone.
+      float tr = uEyeSize.x * 0.33 * smoothstep(0.0, 0.25, uSad.y);
+      vec2 tq = p - vec2(uEyePos.x + uEyeSize.x * 0.5, uEyePos.y - uEyeSize.y * (1.0 + 2.2 * uSad.y * uSad.y));
+      // (Pointed at the top.)
+      tq.x *= 1.0 + max(tq.y, 0.0) / max(tr, 1e-4) * 0.9;
+      float td = length(tq * vec2(1.0, 0.8)) - tr;
+      float ta = 1.0 - smoothstep(0.75, 1.0, uSad.y);
+      col = mix(col, mix(uWhite, vec3(0.62, 0.82, 0.98), 0.55) * mix(uLightCol, vec3(1.0), 0.6), fillE(td, aa) * ta);
+      col = mix(col, uInk, fillE(abs(td) - lw * 0.5, aa) * ta);
     }
   } else if (tag > 1.5 && tag < 2.5) {
     // A small frown: a curve that droops at both ends (inspo woff).

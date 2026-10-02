@@ -1,8 +1,7 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { buildBoulder, buildConifer, TREE_HEIGHT } from '../gfx/geometry';
-import { makeCasterMaterial, makePropMaterial } from '../gfx/materials';
-import { SHADOW_LAYER } from '../gfx/groundShadow';
+import { makePropMaterial } from '../gfx/materials';
 import type { StoryStone, StoryTree } from '../world/storySite';
 import { buildAxe, buildBlock, buildLog, buildPebble, buildPick, buildStump, PICK_TIP } from './geometry';
 
@@ -265,64 +264,6 @@ export class Flyer {
       }
     }
     return false;
-  }
-}
-
-// ---------------------------------------------------------------- planted woods
-
-export interface WoodTree { x: number; y: number; z: number; sc: number; rot: number; lean: number; tone: number }
-
-/**
- * Extra conifers round the start clearing and along the first stretch of the
- * path, so you always set out from the woods (the natural forest near the
- * start can be thin). Drawn exactly like world trees: instanced prop meshes
- * in world space, plus ground-shadow casters.
- */
-export class Woods {
-  readonly group = new THREE.Group();
-
-  constructor(readonly trees: WoodTree[]) {
-    if (!trees.length) return;
-    const mat = makePropMaterial({ bend: 0.24, wind: 0.012, heightRef: TREE_HEIGHT, toneVar: 0.22, doubleSide: true, cutaway: 'occluders' });
-    const variants = [buildConifer(7, 1), buildConifer(31, 1)];
-    let cx = 0, cz = 0;
-    for (const t of trees) { cx += t.x; cz += t.z; }
-    cx /= trees.length; cz /= trees.length;
-    let rad = 0;
-    for (const t of trees) rad = Math.max(rad, Math.hypot(t.x - cx, t.z - cz));
-    const sphere = new THREE.Sphere(new THREE.Vector3(cx, trees[0].y + 8, cz), rad + 20);
-    const rows = (list: WoodTree[]) => {
-      const a0 = new Float32Array(list.length * 4), a1 = new Float32Array(list.length * 4);
-      list.forEach((t, i) => { a0.set([t.x, t.y - 0.4, t.z, t.sc], i * 4); a1.set([t.rot, 1, t.lean, t.tone], i * 4); });
-      return [new THREE.InstancedBufferAttribute(a0, 4), new THREE.InstancedBufferAttribute(a1, 4)];
-    };
-    variants.forEach((geo, v) => {
-      const list = trees.filter((t) => (t.tone < 0.5 ? 0 : 1) === v);
-      if (!list.length) return;
-      const [i0, i1] = rows(list);
-      const ig = new THREE.InstancedBufferGeometry();
-      ig.index = geo.index;
-      ig.setAttribute('position', geo.attributes.position);
-      ig.setAttribute('normal', geo.attributes.normal);
-      ig.setAttribute('aKind', geo.attributes.aKind);
-      ig.setAttribute('aI0', i0);
-      ig.setAttribute('aI1', i1);
-      ig.instanceCount = list.length;
-      ig.boundingSphere = sphere;
-      this.group.add(new THREE.Mesh(ig, mat));
-    });
-    const [i0, i1] = rows(trees);
-    const cg = new THREE.InstancedBufferGeometry();
-    const low = buildConifer(7, 2);
-    cg.index = low.index;
-    cg.setAttribute('position', low.attributes.position);
-    cg.setAttribute('aI0', i0);
-    cg.setAttribute('aI1', i1);
-    cg.instanceCount = trees.length;
-    cg.boundingSphere = new THREE.Sphere(sphere.center, sphere.radius + 45);
-    const caster = new THREE.Mesh(cg, makeCasterMaterial({ bend: 0.24, wind: 0.012, heightRef: TREE_HEIGHT }));
-    caster.layers.set(SHADOW_LAYER);
-    this.group.add(caster);
   }
 }
 

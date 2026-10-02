@@ -18,11 +18,9 @@ import { Hud } from './hud';
 import { glowCanvas, iconCanvas, tex, type IconName } from './icons';
 import { Billboard, OVERLAY_U } from './overlay';
 import { PHASE1, type Anchor, type PhaseDef, type Resource, type StepDef, type TargetTag } from './phase1';
-import { AxeProp, ChopTree, easeGlint, Flyer, LassoProp, PickProp, SmashRock, Stumps, Woods, type WoodTree } from './props';
+import { AxeProp, ChopTree, easeGlint, Flyer, LassoProp, PickProp, SmashRock, Stumps } from './props';
 import type { Colliders, PropHit } from '../world/colliders';
 import { BIG_ROCK, Harvest, rubbleOf, type RegrowCtx, type Taken } from '../world/harvest';
-import { hash01 } from '../core/rng';
-import { segDist } from '../world/worldgen';
 import { PAT, Spirit } from './spirit';
 import { Village } from './village';
 
@@ -173,7 +171,6 @@ export class Story {
   private giftT = -1;
   private giftBall = new THREE.Mesh(new THREE.IcosahedronGeometry(1, 3), makeSolidMaterial('#ffcf73', 0.8));
   readonly far: FarLight;
-  readonly woods: Woods;
   private sparkles = new Puffs('#ffe7a0', 30, 0.8, 0.9);
   private chipPuffs = new Puffs('#ecd3a2', 24, 0, 0.6);
   private flyers: { f: Flyer; res: Resource; stone: number }[] = [];
@@ -268,8 +265,6 @@ export class Story {
     // The axe leans on the side facing the yard (where you walk in).
     this.axe = new AxeProp(site.stump.x, ground(site.stump.x, site.stump.z), site.stump.z, Math.atan2(site.paths[0].bx - cab.x, site.paths[0].bz - cab.z));
     this.group.add(this.axe.group);
-    this.woods = new Woods(this.plantWoods(gen));
-    this.group.add(this.woods.group);
     this.far = new FarLight(site);
     this.group.add(this.far.mesh);
     this.overlayGroup.add(this.far.halo.mesh);
@@ -406,55 +401,6 @@ export class Story {
     return this.cabin.inside(x, z, -0.2) ? Math.max(g, this.site.y + CAB.floor) : g;
   }
 
-  /**
-   * Conifers round the start clearing and along the first two-thirds of the
-   * path from it, wherever the natural forest is thin, so the walk always
-   * starts in the woods and the cabin opens up round the bend. Seeded: the
-   * same trees every time.
-   */
-  private plantWoods(gen: WorldGen): WoodTree[] {
-    const site = this.site;
-    const seed = gen.seed;
-    const approach = site.paths.slice(2); // [0] door->yard, [1] to the bank
-    const out: WoodTree[] = [];
-    if (!approach.length) return out;
-    const S = site.spawn;
-    const pathD = (x: number, z: number) => approach.reduce((d, p) => Math.min(d, segDist(x, z, p)), Infinity);
-    const trail = gen.journey.toHome;
-    const journeyD = (x: number, z: number) => {
-      let d = Infinity;
-      for (let k = 0; k + 1 < trail.length; k++) d = Math.min(d, segDist(x, z, { ax: trail[k][0], az: trail[k][1], bx: trail[k + 1][0], bz: trail[k + 1][1] }));
-      return d;
-    };
-    for (let i = 0; i < 700 && out.length < 95; i++) {
-      const r = (k: number) => hash01(i, k, seed, 977);
-      let x: number, z: number;
-      if (r(0) < 0.4) {
-        const a = r(1) * Math.PI * 2, d = 10 + r(2) * 16;
-        x = S.x + Math.cos(a) * d; z = S.z + Math.sin(a) * d;
-      } else {
-        // Beside the path, over the stretch nearest the start.
-        const seg = approach[approach.length - 1 - Math.floor(r(1) * approach.length * 0.7)];
-        const t = r(2);
-        const px = seg.ax + (seg.bx - seg.ax) * t, pz = seg.az + (seg.bz - seg.az) * t;
-        const l = Math.hypot(seg.bx - seg.ax, seg.bz - seg.az) || 1;
-        const side = (r(3) < 0.5 ? -1 : 1) * (5.4 + r(4) * 9);
-        x = px - ((seg.bz - seg.az) / l) * side; z = pz + ((seg.bx - seg.ax) / l) * side;
-      }
-      const h = gen.height(x, z);
-      if (h < 2.5 || Math.abs(gen.height(x + 2, z) - gen.height(x - 2, z)) > 1.4) continue;
-      if (gen.forestDensity(x, z, h) > 0.35) continue; // real forest already
-      if (pathD(x, z) < 5.2 || Math.hypot(x - S.x, z - S.z) < 9.5) continue;
-      // Clear of the journey's trail to the home tower by the whole canopy.
-      if (journeyD(x, z) < 1.2 + 1.6 + 2.4 * (0.75 + r(5) * 0.45)) continue;
-      if (Math.hypot(x - site.x, z - site.z) < 24) continue;
-      if (gen.storyBlock(x, z, 1.2, 'tree')) continue;
-      if (out.some((t) => Math.hypot(t.x - x, t.z - z) < 3.6)) continue;
-      out.push({ x, y: h, z, sc: 0.75 + r(5) * 0.45, rot: r(6) * 6.283, lean: r(7) - 0.5, tone: r(8) });
-    }
-    return out;
-  }
-
   // ------------------------------------------------------------ the lasso gift
 
   /** Little hearts floating up (a creature coming home). */
@@ -570,16 +516,6 @@ export class Story {
     this.village?.push(pos, vel, r);
     const l = siteToLocal(this.site, pos.x, pos.z);
     if (Math.abs(l.x) > 130 || Math.abs(l.z) > 130) return;
-    for (const t of this.woods.trees) {
-      const rad = 0.34 * t.sc + r;
-      const dx = pos.x - t.x, dz = pos.z - t.z;
-      const dd = Math.hypot(dx, dz);
-      if (dd >= rad || dd < 1e-4 || pos.y > t.y + 12) continue;
-      pos.x = t.x + (dx / dd) * rad;
-      pos.z = t.z + (dz / dd) * rad;
-      const vn = (vel.x * dx + vel.z * dz) / dd;
-      if (vn < 0) { vel.x -= (dx / dd) * vn; vel.z -= (dz / dd) * vn; }
-    }
     for (const rk of this.rocks) {
       if (rk.broken) continue;
       const rad = rk.radius * 0.95 + r;
@@ -1821,7 +1757,8 @@ export class Story {
    * Where the task is, for the far-off pointer (story/pointer.ts): the
    * spirit, which always waits at (or leads you to) the next job. Nothing
    * while you're gathering (trees and rocks are anywhere), resting, or out
-   * catching a creature; leading one, the pasture gate.
+   * catching a creature; leading one, the pasture gate. Nothing at the
+   * very start either: until you've met the spirit, it's yours to find.
    */
   guide(leading: boolean): Guide | null {
     if (!this.d.active || this.lent) return null;
@@ -1829,7 +1766,7 @@ export class Story {
     switch (st.kind) {
       case 'gather': case 'rest': return null;
       case 'herd': return leading && this.stable ? { at: this.stable.gate, near: 30 } : null;
-      case 'meet': return { at: this.spirit.pos, near: Math.max(st.radius, 30) };
+      case 'meet': return this.phaseIndex === 0 ? null : { at: this.spirit.pos, near: Math.max(st.radius, 30) };
       default: return { at: this.spirit.pos, near: 30 };
     }
   }

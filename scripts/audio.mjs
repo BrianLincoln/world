@@ -8,15 +8,15 @@
 // (PAD seconds of each): the file is periodic all the way through, and the
 // game loops a window exactly one period long inside it (see `PAD` and `len`
 // in src/audio/ambience.ts, which must match what this prints). One-shots go
-// through as they are.
+// through as they are. A WAV that isn't in the folder is left as it was.
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, statSync } from 'node:fs';
+import { existsSync, mkdirSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 
 const PAD = 0.5;
 const LOOPS = ['warm_field_v3_exploration_loop'];
-const SHOTS = [];
+const SHOTS = ['giant_emergence', 'giant_village', 'giant_aftermath'];
 
 const src = process.argv[2] ?? join(homedir(), 'Downloads');
 const out = new URL('../public/audio/', import.meta.url).pathname;
@@ -29,9 +29,10 @@ const mp3 = (name, filter) => {
   return (statSync(to).size / 1e6).toFixed(2);
 };
 
-for (const name of LOOPS) {
+const here = (name) => existsSync(join(src, `${name}.wav`)) || (console.log(`${name}: not in ${src}, skipped`), false);
+for (const name of LOOPS.filter(here)) {
   const len = seconds(join(src, `${name}.wav`));
   const wrap = `[0:a]asplit=3[a][b][c];[a]atrim=start=${len - PAD},asetpts=PTS-STARTPTS[tail];[c]atrim=end=${PAD},asetpts=PTS-STARTPTS[head];[tail][b][head]concat=n=3:v=0:a=1`;
   console.log(`${name}: len ${len} s, ${mp3(name, ['-filter_complex', wrap])} MB`);
 }
-for (const name of SHOTS) console.log(`${name}: ${mp3(name, [])} MB`);
+for (const name of SHOTS.filter(here)) console.log(`${name}: ${mp3(name, [])} MB`);

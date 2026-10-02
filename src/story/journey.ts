@@ -730,14 +730,6 @@ export class Journey {
     this.sBike.ridden = true;
   }
 
-  /** Stand the spirit's bike at a spot of someone else's choosing (the giant's visit: beside it, at the foot of the tower). */
-  standBike(x: number, z: number, heading: number) {
-    if (!this.sBike) this.sBike = this.d.bikes.place('spirit', x, z, heading, 2, LITTLE);
-    else this.d.bikes.move(this.sBike, x, z, heading);
-    this.sBike.scale = LITTLE;
-    this.sBike.ridden = true;
-  }
-
   /** Waiting on its bike at the start for you to get on yours. */
   private holding = false;
   private boardT = 0;

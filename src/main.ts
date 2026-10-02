@@ -61,11 +61,11 @@ const camera = new THREE.PerspectiveCamera(36, 1, 0.5, 18000);
 
 /**
  * Which land the saves in storage belong to. Bump it whenever world gen moves
- * every seed's land (2: less water, 2026-10-02): every save of every seed is
+ * every seed's land (2: less water; 3: forest grown round the start, 2026-10-02): every save of every seed is
  * then thrown away on the next load, before anything reads one, since they
  * hold places (felled trees, lit towers, the dungeon sites) that are gone.
  */
-const WORLD_VERSION = '2';
+const WORLD_VERSION = '3';
 try {
   if (localStorage.getItem('fjellheim.world') !== WORLD_VERSION) {
     for (const k of Object.keys(localStorage)) if (k.startsWith('fjellheim.')) localStorage.removeItem(k);
@@ -372,7 +372,7 @@ function makeJourney() {
   makeHerd();
 }
 /** The far-off pointer to the next task (story only). */
-const pointer = storyHost.active ? new Pointer() : null;
+const pointer = storyHost.active ? new Pointer(storyHost.overlay, (x, z) => gen.height(x, z)) : null;
 // Phase 3: the creatures living at the stable (story only).
 let herd = null as Herd | null;
 function makeHerd() {
@@ -409,8 +409,7 @@ if (params.get('beacons') === '0') beacons.group.visible = false;
 // The giant (slice 1, step 1: the look; no story drives it yet). It only
 // exists once summoned: `__ow.giant(dist)` or ?giant=<metres>[,walk].
 const giantDust = new Puffs('#efe4d2', 60, 0, 0.35);
-const giantBreath = new Puffs('#fbf8f4', 16, 0, 0.5, true);
-scene.add(giantDust.group, giantBreath.group, trail.group);
+scene.add(giantDust.group, trail.group);
 function summonGiant(x: number, z: number, heading: number) {
   if (!giant) {
     giant = new Giant({
@@ -424,9 +423,6 @@ function summonGiant(x: number, z: number, heading: number) {
         giantDust.emit(at, 8, 2.2, 7, undefined, { life: 1.1, rise: 2, drag: 1.4, up: 6 });
         const d = at.distanceTo(player.body.pos);
         if (d < 900) orbit.bump(1.8 * (1 - d / 900) ** 2);
-      },
-      onBreath: (at, dir) => {
-        for (let i = 0; i < 3; i++) giantBreath.emit(v3.copy(at).addScaledVector(dir, 2 + i * 2.5), 1, 2.6 - i * 0.5, 0.4, v3b.copy(dir).multiplyScalar(-14 + i * 3), { life: 3.2, rise: 0.5, drag: 0.9, up: -0.6 });
       },
     });
     scene.add(giant.group);
@@ -643,7 +639,6 @@ function makeVisit() {
     tree: (x, z, max) => colliders.nearestTree(x, z, max)?.d ?? Infinity,
     ring: () => ring,
     solid: (p) => beacons.solidAt(p, true),
-    bike: (x, z, h) => journey?.standBike(x, z, h),
   }) : null;
   if (visit) scene.add(visit.group);
   visitWait = 0;
@@ -1189,7 +1184,6 @@ function frame(ts?: number) {
   smokePuffs.update(dt);
   giant?.update(dt);
   giantDust.update(dt);
-  giantBreath.update(dt);
   trail.update(dt, body.pos, !!giant?.walking);
   post.giant = giant ? { dist: giant.centre.distanceTo(camera.position), y: giant.centre.y } : null;
   if (storyHost?.story) {
@@ -1362,7 +1356,7 @@ function frame(ts?: number) {
   env.update(dt);
   // Down there the light is the cave's own, whatever the hour is above.
   if (dungeon?.inside) dungeon.applyLight(camera.position);
-  ambience.update(dt, { hush: !!visit?.busy || !!offering?.busy || !!homecoming?.busy || !!dungeon?.inside });
+  ambience.update(dt, { hush: !!visit?.busy || !!offering?.busy || !!homecoming?.busy || !!dungeon?.inside, cue: visit?.music ?? null, soon: visit?.state === 'idle' && !!visit.route });
   U.uTime.value = elapsed;
   sky.update(camera, elapsed);
   terrain.update(camera.position);
@@ -1513,7 +1507,6 @@ function rocketWork(m: Mob, dt: number) {
 let trailT = 0;
 let trailEmit = 0;
 const v3 = new THREE.Vector3();
-const v3b = new THREE.Vector3();
 
 /**
  * Touch: with no finger on the camera, it swings round behind the way you're

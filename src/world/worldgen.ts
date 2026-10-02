@@ -78,6 +78,7 @@ export class WorldGen {
   searchMs: number[] = [];
   private wayClear: { line: [number, number][]; box: [number, number, number, number] }[] = [];
   private journeyBox: [number, number, number, number] | null = null;
+  private woodsBox: [number, number, number, number] | null = null;
   private _towers: TowerNet | null = null;
   private towerCells: Map<number, number[]> | null = null;
   private bq = { d: 0, bed: 0, t: 0, i: 0 };
@@ -834,9 +835,40 @@ export class WorldGen {
 
   /** 0..1 grove density. Clustered, with hard-ish edges and inner clearings. Bogs thin it out. */
   forestDensity(x: number, z: number, h: number): number {
-    const d = this.forestBase(x, z, h);
+    const d = Math.max(this.forestBase(x, z, h), this.startWoods(x, z) * smoothstep(1.8, 4.5, h));
     if (d <= 0) return d;
     return d * (1 - 0.85 * this.bog(x, z));
+  }
+
+  /**
+   * 0..1: forest that grows wherever the land didn't put any, round the
+   * start clearing and along the outer two-thirds of the way in from it, so
+   * you always set out from the woods and the cabin opens up round the bend.
+   * Not in `forestBase`: nothing is placed by it, it only grows trees (and
+   * the scatter keeps them off the paths, the clearing and the village).
+   */
+  startWoods(x: number, z: number): number {
+    const st = this.story, a = st.approach;
+    if (a.length < 2) return 0;
+    const bb = (this.woodsBox ??= (() => {
+      let x0 = Infinity, z0 = Infinity, x1 = -Infinity, z1 = -Infinity;
+      for (const p of a) { x0 = Math.min(x0, p.x); z0 = Math.min(z0, p.z); x1 = Math.max(x1, p.x); z1 = Math.max(z1, p.z); }
+      return [x0 - 36, z0 - 36, x1 + 36, z1 + 36] as [number, number, number, number];
+    })());
+    if (x < bb[0] || x > bb[2] || z < bb[1] || z > bb[3]) return 0;
+    let w = 1 - smoothstep(26, 34, Math.hypot(x - st.spawn.x, z - st.spawn.z));
+    let d = Infinity;
+    for (let i = Math.floor((a.length - 1) * 0.3); i + 1 < a.length; i++) d = Math.min(d, segDist(x, z, { ax: a[i].x, az: a[i].z, bx: a[i + 1].x, bz: a[i + 1].z }));
+    w = Math.max(w, 1 - smoothstep(15, 22, d));
+    if (w <= 0) return 0;
+    // The yard stays open, and so does the lane.
+    w *= smoothstep(24, 36, Math.hypot(x - st.x, z - st.z));
+    if (w > 0 && st.village) {
+      let dl = Infinity;
+      for (const p of st.village.lane) dl = Math.min(dl, Math.hypot(x - p.x, z - p.z));
+      w *= smoothstep(10, 20, dl);
+    }
+    return w;
   }
 
   /** The forest field before the wild biomes (what the story, towers and POIs were placed on). */

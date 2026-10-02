@@ -691,8 +691,8 @@ camera.
   visible (>= 4 m clearance, sparse trees count as a 14 m wall) from the
   doorstep or a knoll within 42 m; after 30 good sites it takes the best view.
   Natural POIs within 110 m are dropped; scatter keeps off the set
-  (`storyBlock`). Where the natural forest by the path is thin, the story
-  plants conifers (`Woods`) so you always set out from the woods.
+  (`storyBlock`). (Where the natural forest by the path was thin the story
+  used to plant conifers, `Woods`; removed 2026-10-02, see below.)
 - **Gathering is a mechanic, not a script:** with the axe any world tree can
   be felled, with the hammer any ordinary boulder smashed (landmark boulders,
   tagged lean = 9 in the chunk data, can't). The grove and the three boulders
@@ -706,7 +706,6 @@ camera.
   until they grow back (see *Regrowth* below). Colliders skip taken props (`Colliders.skip`) and answer
   `nearestTree` / `nearestRock`. Aliasing: two taken props exactly 2 km (trees)
   or 4.6 km (rocks) apart share a flag; rare, and it only hides a far twin.
-  The planted woods by the start path can't be felled yet.
 - **One action for everything:** E, a click (pointer locked) or the on-screen
   badge (touch). The badge shows what it does: mitten = pick up, axe = chop,
   cracked stone = smash (both hold to keep swinging), hammer = repair (one
@@ -777,7 +776,7 @@ camera.
   whole thing with real key presses (tap E, hold E at trees and rocks) and
   screenshots each stage; `scripts/spirit.mjs` does spirit close-ups.
 - **Known / next:** a bed (sleep through the night) inside the bigger cabin;
-  a new look for the spirit; felling the planted woods; shots whose subject
+  a new look for the spirit; shots whose subject
   hugs the cabin can put the camera in a wall (the orbit camera only collides
   with terrain); gamepad mapping.
 - **Crows keep off the home patch:** `groundScore` in `mobs/crow.ts` rejects
@@ -4319,3 +4318,158 @@ different land. Whether to wipe instead is an open question.
 - Perf (about 20% slower) and the shot list's framings: each handed to a
   new session (a perf audit; choosing the shots again).
 
+- The owner (2026-10-02): the giant's breath clouds "sorta puff out of its non existent mouth". Removed
+  altogether (`onBreath`, `giantBreath`). The dust ring of each footfall stays (`giantDust` in `onStep`),
+  and so does the steam off warm prints while it walks (`Trail.update`): ground level, not off the giant.
+
+## The guide in despair on the walk home (2026-10-02)
+Owner: sadder on the trudge, "depths of despair" until the stable begins.
+- The levels, lightest first: `mood = 'down'` (frown, heavy lids, gets on
+  with things), `mood = 'sad'` (reaching up after what's taken), and
+  `sullen` on top of `down` (the `trudge` and `grieve` stages). `sullen` is
+  now the bottom: eased in and out as `gloom`.
+- What `sullen` adds: its colour sinks toward `ASHEN` and the ember glow
+  and blush go (whatever its warmth); lids cut on a slant, low at the outer
+  corner (`uSad.x` in `CREATURE_FRAG`, the mirror of `uBrow`); a wider,
+  deeper frown that trembles; bent further over with the arms dangling in
+  front; a slower, flatter plod with more sway; a heaved sigh every `SIGH`
+  seconds; a tear from one eye every `TEAR` seconds (`uSad.y`).
+- Pats and acts still override it, and it ends where it did (the stable
+  beginning). No sound added.
+- `scripts/trudge.mjs`'s `grieve-*` shots are taken after the grieving has
+  already run out on the walk (`GRIEVE` counts from setting off), so they
+  show the stable's first step, not the grieving.
+
+## The planted woods are gone; forest grows round the start (2026-10-02)
+- **What:** `Woods` / `plantWoods` (up to 95 conifers the story added round
+  the start clearing and beside the arrival path where the natural forest
+  was thin) are deleted, and with them the idea of the story planting
+  trees. Every standing tree is a world tree, so every tree can be felled.
+- **Why:** they were off the harvest grid, so the axe never found them, and
+  they had drifted into the village. `plantWoods` took "every site path
+  after the first two" as the arrival path; once the pasture path, the
+  village lane and the door paths were appended to `site.paths`, most of the
+  planting landed 5-14 m either side of the lane: lone unchoppable trees
+  among the houses.
+- **What holds the bend reveal now:** `WorldGen.startWoods`, a 0..1 field
+  that `forestDensity` takes the max with: full within 26 m of the spawn and
+  within 15 m of the outer 70% of `StorySite.approach` (new: the arrival
+  path, yard -> clearing), fading over 7-8 m, and nothing within 24 m of the
+  cabin or 10 m of the village lane. The ordinary scatter then grows the
+  trees (and keeps them off the paths, the clearing and the plots, as
+  anywhere). It was needed: on `hilda` the trees round the start were all
+  planted ones, and without them the cabin is in view from the first frame.
+- **Not in `forestBase`**, which is what the site, towers, dungeons and
+  routes are placed on, so none of those move. Trees, bushes and the forest
+  floor near the start do, so `WORLD_VERSION` is 3.
+- Shots: `shots/woods-before-*` (planted), `shots/nowoods-*` (deleted, bare
+  start), `shots/startwoods-*` (now).
+
+## Music: the giant's visit (2026-10-02)
+
+- **What:** three one-shot pieces (`giant_emergence` 24 s, `giant_village`
+  34 s, `giant_aftermath` 28 s; `public/audio/*.mp3`, from the WAVs by
+  `scripts/audio.mjs <folder>`) play through the visit, cross-faded, with
+  the effects over them as before. `Ambience` only plays and fades
+  (`CUES`, `score`); which piece is `Visit.music`, set where the visit's
+  own events happen, no timers of the music's own:
+  - `giant_emergence`: `Visit.start()` (the giant begins to come up; the
+    loop goes out over `FADE` = 8 s from the same moment, as it already did).
+  - `giant_village`: in `onStep`, the last footfall before the first house
+    (about 22.75 s in), over 3 s: it is fully in as the first house bursts.
+  - `giant_aftermath`: `cue.aloft` in `update` (all taken, the camera goes
+    up among the crows and their lights; 6.5 s before `g.resume()`), over
+    5 s: it is fully in about a second before the giant walks on.
+  Then it plays out (about 17 s after the camera is handed back), `REST` =
+  4 s of nothing, and the loop comes back over `FADE`.
+- **Why those and not the smash and `resume()` themselves:** the first two
+  pieces end at full level (they're made to be cross-faded out of), and
+  their lengths are the scene's: 24 s to the first house, 34 s more to
+  where it walks on. Triggered on those events exactly, each piece had
+  already run out when the next began, so there was nothing to cross-fade.
+  One event earlier each gives a real overlap.
+- **If the scene runs long** (frames slow enough that game time lags the
+  clock): a piece that reaches its end with nothing after it goes out over
+  its last `TAIL` = 2 s, not a click, and there's silence until the next
+  event. Seen only in a slow headless run from the tower.
+- **Volume:** `gains.music` as before; the pieces get `gains.scene` (1.4)
+  on top, since they're mastered about 3 dB under the loop (-16 to -13.4
+  LUFS against -11.6). "Music > giant scene x" in the panel.
+- A reloaded save after the visit plays none of it (`restore` leaves
+  `music` null).
+- Check: `node scripts/music.mjs [seed=..] [tower] [real]`.
+
+## The pointer, restyled (2026-10-02)
+
+The owner disliked the orange arrowhead: its look, where it sat (the
+screen's edge, or hanging over the target), and that it showed at the very
+start.
+
+- `story/pointer.ts` is now a small pale chevron (cream stroke, no fill, no
+  ink line, no glow, 60% at most) that stays by the explorer. It sits where
+  a ring on the ground round their feet (`RING`, 1.7 m) projects on screen,
+  on the side the task is on, and points straight out from them. Kept
+  between `MIN_R` and `MAX_R` px off the explorer and inside the screen.
+- Tried first: the chevron drawn flat in the ground's plane (a CSS matrix
+  from the projected ground axes). At a low camera it sheared into a
+  sliver that didn't read as an arrow. It's drawn upright now; only its
+  place follows the ground ring.
+- `Story.guide` returns nothing for phase 1's `meet`, so nothing points
+  before you've met the spirit. Phase 3's `plot` (also a `meet`) still
+  points. The 15 s `DELAY` and the fade by distance are unchanged.
+
+Later the same day, the owner's second pass: waist high, glowing orange but
+still translucent, and behind the explorer rather than drawn over them.
+
+- No longer HTML. It's a camera-facing quad in the story's overlay scene
+  (`overlayMat`, the one place with real transparency), the chevron and its
+  halo drawn by a distance field in the fragment shader. `uThrough = 0`, so
+  the overlay's depth test hides it wholly behind anything solid: the
+  explorer, a mount, a tree.
+- It hovers at `WAIST` (0.6 m) on a ring of `RING` (2.1 m; 1.3 at first, then the owner asked for farther, bigger and fainter: `PX` 104, `MAX_A` 0.6, a soft-edged stroke in a wide dim halo), lifted to
+  `CLEAR` above the ground where a slope would swallow it. A set size on
+  screen (`PX`). The dungeon swaps the overlay scene, so it can't show there.
+- Known cost of going behind the explorer: with the camera behind them and
+  the task dead ahead, the chevron is mostly hidden by their body. Told
+  the owner; left as is (out of sight roughly means "you're facing it").
+
+## The guide's shot at the tower: it bolts into the doorway (2026-10-02)
+
+- **What:** in the giant's visit watched from the home tower, the guide's
+  reaction shot is no longer it standing in the open by its bike. It runs
+  for the doorway and into the room in the tower's foot, turns, looks one
+  way, the other, then out and up, frightened. 4.6 s (`GUIDE.run` 1.9 +
+  `GUIDE.look` 2.7) against 3.1 s before: asked for, "1-2 seconds longer".
+- **How:** `placeGuide` (at the moment the giant stops, the camera away)
+  puts it `DEN.from` out in front of the doorway; `GUIDE.lead` before the
+  cut it's sent to `den` (inside, `DEN.in` behind the opening) at
+  `GUIDE.speed`, so the shot opens on it already running. The camera starts
+  out in front and to one side (whichever is clearer of trunks and rock)
+  and comes in after it to the doorway. Where it looks is `stage.face`,
+  on a timetable in `update`. It stays 'scared' (no 'sad' reach here: that
+  is still the shot at home).
+- Its bike is no longer stood beside it for the shot (`standBike` and the
+  `bike` dep are gone): it stays where the ride left it.
+- `spirit.ts`: a settled spirit that's 'scared' doesn't glance round at you
+  pleased (you're right over it, up in the head).
+- The music is unmoved on `hilda` (`giant_aftermath` still at 17.6 s after
+  it stops: with eight spirits the last crow up sets `cue.aloft`, not this
+  shot). With five or fewer it would come 1.5 s later.
+- Check: `node scripts/visit.mjs <dir> tower fine`, frames at 9.7-14.3 s
+  after it stops. Shots: `shots/dash/sheet.png`.
+
+Third pass, same day. The owner: "it spins around relative to the
+destination but doesn't pull you there". The cause: the chevron was a
+billboard, always flat on to the camera and turned on the screen, so it
+slid round the explorer as a 2D glyph and never pointed *into* the picture.
+
+- It now lies in the world: a quad spanned by the way to the task and the
+  across of a plane that is flat but leant toward the camera (`LEAN`), so
+  a low camera never sees it edge on (the fault of the very first, HTML,
+  flat attempt). Ahead of you it points away into the scene.
+- Three chevrons in a row with a brightness pulse running outward (the
+  ">>>" idiom), the outer ones brighter: that's the pull.
+- True size, held between `MIN_PPM` and `MAX_PPM` px to the metre.
+- Still wholly hidden behind the explorer when the task is dead ahead of
+  a camera behind them (about 10 degrees either side). Open with the owner:
+  a faint show-through (`uThrough`) would fix it, against their ask.

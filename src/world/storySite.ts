@@ -68,6 +68,8 @@ export interface StorySite {
   /** Rotation (radians); the door faces (sin rot, cos rot). */
   rot: number;
   spawn: SitePoint & { yaw: number };
+  /** The way you arrive, yard -> the start clearing (forest grows round its far end: `WorldGen.startWoods`). */
+  approach: SitePoint[];
   stump: SitePoint;
   trees: StoryTree[];
   /** Where the spirit sits under a tree while you chop. */
@@ -338,7 +340,7 @@ export function findStorySite(seed: number, f: Field): StorySite {
         }
       }
       if (village) grow([...village.lane, ...village.plots]);
-      const site: StorySite = { x, z, y, rot, spawn, stump, trees, seat, brook, bank, stones, boulders, spring, far, lookout, paths, pasture, village, box: [x0, z0, x1, z1] };
+      const site: StorySite = { x, z, y, rot, spawn, approach: route, stump, trees, seat, brook, bank, stones, boulders, spring, far, lookout, paths, pasture, village, box: [x0, z0, x1, z1] };
       // Strict: the next cabin's light must be clearly visible from here.
       if (ok && (!strict || view.margin >= 4)) return site;
       if (ok && strict) {
@@ -369,7 +371,7 @@ export function findStorySite(seed: number, f: Field): StorySite {
   // Nothing anywhere (an all-sea seed?): build it at the origin regardless.
   const y = Math.max(f.base(0, 0), 4) + 0.05;
   return {
-    x: 0, z: 0, y, rot: 0, spawn: { x: 1.4, z: 15, yaw: 0 }, stump: { x: -5.7, z: 5.1 }, trees: [], seat: { x: -20, z: 0 },
+    x: 0, z: 0, y, rot: 0, spawn: { x: 1.4, z: 15, yaw: 0 }, approach: [], stump: { x: -5.7, z: 5.1 }, trees: [], seat: { x: -20, z: 0 },
     brook: [], bank: { x: 36, z: 0 }, stones: [], boulders: [{ x: 10, z: -9, rot: 0, sc: 0.95 }], spring: { x: 36, z: -40 }, far: findFarCabin(seed, f, 0, 0, y, 0).far, lookout: { x: 0, z: 5 }, paths: [], pasture: null, village: null, box: [-40, -40, 40, 40],
   };
 }

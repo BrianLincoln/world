@@ -4,7 +4,9 @@ import type { Want } from '../story/spirit';
 import type { Story } from '../story/story';
 import { CAB } from '../story/geometry';
 import { PASTURE_D, PASTURE_W, pastureLocal, siteLocal, siteToLocal } from '../world/storySite';
+import type { Tower } from '../world/towers';
 import type { WorldGen } from '../world/worldgen';
+import type { Cue } from '../audio/ambience';
 import { Birds, GRIP } from './birds';
 import type { Giant } from './giant';
 import type { Trail } from './trail';
@@ -42,7 +44,7 @@ const STEP_TIME = 2.0;
  * has gone, and then go `later` apart, heard faintly from wherever it is.
  * Then, lengths of what follows (see `cue`): one goes for the guide and
  * misses (`miss`, only if the guide is at home), the guide is left reaching
- * (`sad`; at the tower it's the shorter `GUIDE` instead), up among the flock
+ * (`sad`; at the tower it's `GUIDE` instead), up among the flock
  * (`aloft`), and it goes as the camera draws back (`back`).
  */
 const SNATCH = { lift: 0.5, lead: 2.4, leadDown: 4.2, pause: 1.5, beat: 0.6, each: 0.3, gap: 2.4, later: 0.8, down: 2.6, up: 2.8, miss: 2.8, sad: 5, aloft: 6.5, back: 4.5 };
@@ -53,12 +55,14 @@ const SNATCH = { lift: 0.5, lead: 2.4, leadDown: 4.2, pause: 1.5, beat: 0.6, eac
  */
 const FILM = { cut: 0.45, after: 0.7 };
 /**
- * The guide's shot when it's away at the tower with you: held `wide` (the
- * tower's foot, its little bike beside it: who this is, and where), a quick
- * `push` in to its face, held for `hold`; then back to the pasture for at
- * least `after`, the crows going up with what they took.
+ * The guide's shot when it's away at the tower with you: it bolts for the
+ * doorway at the tower's foot and into the room inside (`run`: it set off
+ * `lead` before the cut, at `speed`, so it's already going), and there
+ * turns and looks about it, frightened (`look`: one way at `left`, the
+ * other at `right`, then out and up at `out`); then back to the pasture
+ * for at least `after`, the crows going up with what they took.
  */
-const GUIDE = { wide: 1.1, push: 0.5, hold: 1.5, after: 1.8 };
+const GUIDE = { run: 1.9, look: 2.7, lead: 0.5, speed: 7, left: 0.35, right: 1.05, out: 1.75, after: 1.8 };
 /** How many are seen being taken: the lead's, then this many less one in quick succession. */
 const SEEN_TAKEN = 4;
 /** It comes up out of the lake (or the ground) over this long as it sets off. */
@@ -324,10 +328,8 @@ export interface VisitDeps {
   tree(x: number, z: number, max: number): number;
   /** The dungeon's ring at the end of its walk: it sets the dark spirit free there. */
   ring(): { free(from: THREE.Vector3): void; setOpen(): void } | null;
-  /** Is a point inside tower rock? The guide's close-up at the tower keeps out of it. */
+  /** Is a point inside tower rock? The camera on the guide at the tower keeps out of it. */
   solid(p: THREE.Vector3): boolean;
-  /** Stand the guide's own little bike here (beside it, for its shot at the tower). */
-  bike(x: number, z: number, heading: number): void;
 }
 
 const v1 = new THREE.Vector3(), v2 = new THREE.Vector3(), v3 = new THREE.Vector3();
@@ -336,6 +338,12 @@ export class Visit {
   readonly group = new THREE.Group();
   readonly route: VisitRoute | null;
   state: 'idle' | 'running' | 'gone' = 'idle';
+  /**
+   * Its music, by where it has got to (audio/ambience.ts plays each piece once, as this changes): coming up
+   * and down the lane; from the footfall before the first house it treads on; and from when the crows are up
+   * with what they took, just before it walks on. The pieces are cut to these: 24 s and 34 s (see scripts/music.mjs).
+   */
+  music: Cue | null = null;
   private giant: Giant | null = null;
   private birds: Birds | null = null;
   /** How many spirits there are to take: bird n takes spirit n, and bird 0 goes first. */
@@ -440,7 +448,7 @@ export class Visit {
     const scene = took(Math.min(this.count, SEEN_TAKEN)) + FILM.after;
     const sad = scene + (this.vantage ? 0 : SNATCH.miss);
     // (`rise`: when it cuts back from the guide to the pasture. At home there's no such shot: it stays on the guide.)
-    const rise = this.vantage ? sad + GUIDE.wide + GUIDE.push + GUIDE.hold : Infinity;
+    const rise = this.vantage ? sad + GUIDE.run + GUIDE.look : Infinity;
     const aloft = Math.max(this.vantage ? rise + GUIDE.after : sad + SNATCH.sad, took(this.count) + SNATCH.up + 1), back = aloft + SNATCH.aloft;
     return { scene, sad, rise: Math.min(rise, aloft), aloft, back, end: back + SNATCH.back };
   }
@@ -458,9 +466,14 @@ export class Visit {
   /** Watched from somewhere else (a tower's head): the guide is there with you, not in the yard. */
   private vantage: ((x: number, z: number) => THREE.Vector3) | null = null;
   private wasLent = false;
-  /** The tower you're watching from, and where the guide stands by it for its close-up (see `placeGuide`). */
-  private tower: { x: number; z: number; foot: number } | null = null;
+  /** The tower you're watching from, and the guide's dash into its foot (see `placeGuide`). */
+  private tower: Tower | null = null;
   private stage: Want | null = null;
+  /** Where it ends up, in the room behind the doorway; and which side of the doorway the camera is. */
+  private den = new THREE.Vector3();
+  private denSide = 1;
+  /** What it's looking at from in there. */
+  private peer = new THREE.Vector3();
 
   /** Ahead of time (as you're drawn up into the tower): it's put where it will start, right under, so it's never seen arriving. */
   prepare() {
@@ -477,7 +490,7 @@ export class Visit {
    * eyes are when it looks toward a point), with the guide beside you; without it, the guide is at home and comes out into
    * the yard. `tower`: the tower that is, which the guide is at the foot of.
    */
-  start(vantage: ((x: number, z: number) => THREE.Vector3) | null = null, tower: { x: number; z: number; foot: number } | null = null) {
+  start(vantage: ((x: number, z: number) => THREE.Vector3) | null = null, tower: Tower | null = null) {
     const r = this.route;
     if (!r || this.state !== 'idle') return false;
     const g = this.d.summon(r.start.x, r.start.z, r.start.heading);
@@ -487,6 +500,7 @@ export class Visit {
     // It stops a step past the last house, both feet down, by the yard.
     g.pauseAt = r.lastHouse + 1;
     this.state = 'running';
+    this.music = 'giant_emergence';
     this.fallen = 0;
     this.jt = -1;
     this.filming = false;
@@ -514,6 +528,8 @@ export class Visit {
     const f = this.route.falls[this.fallen++];
     this.dip.v -= 2.2 + (f?.house >= 0 ? 2.4 : 0);
     this.d.sound('stomp');
+    // (The last footfall before the first house: the village's piece is in by the time that one goes.)
+    if (this.music === 'giant_emergence' && this.fallen >= this.route.firstHouse - 1) this.music = 'giant_village';
     if (this.fallen >= 2) this.d.story.spirit.mood = 'scared';
     // The ground jumps under the village: they start, and stare.
     if (!this.fled && this.fallen >= 2) this.d.story.village!.flinch();
@@ -547,7 +563,7 @@ export class Visit {
       }
       if (this.fled && this.jt < 0) this.chase(dt);
       if (g.paused && this.jt < 0) { this.jt = 0; this.placeGuide(); }
-      // (The journey has it by the doorway, facing in: for this it's out in the open, watching.)
+      // (The journey has it by the doorway, facing in: for this it's out in front of it, watching.)
       if (this.stage) sp.want = this.stage;
       if (this.jt >= 0) {
         const t0 = this.jt, t = (this.jt += dt);
@@ -604,7 +620,17 @@ export class Visit {
           if (passed(at + SNATCH.down - 0.5)) { sp.want.pose = 'sit'; this.d.sound('squeak'); }
           if (passed(at + SNATCH.down)) lift(n);
         }
-        if (passed(cue.sad)) { if (!this.vantage) sp.want.pose = 'stand'; sp.mood = 'sad'; this.d.sound('whimper'); }
+        if (this.stage && this.tower) {
+          // At the tower it has seen enough: it runs for the doorway, and in there turns to look out, this way and that.
+          const u = t - cue.sad - GUIDE.run, yaw = this.tower.yaw + (u < GUIDE.left || u >= GUIDE.out ? 0 : u < GUIDE.right ? 1.1 : -1.1) * this.denSide;
+          if (passed(cue.sad - GUIDE.lead)) { this.stage.at = this.den; sp.haste = GUIDE.speed; }
+          if (passed(cue.sad)) this.d.sound('squeak');
+          if (passed(cue.sad + GUIDE.run)) this.d.sound('whimper');
+          if (passed(cue.sad + GUIDE.run + GUIDE.left) || passed(cue.sad + GUIDE.run + GUIDE.right)) sp.flinch();
+          if (passed(cue.rise)) sp.haste = null;
+          this.stage.face = this.peer.set(this.den.x + Math.sin(yaw) * 12, this.den.y + (u < GUIDE.out ? 0.8 : 5), this.den.z + Math.cos(yaw) * 12);
+        } else if (passed(cue.sad)) { if (!this.vantage) sp.want.pose = 'stand'; sp.mood = 'sad'; this.d.sound('whimper'); }
+        if (passed(cue.aloft)) this.music = 'giant_aftermath';
         if (passed(cue.back)) g.resume();
         // It watches them go.
         if (!this.vantage) sp.want.face = t > cue.sad ? this.hub : g.centre;
@@ -612,6 +638,7 @@ export class Visit {
       if (!this.busy) {
         this.state = 'gone';
         st.lent = this.wasLent;
+        if (this.stage) sp.haste = null;
         this.stage = null;
         sp.mood = null;
         st.giantGone = true;
@@ -729,54 +756,45 @@ export class Visit {
 
   /** The guide's close-up: the camera is this far in front of it and this far to one side, this high. */
   private static readonly CLOSE = { d: 4.3, side: 1.1, up: 0.6 };
-  /** And where that shot starts from at the tower, on the same line: far enough back for the tower's foot behind it. */
-  private static readonly WIDE = { d: 17, side: 4.5, up: 3.4, at: 2.6 };
+  /**
+   * At the tower: how far inside the doorway it ends up (`in`), how far out
+   * in front of it it sets off from (`from`), and the camera on it. That
+   * starts out in front and off to one side (`wide`: the doorway and the
+   * tower's foot, the guide going away from it), and comes in after it to
+   * look in at the doorway (`close`, from where it stands inside).
+   */
+  private static readonly DEN = { in: 4.5, from: 4.8, wide: { d: 9.5, side: 4.6, up: 1.5, at: 1.1 }, close: { d: 6.9, side: 1.3, up: 0.7, at: 0.62 } };
 
   /**
-   * At the tower, the guide is by the doorway facing the rock, and its
-   * close-up is from in front of it: in the rock, or looking at it. So
-   * while the camera is away it's put out at the foot of the tower on the
-   * giant's side, facing the giant, where there's open, level ground for it
-   * and for the camera in front of it (the tower is then behind it in the
-   * shot). Wherever round that side is clearest of rock and trunks. Its
-   * bike is stood beside it there: whose face this is.
+   * At the tower, the guide is by the doorway facing the rock. While the
+   * camera is away it's put out in front of the doorway, looking at the
+   * giant, to bolt from there into the room in the tower's foot when its
+   * shot comes. The camera's side of the doorway is whichever is clearer
+   * of trunks and rock.
    */
   private placeGuide() {
     const t = this.tower;
     if (!t) return;
-    const gy = this.d.ground, C = Visit.CLOSE, W = Visit.WIDE;
-    const to = Math.atan2(this.hub.x - t.x, this.hub.z - t.z);
-    const spot = new THREE.Vector3();
+    const gy = this.d.ground, D = Visit.DEN, g = t.door.ground;
+    const fx = Math.sin(t.yaw), fz = Math.cos(t.yaw);
+    this.den.set(t.door.x - fx * D.in, 0, t.door.z - fz * D.in);
+    this.den.y = gy(this.den.x, this.den.z);
     let best = -Infinity;
-    for (const [turn, cost] of [[0, 0], [0.35, 0.3], [0.7, 0.8], [1.05, 1.5], [1.4, 2.4], [1.9, 3.6]])
-      for (const s of turn ? [1, -1] : [1])
-        for (const out of [5, 8, 12, 17]) {
-          const a = to + s * turn, x = t.x + Math.sin(a) * (t.foot + out), z = t.z + Math.cos(a) * (t.foot + out), y = gy(x, z);
-          const fl = Math.hypot(this.hub.x - x, this.hub.z - z) || 1, fx = (this.hub.x - x) / fl, fz = (this.hub.z - z) / fl;
-          const cx = x + fx * C.d + fz * C.side, cz = z + fz * C.d - fx * C.side, cy = gy(cx, cz);
-          // Room for the guide and the camera, and a clear look between them: trunks, then rock.
-          let room = Math.min(this.d.tree(x, z, 12) - 1, this.d.tree(cx, cz, 12) - 2, 6);
-          for (const u of [0.33, 0.66]) room = Math.min(room, this.d.tree(x + (cx - x) * u, z + (cz - z) * u, 12));
-          for (const u of [0, 0.25, 0.5, 0.75, 1, 1.4])
-            for (const up of [0.3, 0.9, 1.8])
-              if (this.d.solid(v1.set(x + (cx - x) * u, y + (cy - y) * Math.min(u, 1) + up, z + (cz - z) * u))) room = -6;
-          // Dry, and near enough level that neither is over a brow from the other.
-          if (Math.min(y, cy) < 1.5) room = -6;
-          // And from where the shot starts, further back: no trunk in the way, and not from inside a rock.
-          const wx = x + fx * W.d + fz * W.side, wz = z + fz * W.d - fx * W.side, wy = Math.max(gy(wx, wz) + FLOOR, y + W.up);
-          for (const u of [0.4, 0.6, 0.8, 1]) {
-            room = Math.min(room, this.d.tree(x + (wx - x) * u, z + (wz - z) * u, 12) + 1);
-            if (this.d.solid(v1.set(x + (wx - x) * u, y + (wy - y) * u + 0.8, z + (wz - z) * u))) room = -6;
-          }
-          const score = room * 2 - cost - out * 0.06 - Math.abs(cy - y) * 2.5;
-          if (score > best) { best = score; spot.set(x, y, z); }
-        }
-    // (`settled`: it keeps its eyes on the giant, and doesn't turn to look for you, up in the tower behind it.)
-    this.stage = { at: spot, face: this.hub, pose: 'stand', icon: null, lead: false, settled: true };
-    this.d.story.spirit.teleport(spot);
-    // Its bike: at its side away from the camera's, a little behind, side on to the shot.
-    const fl = Math.hypot(this.hub.x - spot.x, this.hub.z - spot.z) || 1, fx = (this.hub.x - spot.x) / fl, fz = (this.hub.z - spot.z) / fl;
-    this.d.bike(spot.x - fz * 1.25 - fx * 0.5, spot.z + fx * 1.25 - fz * 0.5, Math.atan2(fz, -fx) - 0.35);
+    for (const s of [1, -1]) {
+      const x = g.x + fx * D.wide.d + fz * D.wide.side * s, z = g.z + fz * D.wide.d - fx * D.wide.side * s, y = gy(x, z) + D.wide.up;
+      let room = Math.min(this.d.tree(x, z, 12) - 1, 6);
+      for (const u of [0.25, 0.5, 0.75]) {
+        room = Math.min(room, this.d.tree(x + (g.x - x) * u, z + (g.z - z) * u, 12));
+        if (this.d.solid(v1.set(x + (g.x - x) * u, y, z + (g.z - z) * u))) room = -6;
+      }
+      if (this.d.solid(v1.set(x, y, z))) room = -6;
+      if (room > best) { best = room; this.denSide = s; }
+    }
+    const from = new THREE.Vector3(g.x + fx * D.from, 0, g.z + fz * D.from);
+    from.y = gy(from.x, from.z);
+    // (`settled`: its eyes stay where they're put, and it doesn't turn to look for you, up in the tower over it.)
+    this.stage = { at: from, face: this.hub, pose: 'stand', icon: null, lead: false, settled: true };
+    this.d.story.spirit.teleport(from);
   }
 
   /** The camera for this frame while the visit has it. */
@@ -815,14 +833,24 @@ export class Visit {
       this.pos.set(sp.x + v3.z * 15 - v3.x * 3, sp.y + 2.2, sp.z - v3.x * 15 - v3.z * 3);
       this.at.set(sp.x + v3.x * 2, sp.y + 2.6, sp.z + v3.z * 2);
     } else if (jt >= 0 && jt < cue.rise) {
-      // The guide, left behind: from in front and low, drifting in on it. At the tower, from further
-      // back first (the tower's foot, its bike beside it) and quickly in.
-      const sh = st.spirit.heading, C = Visit.CLOSE, W = Visit.WIDE;
-      const w = this.tower ? 1 - THREE.MathUtils.smootherstep(jt, cue.sad + GUIDE.wide, cue.sad + GUIDE.wide + GUIDE.push) : 0;
-      const d = C.d - 1.1 * THREE.MathUtils.smoothstep(jt, cue.sad, cue.rise) + (W.d - C.d) * w, side = C.side + (W.side - C.side) * w;
-      v3.set(Math.sin(sh), 0, Math.cos(sh));
-      this.pos.set(sp.x + v3.x * d + v3.z * side, sp.y + C.up + (W.up - C.up) * w, sp.z + v3.z * d - v3.x * side);
-      this.at.set(sp.x, sp.y + 0.62 + (W.at - 0.62) * w, sp.z);
+      // The guide, left behind: from in front and low, drifting in on it.
+      const sh = st.spirit.heading, C = Visit.CLOSE, t = this.tower;
+      if (t) {
+        // At the tower it runs for the doorway: from out in front and to one side as it goes, the tower's foot
+        // over it, and in after it to the doorway, where it has turned to look out.
+        const D = Visit.DEN, W = D.wide, N = D.close, g = t.door.ground, s = this.denSide;
+        const k = THREE.MathUtils.smootherstep(jt, cue.sad + GUIDE.run * 0.3, cue.sad + GUIDE.run + 0.35);
+        const d = N.d - 0.8 * THREE.MathUtils.smoothstep(jt, cue.sad + GUIDE.run, cue.rise);
+        v3.set(Math.sin(t.yaw), 0, Math.cos(t.yaw));
+        this.pos.set(g.x + v3.x * W.d + v3.z * W.side * s, gy(g.x, g.z) + W.up, g.z + v3.z * W.d - v3.x * W.side * s);
+        this.pos.lerp(v2.set(this.den.x + v3.x * d + v3.z * N.side * s, this.den.y + N.up, this.den.z + v3.z * d - v3.x * N.side * s), k);
+        this.at.set(sp.x, sp.y + W.at + (N.at - W.at) * k, sp.z);
+      } else {
+        const d = C.d - 1.1 * THREE.MathUtils.smoothstep(jt, cue.sad, cue.rise);
+        v3.set(Math.sin(sh), 0, Math.cos(sh));
+        this.pos.set(sp.x + v3.x * d + v3.z * C.side, sp.y + C.up, sp.z + v3.z * d - v3.x * C.side);
+        this.at.set(sp.x, sp.y + 0.62, sp.z);
+      }
     } else if (jt >= 0 && jt < cue.aloft) {
       // Back to the pasture, from behind where they stood: empty now, and the crows going up to it with what they took.
       const m = this.gather, fr = this.front, k = THREE.MathUtils.smoothstep(jt, cue.rise, cue.aloft);

@@ -29,6 +29,10 @@ const LOOP_R = 0.2;
 const COLD = new THREE.Color('#b8c6d8');
 const MID = new THREE.Color('#ecc9ae');
 const WARM = new THREE.Color('#f0924c');
+/** Sunk in despair (`sullen`): ash with a little warmth left in it. */
+const ASHEN = new THREE.Color('#aab4c6');
+/** Seconds between its sighs, and between its tears, when it's sullen. */
+const SIGH = 6.5, TEAR = 4.3;
 const HEART_COLD = new THREE.Color('#6d6874');
 const HEART_WARM = new THREE.Color('#ffb24a');
 
@@ -235,8 +239,15 @@ export class Spirit {
    * Heavy-hearted (the walk home after the giant, story/journey.ts): it
    * trudges instead of trotting, bent forward, arms hanging, eyes on the
    * ground, and isn't cheered by seeing you.
+   *
+   * The lowest it gets, below every `mood`: its fire sunk to ash (colour
+   * and glow, whatever its warmth), lids heavy and slanted, its lip
+   * trembling, a heaved sigh every so often, and tears.
    */
   sullen = false;
+  /** `sullen`, eased in and out. */
+  private gloom = 0;
+  private mouthHalf = -1;
 
   /** Snatched up by one of the giant's crows: it hangs at this point (which moves), arms up, legs going. */
   carried: THREE.Vector3 | null = null;
@@ -343,7 +354,11 @@ export class Spirit {
   }
   /** Wave hello; with `at`, first hurry there (out the door to meet you). */
   greet(at?: THREE.Vector3) {
-    if (at) this.acts.push({ kind: 'emerge', t: 0, to: at.clone() });
+    // Already out fetching you (a hint): it's met you where it stands, so it
+    // doesn't walk back to its spot indoors first and come out again.
+    const out = this.acts.some((a) => a.kind === 'hint');
+    this.acts = this.acts.filter((a) => a.kind !== 'hint');
+    if (at && !out) this.acts.push({ kind: 'emerge', t: 0, to: at.clone() });
     this.acts.push({ kind: 'greet', t: 0 });
   }
   hint(target: THREE.Vector3, face: THREE.Vector3 | null) {
@@ -606,7 +621,7 @@ export class Spirit {
         if (w.settled) {
           // Content by the fire: it watches the flames and, when you're
           // close, looks round at you now and then, pleased you're there.
-          const near = toPlayer < 7;
+          const near = toPlayer < 7 && this.mood !== 'scared';
           this.glanceT -= dt;
           if (this.glanceT <= 0) this.glanceT = near ? 5 + Math.random() * 6 : 2;
           const glancing = near && this.glanceT < 1.8;
@@ -726,12 +741,17 @@ export class Spirit {
     // Trotting hops; celebration and hints bounce higher. Sullen, it barely
     // lifts its feet.
     const low = this.sullen && !act && !this.riding;
-    const hopRate = walking ? (low ? 2.1 + hs * 0.35 : 3.4 + hs * 0.5) : bounce > 0 ? 2.6 : 0;
+    this.gloom += ((low ? 1 : 0) - this.gloom) * e(1.5);
+    const gloom = this.gloom;
+    // A sigh: it heaves up, then sinks lower than before.
+    const sp = (this.t % SIGH) / 2.2;
+    const sigh = low && sp < 1 ? Math.sin(sp * Math.PI * 2) * (sp < 0.5 ? 0.6 : 1) : 0;
+    const hopRate = walking ? (low ? 1.7 + hs * 0.3 : 3.4 + hs * 0.5) : bounce > 0 ? 2.6 : 0;
     if (hopRate > 0) this.hop += dt * hopRate;
     else this.hop = Math.round(this.hop);
     const ph = this.hop % 1;
     const air = hopRate > 0 ? Math.sin(ph * Math.PI) : 0;
-    const hopTarget = walking ? (low ? 0.025 : 0.1 + hs * 0.018) : bounce * 0.42;
+    const hopTarget = walking ? (low ? 0.012 : 0.1 + hs * 0.018) : bounce * 0.42;
     this.hopH += (hopTarget - this.hopH) * e(8);
     const lift = air * this.hopH;
     const landing = hopRate > 0 && ph < 0.12 ? 1 - ph / 0.12 : 0;
@@ -744,7 +764,7 @@ export class Spirit {
     this.root.position.x += Math.sin(this.t * 55) * 0.008 * shiver;
     this.root.rotation.y = this.heading + this.spin * Math.PI * 2;
     const breathe = Math.sin(this.t * 2.1) * 0.02;
-    const sy = 1 + sq + breathe - this.sit * 0.08;
+    const sy = 1 + sq + breathe - this.sit * 0.08 - gloom * 0.05 + sigh * 0.055;
     this.body.scale.set(1 / Math.sqrt(sy), sy, 1 / Math.sqrt(sy));
     this.body.position.y = R * 0.86 * sy + lift - this.sit * 0.07;
     // On a slope the flat seat would cut into the hill ahead (a trot's hop hides it; a trudge doesn't).
@@ -753,19 +773,19 @@ export class Spirit {
       this.body.position.y += Math.max(0, this.hooks.ground(this.pos.x + fx, this.pos.z + fz) - this.pos.y, this.hooks.ground(this.pos.x - fx, this.pos.z - fz) - this.pos.y);
     }
     this.patGlow += ((patted || act?.kind === 'pat' ? 1 : 0) - this.patGlow) * e(patted ? 3 : 0.8);
-    const lean = this.tilt.step(THREE.MathUtils.clamp(hs * 0.05, 0, 0.25) - this.sit * 0.12 + (reach ? -0.2 : 0) + (pose === 'warm' ? 0.1 : 0) - patted * 0.16 + (low ? 0.2 * (1 - this.sit) : 0), 90, 12, dt);
+    const lean = this.tilt.step(THREE.MathUtils.clamp(hs * 0.05, 0, 0.25) - this.sit * 0.12 + (reach ? -0.2 : 0) + (pose === 'warm' ? 0.1 : 0) - patted * 0.16 + (low ? (0.36 - sigh * 0.1) * (1 - this.sit * 0.6) : 0), 90, 12, dt);
     // Patted: a slow contented wiggle under the hand.
     const wiggle = Math.sin(this.t * 6.5) * 0.08 * patted;
     // Bent forward, the seat's front edge drops: lift it clear.
     this.body.position.y += Math.max(0, Math.sin(lean)) * R * 0.8 * (low ? 1 : 0);
-    this.body.rotation.set(lean, 0, Math.sin(this.t * 42) * 0.03 * shiver + (walking ? Math.sin(this.hop * Math.PI * 2) * 0.06 : 0) + (rest ? Math.sin(this.t * 0.9) * 0.045 * this.sit : 0) + wiggle);
+    this.body.rotation.set(lean, 0, Math.sin(this.t * 42) * 0.03 * shiver + (walking ? Math.sin(this.hop * Math.PI * 2) * (low ? 0.1 : 0.06) : 0) + (rest ? Math.sin(this.t * 0.9) * 0.045 * this.sit : 0) + wiggle);
 
     // Feet: little alternating steps, tucked forward when sitting.
     for (let k = 0; k < 2; k++) {
       const f = this.feet[k];
       const s = k ? -1 : 1;
       const step = walking ? Math.sin(this.hop * Math.PI * 2 + k * Math.PI) : 0;
-      f.position.set(s * 0.42 * R, lift * 0.85 + Math.max(0, step) * 0.05, 0.18 * R + step * 0.06 + this.sit * 0.14);
+      f.position.set(s * 0.42 * R, lift * 0.85 + Math.max(0, step) * (low ? 0.015 : 0.05), 0.18 * R + step * (low ? 0.045 : 0.06) + this.sit * 0.14);
       f.rotation.x = -this.sit * 0.9 + step * 0.3;
       f.rotation.y = s * 0.2;
     }
@@ -797,7 +817,8 @@ export class Spirit {
       if (pose === 'warm' && !walking && !act) { x = -1.35; z = s * 0.1; }
       if (walking) { x = Math.sin(this.hop * Math.PI * 2 + k * Math.PI) * 0.5; z = s * 0.5; }
       // Hanging at its sides, hardly swinging.
-      if (low && shiver < 0.5) { x = 0.22 + (walking ? Math.sin(this.hop * Math.PI * 2 + k * Math.PI) * 0.1 : 0); z = s * 0.1; }
+      // (Bent over, they dangle in front of it.)
+      if (low && shiver < 0.5) { x = -0.3 + (walking ? Math.sin(this.hop * Math.PI * 2 + k * Math.PI) * 0.07 : 0) - sigh * 0.08; z = s * 0.04; }
       if (armsUp) { x = -0.4 + Math.sin(this.t * 14 + k) * 0.25; z = s * (2.5 + Math.sin(this.t * 10 + k * 2) * 0.2); }
       if (reach) { x = -1.45 + Math.sin(this.t * 14) * 0.15; z = s * 0.15; }
       if (beckon && k === 0) { x = -1.2; z = 2.0 + Math.sin(this.t * 10) * 0.55; }
@@ -850,8 +871,11 @@ export class Spirit {
       ly = THREE.MathUtils.clamp(Math.atan2(tv.y, Math.hypot(lxw, lz)) / 0.7, -1, 1);
     }
     // Eyes down, unless it's looking round at you.
-    if (low && lookAt !== this.player) { ly = Math.min(ly, -0.75); if (walking) lx = 0; }
-    if (low && lids > 0.5) lids = 0.5;
+    if (low && lookAt !== this.player) { ly = Math.min(ly, -0.9); if (walking) lx = 0; }
+    if (low && lids > 0.5) lids = 0.8;
+    const sad = this.bodyB.material.uniforms.uSad.value as THREE.Vector2;
+    const tp = ((this.t + 1.3) % TEAR) / 2.4;
+    sad.set(gloom, low && tp < 1 ? Math.max(tp, 0.001) : 0);
     this.look.x += (lx - this.look.x) * e(low ? 4 : 10);
     this.look.y += (ly - this.look.y) * e(10);
     this.eye.set(this.look.x, this.look.y, lids, 0);
@@ -859,17 +883,21 @@ export class Spirit {
     // Colour: ash-blue -> apricot -> amber, and a growing glow.
     if (wm < 0.5) this.tint.copy(COLD).lerp(MID, wm * 2);
     else this.tint.copy(MID).lerp(WARM, (wm - 0.5) * 2);
+    // In despair its fire's all but out.
+    this.tint.lerp(ASHEN, gloom * 0.7);
     // Being patted warms it through a little, however cold it is.
     if (wm < 0.75) this.tint.lerp(wm < 0.5 ? MID : WARM, pg * 0.35);
     this.heartTint.copy(HEART_COLD).lerp(HEART_WARM, Math.max(pg, THREE.MathUtils.smoothstep(wm, 0.05, 0.6)));
-    this.bodyB.material.uniforms.uEmber.value = Math.min(0.8, THREE.MathUtils.smoothstep(wm, 0.55, 1) * 0.62 + pg * 0.18);
-    this.heartB.material.uniforms.uEmber.value = Math.max(pg, THREE.MathUtils.smoothstep(wm, 0.05, 0.5)) * 0.85;
+    this.bodyB.material.uniforms.uEmber.value = Math.min(0.8, THREE.MathUtils.smoothstep(wm, 0.55, 1) * 0.62 * (1 - gloom * 0.85) + pg * 0.18);
+    this.heartB.material.uniforms.uEmber.value = Math.max(pg, THREE.MathUtils.smoothstep(wm, 0.05, 0.5) * (1 - gloom * 0.6)) * 0.85;
     this.armB.material.uniforms.uEmber.value = this.footB.material.uniforms.uEmber.value = this.bodyB.material.uniforms.uEmber.value;
     // Mouth: a little frown when cold, a "w" smile when warm or happy.
     const mw = this.bodyB.material.uniforms.uMouthW.value as THREE.Vector3;
-    mw.z = brave ? -1.5 : mood === 'sad' ? -8 : mood === 'scared' ? -5 : happy || this.happyT > 0 ? 7 : mood === 'down' ? -6 : wm > 0.35 ? 7 : shiver > 0.5 ? -5 : 3;
+    mw.z = brave ? -1.5 : mood === 'sad' ? -8 : mood === 'scared' ? -5 : happy || this.happyT > 0 ? 7 : low ? -13 + Math.sin(this.t * 17) * 2.5 : mood === 'down' ? -6 : wm > 0.35 ? 7 : shiver > 0.5 ? -5 : 3;
+    if (this.mouthHalf < 0) this.mouthHalf = mw.y;
+    mw.y = this.mouthHalf * (1 + gloom * 0.5);
     const bl = this.bodyB.material.uniforms.uBlush.value as THREE.Vector4;
-    const blush = Math.max(THREE.MathUtils.smoothstep(wm, 0.3, 0.8), pg) * (1 + pg * 0.25);
+    const blush = Math.max(THREE.MathUtils.smoothstep(wm, 0.3, 0.8) * (1 - gloom), pg) * (1 + pg * 0.25);
     bl.z = 0.14 * blush;
     bl.w = 0.08 * blush;
 

@@ -68,8 +68,8 @@ to stay inside the art direction (`docs/BRIEF.md`) and "nothing scary".
   round its head. Never by darkness or detail.
 - **Cold, read at a glance.** Its palette is the cold spirit's ash blue. It
   hunches. (It doesn't walk about hugging itself, and it doesn't shiver:
-  neither read well. Arms swing.) Its breath comes out as
-  big flat-bottomed toon clouds. Frost rimes its shoulders. Same language as
+  neither read well. Arms swing. No breath clouds: with no mouth to
+  come from, they read as random puffs.) Frost rimes its shoulders. Same language as
   the cold hearth spirit in phase 1, so kids have already learned it.
 - **The face** is the towers' and spirits' face: two tall, rounded-rectangle
   eyes, sleepy and half-lidded, set high. No teeth, no brow, no scowl. It
@@ -291,9 +291,14 @@ None of it is required.
 - Quests use pictogram bubbles (the spirit's thought bubbles, as now).
 
 ### Finding the way back (built)
-- Wander well away from the task and, after about 15 s, a small warm
-  arrowhead fades in. It rides the screen edge pointing toward the task, or
-  hangs over it when it's in view. It fades out once you're close. The task
+- Wander well away from the task and, after about 15 s, three faint
+  glowing orange chevrons fade in beside the explorer: they lie nearly
+  flat in the air at waist height, a little way out on the side the task
+  is on, pointing at it in the world, with a pulse running out along them
+  (a compass needle, not a waypoint marker; nothing at the screen's edge
+  or over the target). They pass behind the explorer.
+  It fades out once you're close. It never shows before you've first met
+  the spirit: the opening is yours to find. The task
   is the spirit (it always waits at, or leads you to, the next job), a
   tower's door at a lock. It doesn't call you home for the stable. It shows
   nothing while you're gathering (trees and rocks are anywhere) or out
@@ -617,6 +622,9 @@ proposed resolution; none is applied until the owner says yes.
   cools when you turn away; if you stand lost for ~20 s it hops down, runs a
   few steps the right way and beckons. The pack is always on screen in
   third person, so it's always readable. The HTML arrow goes.
+  (2026-10-02: the owner asked instead for a subtle HUD arrow that hovers
+  round the player, and it's built: see "Finding the way back". Whether
+  the guide still takes over the pointing is open.)
 - **5, settled:** a dungeon is **its own enclosed scene**, separate from
   the outdoor world. Walking through its entrance swaps you into it. Rooms
   are big and open, with roofs; the camera stays fairly tight to the
