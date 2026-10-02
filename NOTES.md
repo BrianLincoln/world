@@ -3352,3 +3352,434 @@ more fall-y."
 - `DESIGN.md`'s "Decided 2026-10-01" now carries the offering as the
   owner described it, the creature coming up with you, and the entrance
   becoming a shrine.
+
+## Dungeon 1, slice B: the offering (2026-10-01)
+
+The rest of slice B of `docs/NEXT-dungeon1.md`: from being put out on the
+surface on the rockhopper to the giant closing its fist on the light and
+glowing. Slice C is not started. `src/giant/offering.ts` is all of it but
+the giant's own new moves (`giant.ts`), the ring shutting (`ring.ts`) and
+the wiring in `main.ts`.
+
+### What happens
+1. **Up.** The ring's arms set you down 5.6 m short of the middle, not on
+   it, facing it, in line with the gap between two of the ring's stones
+   (so the camera behind you looks in through the gap and not at the back
+   of a stone: it was behind one, and you couldn't see yourself). The
+   light is at your shoulder as it was below: it's a mesh in the world's
+   scene now. The rockhopper is turned to face the shrine as you're
+   put on it (it used to keep whatever way it had been facing below, so
+   you came up looking at the camera).
+2. **The ring shuts** (3 s, `Ring.seal`): the field's lip closes in to its
+   middle, the dark spirit goes down through the last of it and is gone,
+   flat blue stones show where the field lay, and a squat stone shrine
+   with an empty bowl comes up in the middle.
+3. **The guide** is at the field's edge as you come up, walks in as the
+   field closes, and stands by the shrine pointing at the bowl with the
+   ember in its bubble. The bowl has a dashed sketch of the light in it
+   and one empty slot over it (`Sketch` and a slot `Billboard`, as the
+   cabin's parts have).
+4. **Setting it down**: E (or click) within 4.4 m, or just ride or walk to
+   within 3 m of it. The slot fills, the light arcs into the bowl.
+5. **Hands off for 32 s** (`T` in `offering.ts` is the whole timeline). A
+   crow comes down off the giant's head in one long glide, lands beyond
+   the shrine, looks at you, takes five hops to the bowl, leans in and
+   takes the light in its beak, turns, hops back out toward the giant. The
+   giant's eyes open; a mouth appears and turns up; it holds out a hand,
+   palm up, over the treetops. The crow flies up with the light under it
+   (grown to the size of the lights the other crows carry), hangs over the
+   palm, lets go. The light drops into the hand, the fingers draw in over
+   it, and the hand and forearm turn orange from the inside. The crow goes
+   back to its head. The arm folds back against its chest with the warm
+   fist, and it keeps a small grin and keeps looking at the shrine.
+6. **Control back**, still mounted, camera in through the gap again.
+
+### The camera for the hand-over (planned first, as asked)
+A crow with a 7 m wingspan and a hand 15 m across, 30 to 60 m from the
+ring and 15 m up. Three tries, each looked at as a sheet of frames:
+- From over the ring, 23 m from the palm: the hand was a wall of boulders
+  across the bottom of the frame and nothing read as a hand.
+- From beside you on the ground for the ending: the ring's stones hid the
+  giant.
+- **Kept:** two places. *Near* (0 to 10.8 s): low, behind you and to one
+  side, inside the ring, looking past you and the shrine to the crow, the
+  giant behind. *High* (the rest): 30 m back from the palm toward the
+  ring and 8 m above it, off to one side; it starts 14 m over the giant's
+  face on a long lens (fov 19: eyes, mouth), cranes down and widens (46)
+  as the hand comes out, closes on the hand (32) for the crow, the drop
+  and the fingers, and ends on face and fist together (34). One position
+  and no cuts after the first, so you always know where you are. Both
+  places are picked from a few candidates for the clearest of tree trunks
+  and ring stones (`pick`).
+- The face shot is from above because from level with it the arms it hugs
+  itself with hide its mouth.
+
+### The giant (`giant.ts`, `GIANT_FRAG`)
+- `awake` (eyes open, breathing, still sunk and still solid), `wide`,
+  `grin` (`uGrin`: a short ink line under the eyes, ends turned up; at 0
+  it has no mouth, as before), `look` (the head turns up to 0.55 rad),
+  `reachArm` / `reach` / `reachAt` (one arm out of the hug to a wrist
+  target, the hand turned palm up and level), `fist` (three fingers and
+  the thumb lerp to places over the palm: its hands are boulders, so
+  "closing" is boulders drawing together), `warm` (`uWarm`, a per-boulder
+  weight in `aWarm`: hand and fingers 1, forearm 0.7 / 0.4 / 0.18).
+  `snap()` for a restored save. `palm()`, `shoulder()`, `face()`.
+- The warm boulders are lit from inside in two flat tones of the ember's
+  orange, with emissive 0.34 (0.48 at night). My first value, 1.25,
+  bloomed to a yellow-white blob with no shape in it; the second, lit by
+  the sun's colours, was grey-pink at night.
+- **It does not rise.** The owner's order is eyes, grin, takes the light,
+  *then* "has gotten up", so getting up is slice C's. It takes the light
+  lying where it is. It isn't solid while the arm moves and is again once
+  it's still (the shell is rebuilt, fist and all).
+- **A bug found on the way, and fixing it changes the sleeping giant.**
+  Its limb bones hang off the group, not the pelvis, and were given
+  positions that already included the group's sink, so a dormant giant's
+  arms and legs were drawn 43 m below where they belonged: buried. Nobody
+  had seen the arms it "wraps round itself" because they were under the
+  ground. The reaching hand never appeared until this was fixed. Now the
+  hugging arms show against its chest when it's asleep, and its solid
+  shape includes them. It is the pose the code always described, but it
+  is not the hill the owner has been looking at. Flagged below.
+
+### The crow (`birds.ts`)
+One more of the giant's crows, with no light of its own, roosting on top
+of its head (the others are in its trees with their lights). `Birds` got
+two states: `stand` (wings shut, put where its owner says: the hops are
+the offering's) and `hover`. It has no legs (the flock never did); on the
+ground it is a plump black shape that hops, which reads.
+
+### Defaults and simplest choices taken (each flagged)
+- **The dark spirit goes down with the field and is gone.** The brief said
+  "leave it watching", from before the entrance was to become the shrine;
+  hanging over the bowl it would be in the way of everything. Simplest.
+- **The field becomes paving**, about 60 flat stones in the giant's ash
+  blue laid on the slope, and **the shrine is a small stone in the
+  middle** in the same blue. No raised floor: a step there would have to
+  be taught to every creature and the guide.
+- **The guide is simply there**, as agreed, and is put back by its own
+  fire once the light is given and you're 90 m off. While you hold the
+  light it stays at the ring, which also holds the story's own asking
+  (`story.lent`) until you give it.
+- **You can get off the rockhopper.** Nothing forces you to stay on. If
+  you stay on, you're on it all the way through and when control returns.
+- **A reload while you hold the light, or mid-sequence, puts you back by
+  the shrine on the rockhopper** rather than on the cabin's doorstep
+  1.5 km away with a light at your shoulder. Mid-sequence it plays again
+  from the light in the bowl. Once the fist has shut it is `given`.
+- **The glow stays** (settling to 0.7 of full) rather than fading after "a
+  while": nothing follows it yet. Slice C can fade it as the giant walks.
+- **Outside the story** (`story=0`, as the quest script runs) nothing has
+  walked to the ring, so a giant is stood 66 m off on the way in, and
+  there is no guide.
+- Saved as `fjellheim.offer1.<seed>`: `placed` or `given` (held is "the
+  dungeon's light is taken and neither of those").
+
+### Checked
+- `scripts/dungeon.mjs quest` on `hilda` and `42`: all steps ok, now
+  through to the end of the offering. It rides to the shrine with W only
+  (no E), holds W through the whole sequence and checks you don't move,
+  and checks the hand went out and shut and that you're still mounted.
+- `scripts/offering.mjs` (new) in the story on `hilda`, `frost`,
+  `bergen`: play (with E), and on `hilda` and `frost` a reload with the
+  light held, set down (mid-sequence) and given. `hilda` at 22:30 too.
+  Sheets of frames looked at for every one. On `bergen` the giant lies
+  much nearer the ring, so the hand is bigger in frame; it still reads.
+- **`42` in the story passes every scripted check and cannot be watched.**
+  Its dungeon site is the search's fallback (the way there has two
+  points, the yard and the ring itself) on a steep mountainside, and the
+  giant ends its walk on top of the ring: the near camera is inside its
+  boulders and the high one looks at a wall of them. That was so before
+  this slice (the ring there was already under the giant); the offering
+  just makes it obvious. Not fixed: it is the site search's problem, and
+  which seeds fall back hasn't been surveyed.
+- From the saddle, not only from the cinematic: coming up, the shrine
+  with its sketch and the guide, the prompt, the giant after from the
+  ring and from under its fist.
+- `dungeon.mjs leave` (an ordinary exit) still lifts you out in the
+  middle.
+- Beside `/inspo`: the paving and shrine are the same cold blue-grey
+  accent as the giant against the warm ground, which holds. The orange
+  fist and the light's bloom are stronger colour than anything in the
+  reference; the fist is two or three flat orange shapes with little
+  inside them.
+
+### Rough / open
+- **Not played by hand.** In particular: whether 32 s with your hands off
+  is too long; whether the crow's glide in is "calm"; whether the fist
+  reads as a fist in motion (in stills it does at 24 to 27 s); whether
+  riding to within 3 m and having the light go by itself feels right or
+  feels taken from you.
+- The sleeping giant looks different (above). If the owner wants the old
+  hill back, the arms can be tucked lower rather than the bug restored.
+- When control returns the ring's stones still hide part of the giant
+  from where you sit; you see the glow between them.
+- The shrine is a plain lathe shape, a little like an anvil from the
+  side. The paving is regular.
+- The crow turns on the spot with the light in its beak and the light
+  swings round a beat behind it.
+- On the sandbox's stand-in giant the folded fist can end up half in the
+  hillside. In the story, on three seeds, it is clear of the ground.
+- The reaching arm goes straight from the hug to the reach; it isn't
+  checked against the other arm or its own chest.
+- Sounds are the existing ones re-used (slot, whoosh, tug for hops,
+  snatch, stomp for waking, thunk, thud, fanfare). Not heard.
+- Frame cost not measured properly (a dozen or so more draw calls by the
+  ring: one crow in six batches, paving, shrine, light, sketch, slot).
+- The stand-in giant outside the story stood on the ring itself on seeds
+  whose way ends at the ring (`42`); it now stands back along the way.
+
+
+## The walk home and the grieving, shortened (2026-10-01)
+
+Owner: the stretch after the giant felt long, the 180 s in the village most
+of all.
+
+- `TRUDGE` 1.8 -> 2.4 m/s on the path home. The village shuffle keeps 1.8
+  (`MOPE`, split off from `TRUDGE`).
+- `GRIEVE` 180 -> 75 s, and counted from setting off home (`grief`, across
+  `trudge` and `grieve`) rather than from reaching the yard: a long walk
+  back isn't followed by a full wait. Not saved; a reload starts the 75 s
+  again. Always at least 20 s in the village itself (`GRIEVE_MIN`), so a
+  long walk doesn't skip the grieving altogether.
+- It can be brought round sooner (`comforted`): a pat (past `PAT.joy`), or
+  staying within 3 m of it for 6 s while it sits by its fire. The other
+  conditions stand (you in the village, on the ground, it not mid-act).
+
+## The send-off: from the ranch to dungeon 1 (2026-10-01)
+
+Owner: after the stable there was nothing pointing you at the trail. The
+guide should walk you to the edge of town toward the footprints and gesture
+that way with a footprint-path icon, looking brave and defiant ("go that
+way, save my people"), not frightened.
+
+- **Where it lives:** `Journey.sendOff()`, inside the `done` stage, with the
+  spirit borrowed (`story.lent`) as the journey always does. Not a step in
+  `phase3.ts`: a `meet` step ends when you arrive, and this has to stay,
+  let go and come back. So saves already at `ranch` get it too.
+- **When:** the story is at `ranch` (a creature is home), the giant has been,
+  the ring isn't found, and you've been in the village on the ground for 6 s.
+- **What:** 2.4 s looking at the nearest wrecked house (still downcast),
+  then `mood = 'brave'` and it leads (`want.lead`, so it waits for you) to
+  the heel rim of the first print more than 55 m from the lane and cabin
+  (`trailEdge`: found from the far end of the print list backwards, since
+  the giant walked in as well as out), and points at the print after next.
+  The far-off pointer follows it while it walks, then stops: the prints ask.
+- **Letting go:** you out of the village and 90 m from it and its spot: it
+  walks home (no teleport) and is the house's again. Back in the village
+  after being away, it does it again. Within 70 m of the ring is "found"
+  (saved as `fjellheim.journey.<seed>.ring`), and that's the end of it.
+- **The brave face:** a new `mood`. `uBrow` on the part material cuts the
+  top of each eye on a slant, low at the inner corner (all creatures share
+  the shader; only the spirit sets it). Eyes wide under it, mouth a nearly
+  flat line. It overrides the happy glance it gives when it sees you.
+- **Icon** `prints`: three of the giant's prints going away up the bubble,
+  smaller and paler each.
+- Checked with `scripts/sendoff.mjs` on `hilda`. Not checked: at night, on
+  other seeds (where the edge print lands), mounted, or with a save that
+  was already at `ranch`.
+
+### The offering, after the owner's first play (2026-10-01)
+Owner: "the arms crossed thing looks weird and bad. Maybe make them go down
+to the ground as if they were a rock stack... The hand/fist closing thing
+looks pretty bad as is as well. the camera angle wasn't helping"; the
+shrine "more of a thing. like a statue of the mount"; "glow fades"; "the
+guide should just not be here at all... have it be like a cutscene where
+its just happening out of the users control"; the saddle's bounce out of
+the camera above ground too; fix the bad dungeon sites "if you think
+that's best".
+
+- **A cutscene from the moment you come up.** No guide (it stays home; all
+  of its code here is gone, and so is the hold on the story's asking), no
+  sketch, no slot, no E. The ring shuts, the shrine rises, and 0.7 s later
+  the light leaves your shoulder in a slow arc and settles in the bowl;
+  the rest as before. Hands are off from coming up to the end, about 37 s
+  in all (3 s of the ring shutting, then 33 s).
+- **The shrine is the rockhopper in stone** on a round plinth, side on to
+  the way you come up, a shallow bowl on its back with the light in it
+  (`rockhopperStatue()` in `mobs/rockhopper.ts`: its own body, head, ears
+  and legs standing still, merged, 1.35 times life size, in the giant's
+  blue). The crow stretches up to take the light from its back.
+- **The sleeping giant's arms hang straight down into the ground**, one
+  stack of boulders at each side (`dormant` now means `hug` 0, not 1).
+- **The hand is a mitten.** Held out, the three finger boulders lie flat
+  on beyond the palm, longer than they hang. Shutting, they swing up and
+  over the palm about the knuckles as one piece (`fold`, `KNUCKLE`,
+  `FOLD` in `giant.ts`) and come down on the light; the thumb comes in
+  from the side. Before, each finger slid across the palm on its own:
+  boulders rolling over a boulder. A try in between (each finger on its
+  own arc) stood them up on end like slabs.
+- **The camera for the hand is side on to it**, measured from the palm
+  and on the side away from the giant's body: 27 m out, 14 m back toward
+  the ring, 8 m over it. (My first "side on" was measured from the line
+  between ring and giant; the arm comes off a shoulder 27 m from that
+  line, so the camera was looking up the arm at the back of the hand.) It
+  goes up again above the canopy for the end, when the fist is down at
+  its chest.
+- **The hand is held 20 m up**, not 15: at 15 the treetops between the
+  giant and the ring came through the palm.
+- **The glow fades** over 55 s after you get your hands back, and as it
+  goes the arm goes back down to the ground (`hold`). The giant stays
+  awake with its small grin. A reload after finds no glow.
+- **The saddle's bounce is smoothed out of the camera everywhere**, not
+  only below (`main.ts`).
+- **The dungeon site search has a real fallback** (`WorldGen.dungeon`):
+  when no way reaches any candidate it now takes the most level, open,
+  dry, low spot of the same sweep, with a straight line to 48 m short of
+  it for a way, instead of "1.2 km toward the next tower, whatever is
+  there". The cache key is `fjellheim.dungeon.v6` so old answers are
+  thrown away. On such a seed the prints may cross ground you have to go
+  round.
+- The owner's other answers are in `docs/NEXT-dungeon1.md` and
+  `DESIGN.md`: the pick is fine; the fetched rockhopper is fine; the dark
+  is liked; the stone hand didn't read as the giant's but is liked, and
+  is to be reused for things out in the world; rescued spirits mend the
+  village a bit more at each checkpoint.
+- **Checked** on the build as it stands: `offering.mjs` in the story on
+  `hilda` and `frost` (play and all three reloads), `bergen`, `42`, and
+  `hilda` at 22:30; `dungeon.mjs quest` on `hilda` and `42` (40 steps
+  each). All pass. W is held from coming up to the end in every one and
+  nothing moves. Sheets of frames looked at for `hilda`, `frost` and
+  `42`. **`42` now has a level site with the giant lying clear of the
+  ring, and its offering can be watched** (before, the giant sat on the
+  ring on a mountainside). Which other seeds used the old last resort
+  hasn't been surveyed.
+- **Still rough:** the fist is clearer but it is still four boulders; the
+  treetops come through the giant's chest and lower arm where it lies in
+  forest (they always did through its body); from the saddle afterwards
+  the ring's stones hide part of it; the second version hasn't been
+  played by hand; sounds unheard; frame cost unmeasured.
+
+
+## The spirit stays grey until the hearth is lit (2026-10-01)
+- It used to warm a little with every step of the repair (`warmth` in
+  `phase1.ts` climbed 0 → 0.68 before the hearth), so it was already a dull
+  apricot by the chimney. Owner's call: every step before `home` is now
+  `warmth: 0`. It turns only when the hearth is lit (`cabin.lit` sends the
+  target to 1, eased in `spirit.ts`). A pat still flushes it a little.
+  Typechecked; not looked at in the game.
+
+### The offering, third go: into its mouth; and stone hands about the world (2026-10-01)
+Owner: "the 'mitten' hand doesn't really work... the fingers don't cover
+the hand or close around the orb. New idea! What if the giant opens its
+mouth wide and the crow (with the orb) literally just flies inside it and
+disappears, then the giant smiles... No smile before that, just big open
+mouth." And: "the stone hands don't need to do anything yet out in the
+world, just place them randomly in interesting places (islands, mountains
+etc.)". And the village's mending steps on at each dungeon finished, to
+start with.
+
+- **The giant takes the light in its mouth.** The crow takes the light
+  from the shrine and hops out as before. The giant's eyes open; then its
+  mouth, wide, a dark hole under the eyes (`Giant.mouth`, `uMouth` in
+  `GIANT_FRAG`; no smile first). The crow flies up and straight in, the
+  light under it, and is gone (it isn't drawn again). The hole glows warm
+  for a moment (`gulp`), the mouth shuts, and a beat later it smiles
+  (`grin`). 24 s from the light leaving your shoulder, where the hand
+  version took 33.
+- **Everything to do with the hand is gone** from `giant.ts`, the shader
+  and `offering.ts`: reach, palm, fingers, fist, glow, hold. The limb fix
+  (arms and legs no longer sink twice) and the arms hanging down asleep
+  stay. So there is no glow to fade.
+- **The camera for the giant** is one place in front of its face and to
+  one side, about level with it, 40 m off: close as its eyes open, back
+  as the mouth opens and the crow flies up into frame and in, close again
+  on the smile.
+- **Where it ends:** the giant awake, mouth shut, a small smile, looking
+  at the shrine; the crow gone; you on the rockhopper. A reload finds the
+  same.
+- **Stone hands** (`src/world/hands.ts`): the cave's hand (its shape is
+  now `handBits()` in `dungeon/shell.ts`, shared) at 17 to 28 m tall, in
+  the giant's blue, standing on small islands and the tips of headlands
+  (dry, under 22 m, water at 70 or 140 m in at least 7 of 8 directions)
+  and on summits (over 120 m, found by climbing from a few starts, falling
+  away all round). A pure function of the seed: the world is cut into
+  1.1 km cells, 60% of cells may have one, and a cell has at most one, at
+  its most striking spot. Never within 420 m of the start, 150 m of a
+  tower or 160 m of the ring. Cells are looked at one a frame as you
+  travel (81 cells take 65 ms in all). You can't walk through one (a
+  round post). They do nothing.
+  On `hilda`, within 5 km of the origin: 19 hands, 9 of them on islands.
+  Four were looked at (a spit in a lake, a summit, two lakeside slopes
+  that the first, looser island test let through and the present one
+  doesn't). Not looked at: how they sit on steep ground, or from far off.
+- **The village mends a step at each dungeon finished** (owner, "let's
+  start with that"). Recorded; it belongs with slice C and isn't built.
+- **Checked** on the build as it stands: `offering.mjs` in the story on
+  `hilda` and `frost` (play and the three reloads), `42`, and `hilda` at
+  22:30; `dungeon.mjs quest` on `hilda` and `42` (40 steps each). All
+  pass. Frames looked at for `hilda` and `frost`.
+- **Rough:** the crow's wings are wider than the mouth and it simply
+  stops being drawn at the lips; the crow never comes back (owner: "gone for
+  good"); the white puffs by its mouth in some frames are its
+  breath, which was already there; not played by hand; sounds unheard.
+
+
+## The village mills about (2026-10-01)
+
+The owner asked for the villagers to be less stationary. `Village.mill`
+(`src/story/village.ts`) gives each spirit a small life while nothing's
+wrong: on its doorstep for a while, then indoors (30%), over to meet a
+neighbour (about 40%) or a stroll along the lane to look at something.
+
+- **Indoors:** the door is now its own mesh, hung on its edge, and swings
+  *in* (out would sweep whoever's on the step); the doorway behind it is a
+  dark panel (a lit one, glass like the windows, blew out to white by day).
+  The spirit's ground is its house's floor once it's over the step
+  (`floor`), it walks in through the panel and is hidden until it comes out.
+- **Talking:** two walk to a spot in the lane between their doors (or stay
+  put if they're neighbours), face each other and take turns: `Spirit.gesture`
+  (wave, arms wide, point, hop, cheer, nod), new, only read while settled.
+  "Point" turns the pointer to a chimney or an end of the lane and the other
+  looks too. The lower index keeps the talk's clock.
+- **Waves:** across the way to whoever else is on their step (who waves
+  back), and at you when you come within 5.5 m (at most every 20 s or so).
+- They walk at 1.6-2.1 m/s (`haste`), out to the lane and along their own
+  side of it (`along`), never through a neighbour's walls.
+- **It stops at the giant's first felt footfall** (`still`, from `flinch` and
+  `panic`): everyone stands where they are, anyone indoors comes out, and
+  `panic` now runs each from the lane point nearest it rather than its door's.
+- Behaviour timing uses `Math.random()` (not world gen; nothing is saved).
+- Not done: nothing different at night (they could all be indoors), and
+  "after we rescue them" has nobody to show yet: slice C isn't built. `mill`
+  covers anyone not `taken`, and skips going indoors while the house is
+  smashed, so a spirit flown home will stroll and talk as it is.
+
+## Crows and a huddle under the giant (2026-10-01)
+
+On `hildaz2` the snatching couldn't be seen: spirits vanished off the grass
+with no crow in shot. Where the giant stops is set by the lane, and there
+the pasture (where they huddle) is 40 m to its side, right under a hand; on
+`hilda` it's 63 m in front. `Visit.clear` keeps a flying crow out of the
+giant by lifting it over a hill-shaped roof that reaches out to twice the
+giant's width, and a mark under that roof can't be flown to: the crow stayed
+108 m up for the whole dive and was put down on the mark in the last few
+frames (and back up as fast), the camera with it.
+
+- A mark inside that reach (`bulk < 2`) is now flown *across* the giant, not
+  from over it: the dive's control point is 80 m off to whichever side the
+  crow is on (`UNDER.skim`), and the crow is let off `clear` over the last
+  60% of the dive and the first 60% of the climb (`Bird.ease`, was a fixed
+  10% at each end). So it goes over the top, comes down outside, and in low
+  under the hand; and on out the other side.
+- The camera behind the lead crow is let off by the same amount
+  (`Bird.kept`), and `placeBeside` reads the way in from the curve's last
+  leg, not from where the dive began.
+- Marks outside the reach fly exactly as before (`hilda` checked).
+- Not done: crows take no notice of trees or hills on the way in, here or
+  before.
+
+## The giant's mouth is a hole, and its clouds are for walking (2026-10-01)
+- The owner: the breath and print steam round a sat giant were "more distracting than anything". Both now
+  show only while `giant.walking` (`Giant.update`, `Trail.update(dt, near, walking)`). The puff at its mouth
+  in the offering is gone too.
+- The crow going into its mouth didn't read: the mouth was a painted ellipse, half of it buried in the chest
+  boulder, and the crow just vanished at the surface. Now `GIANT_FRAG` discards the head inside the lip
+  (`gape()`), and a second mesh (`hollow`: the head pebble again, BackSide, `uInside`) is what shows through:
+  dark, lit in two hard rings by whatever light is in it (`gulp`, `gulpAt`). The crow flies along
+  `Giant.throat` through the lips to the back of the hollow and the mouth shuts on it (`T.shut`, `T.closed`).
+- The head sits sunk in the shoulders, so (a) with its mouth open it lifts and tips its head back (`chinNow`,
+  `CHIN_*`), and (b) the other boulders aren't drawn where they run inside the head while the mouth is open
+  (`uHeadInv`: within 0.86 of the head's unit space, or anything within its bounds seen through the hole).
+- Check with `scripts/offering.mjs <dir> mouth`: the open mouth from three sides, then a frame every 0.2 s
+  of the crow going in.

@@ -38,6 +38,8 @@ const HEART_WARM = new THREE.Color('#ffb24a');
 export const PAT = { beats: [0.6, 1.1, 1.6], end: 2.1, joy: 1.3 };
 
 export type Pose = 'stand' | 'sit' | 'shiver' | 'warm' | 'point';
+/** What it says with its arms to company (the village milling about, story/village.ts). */
+export type Gesture = 'wave' | 'wide' | 'point' | 'hop' | 'cheer' | 'nod';
 
 export interface Want {
   at: THREE.Vector3;
@@ -215,9 +217,12 @@ export class Spirit {
    * arms pulled in; 'sad' reaches both arms up after what's been taken, mouth
    * turned right down, eyes heavy. 'down' is what's left afterwards: heavy
    * eyes and a frown, but it gets on with things (and still brightens when
-   * something good happens).
+   * something good happens). 'brave' is its mind made up (the send-off,
+   * story/journey.ts): brows set, eyes wide open under them, mouth a firm
+   * line, stood up straight. Seeing you doesn't soften it.
    */
-  mood: 'scared' | 'sad' | 'down' | null = null;
+  mood: 'scared' | 'sad' | 'down' | 'brave' | null = null;
+  private brow = 0;
 
   /**
    * Heavy-hearted (the walk home after the giant, story/journey.ts): it
@@ -231,6 +236,13 @@ export class Spirit {
 
   /** In a hurry (the village running from the giant): how fast it goes to where it's wanted, m/s. */
   haste: number | null = null;
+  /**
+   * In company (the village, story/village.ts): what it's saying to whoever
+   * it's turned to (`want.face`) while it's settled there. 'point' turns and
+   * points out `pointing`.
+   */
+  gesture: Gesture | null = null;
+  pointing: THREE.Vector3 | null = null;
   private flinchT = 0;
   /** A start: one sharp hop where it stands. */
   flinch() { this.flinchT = 0.38; }
@@ -584,6 +596,18 @@ export class Spirit {
           const glancing = near && this.glanceT < 1.8;
           if (glancing && this.glanceT + dt >= 1.8 && !this.sullen) this.happyT = Math.max(this.happyT, 1.4);
           lookAt = glancing ? this.player : w.face;
+          const g = this.gesture;
+          if (g) {
+            // On its feet for it, turned to them.
+            pose = 'stand';
+            lookAt = faceAt = w.face;
+            if (g === 'wave') { beckon = 1; bounce = 0.3; }
+            else if (g === 'wide') present = 1;
+            else if (g === 'point' && this.pointing) { pointAt = lookAt = this.pointing; faceAt = null; }
+            else if (g === 'hop') bounce = 0.6;
+            else if (g === 'cheer') { armsUp = 1; bounce = 0.8; happy = true; }
+            else if (g === 'nod') { bounce = 0.2; this.happyT = Math.max(this.happyT, 0.3); }
+          }
         } else if (w.usher && toPlayer < 30) {
           // Ushering: turned between you and the doorway, it holds a hand
           // out to you, sweeps it round into the opening with a little hop,
@@ -784,6 +808,10 @@ export class Spirit {
     if (happy || this.happyT > 0) lids = -1;
     if (mood === 'scared' && lids > 0.5) lids = 1;
     if ((mood === 'sad' || mood === 'down') && lids > 0.5) lids = 0.62;
+    const brave = mood === 'brave' && !happy;
+    if (brave && lids !== 1) lids = this.t > this.blinkAt ? 0.05 : 1;
+    this.brow += ((brave ? 1 : 0) - this.brow) * e(7);
+    this.bodyB.material.uniforms.uBrow.value = this.brow;
     let lx = 0, ly = 0;
     if (lookAt) {
       tv.subVectors(lookAt, this.pos);
@@ -811,7 +839,7 @@ export class Spirit {
     this.armB.material.uniforms.uEmber.value = this.footB.material.uniforms.uEmber.value = this.bodyB.material.uniforms.uEmber.value;
     // Mouth: a little frown when cold, a "w" smile when warm or happy.
     const mw = this.bodyB.material.uniforms.uMouthW.value as THREE.Vector3;
-    mw.z = mood === 'sad' ? -8 : mood === 'scared' ? -5 : happy || this.happyT > 0 ? 7 : mood === 'down' ? -6 : wm > 0.35 ? 7 : shiver > 0.5 ? -5 : 3;
+    mw.z = brave ? -1.5 : mood === 'sad' ? -8 : mood === 'scared' ? -5 : happy || this.happyT > 0 ? 7 : mood === 'down' ? -6 : wm > 0.35 ? 7 : shiver > 0.5 ? -5 : 3;
     const bl = this.bodyB.material.uniforms.uBlush.value as THREE.Vector4;
     const blush = Math.max(THREE.MathUtils.smoothstep(wm, 0.3, 0.8), pg) * (1 + pg * 0.25);
     bl.z = 0.14 * blush;
@@ -835,7 +863,7 @@ export class Spirit {
     // is flying in; the heart comes next).
     const want = w.count === 0 ? null : w.icon;
     // (Frightened or grieving, it isn't asking for anything.)
-    const icon = !this.bubbleNear || (this.mood && this.mood !== 'down') ? null : act?.kind === 'celebrate' || (act?.kind === 'pat' && act.t > PAT.end) ? 'heart' : this.moving || this.waiting ? null : want;
+    const icon = !this.bubbleNear || (this.mood && this.mood !== 'down' && this.mood !== 'brave') ? null : act?.kind === 'celebrate' || (act?.kind === 'pat' && act.t > PAT.end) ? 'heart' : this.moving || this.waiting ? null : want;
     const count = icon === w.icon ? w.total ?? w.count ?? 0 : 0;
     if (icon !== this.bubbleIcon && this.bubbleA < 0.05) {
       this.bubbleIcon = icon;

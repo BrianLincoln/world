@@ -264,6 +264,7 @@ export function makeCreatureMaterial(o: CreatureLook = {}) {
     uPupil: { value: new THREE.Vector2(...(o.pupil ?? [0.06, 0.09])) },
     uLookRange: { value: new THREE.Vector2(...(o.lookRange ?? [0.12, 0.1])) },
     uEyeTilt: { value: o.eyeTilt ?? 0 },
+    uBrow: { value: 0 },
     uMouthOrigin: { value: o.mouthOrigin ?? new THREE.Vector3() },
     uMouth: { value: new THREE.Vector3(...(o.mouth ?? [-0.2, 0.2, 1])) },
     uMouthW: { value: new THREE.Vector3(...(o.mouthW ?? [0, 0, 0])) },
@@ -281,7 +282,8 @@ export function makeCreatureMaterial(o: CreatureLook = {}) {
  * The giant: cold stone in the spirit's ash blue, turf and frosted conifers
  * on its back, snow on its head. One material for its boulders and its trees.
  */
-export function makeGiantMaterial() {
+/** (`inside`: the hollow of its mouth, the head's shape drawn from within.) */
+export function makeGiantMaterial(inside = false) {
   return mat(GIANT_VERT, GIANT_FRAG, {
     ...U,
     uIsProp: { value: 3 },
@@ -294,7 +296,13 @@ export function makeGiantMaterial() {
     cInk: { value: col('#2c2638') },
     uKeep: { value: 0.72 },
     uLid: { value: 0.45 },
-  });
+    uGrin: { value: 0 },
+    uMouth: { value: 0 },
+    uInside: { value: inside ? 1 : 0 },
+    uGlowAt: { value: new THREE.Vector4() },
+    uHeadInv: { value: new THREE.Matrix4() },
+    cWarm: { value: col('#f08a3c') },
+  }, inside ? { side: THREE.BackSide } : {});
 }
 
 /** The explorer's head: skin with painted eyes/brows/nose/mouth (see FACE_FRAG). */

@@ -76,6 +76,13 @@ const SEEN = 2.6, FRIGHT = 3.15, RUN = 13, REACT = [0.25, 1.5];
 const CHASE = 6;
 /** A crow comes in level along the ground from this far short of its mark, and goes on level this far past it. */
 const SKIM = 18;
+/**
+ * A mark in under the giant (the huddle can be right beside it, under a hand): there a crow comes in
+ * across its front or along its side, never from over it, from this far off; and it's let off keeping
+ * clear of the giant for this much of the dive (and as much of the climb away), which is what brings
+ * it down outside the giant and in underneath.
+ */
+const UNDER = { skim: 80, ease: 0.6 };
 /** The camera is never nearer the ground than this. */
 const FLOOR = 0.6;
 /** The camera's own field of view, and the tower head's (which it's handed back to). */
@@ -297,11 +304,16 @@ export class Visit {
   private clear = (p: THREE.Vector3) => {
     const g = this.giant;
     if (!g || g.dormant) return;
-    const c = g.centre, sn = Math.sin(g.facing), cs = Math.cos(g.facing), dx = p.x - c.x, dz = p.z - c.z;
-    const k = Math.hypot((dx * cs - dz * sn) / BULK.w, (dx * sn + dz * cs) / BULK.d);
+    const c = g.centre, k = this.bulk(p.x, p.z);
     const base = this.d.ground(c.x, c.z);
     p.y = Math.max(p.y, base + (this.hub.y + 5 - base) * (1 - THREE.MathUtils.smoothstep(k, 0.85, 2)));
   };
+
+  /** How far out from the giant's middle a point is, in its own widths (1: at its edge; 2: where `clear` leaves off). */
+  private bulk(x: number, z: number) {
+    const g = this.giant!, c = g.centre, sn = Math.sin(g.facing), cs = Math.cos(g.facing), dx = x - c.x, dz = z - c.z;
+    return Math.hypot((dx * cs - dz * sn) / BULK.w, (dx * sn + dz * cs) / BULK.d);
+  }
 
   /** The camera is taken and input is off. */
   get busy() { return this.state === 'running' && !!this.giant && this.jt < this.cue().end; }
@@ -443,9 +455,15 @@ export class Visit {
           v3.set(to.x - b.pos.x, 0, to.z - b.pos.z);
           if (v3.lengthSq() < 100) v3.set(to.x - g.centre.x, 0, to.z - g.centre.z);
           v3.normalize();
-          v2.copy(to).addScaledVector(v3, -SKIM);
+          // (In under the giant: across it, from whichever side the crow is on, so the way in and the way on are both clear of it.)
+          const under = this.bulk(to.x, to.z) < 2;
+          if (under) {
+            const ox = to.x - g.centre.x, oz = to.z - g.centre.z, s = (-oz * v3.x + ox * v3.z) < 0 ? -1 : 1;
+            v3.set(-oz * s, 0, ox * s).normalize();
+          }
+          v2.copy(to).addScaledVector(v3, under ? -UNDER.skim : -SKIM);
           v2.y = Math.max(to.y, this.d.ground(v2.x, v2.z) + GRIP);
-          fl.send(i, 'dive', v2, to, dur, 'dive');
+          fl.send(i, 'dive', v2, to, dur, 'dive', 0.1, under ? UNDER.ease : 0.1);
         };
         const lift = (i: number) => {
           const b = fl.birds[i];
@@ -453,10 +471,11 @@ export class Visit {
           v3.copy(b.dir).setY(0);
           if (v3.lengthSq() < 1e-4) v3.set(b.pos.x - g.centre.x, 0, b.pos.z - g.centre.z);
           v3.normalize();
-          v2.copy(b.pos).addScaledVector(v3, SKIM);
+          const under = this.bulk(b.pos.x, b.pos.z) < 2;
+          v2.copy(b.pos).addScaledVector(v3, under ? UNDER.skim : SKIM);
           v2.y = Math.max(b.pos.y, this.d.ground(v2.x, v2.z) + GRIP) + 0.5;
           v3.copy(this.hub).setY(this.hub.y + 8);
-          fl.send(i, 'climb', v2, v3, SNATCH.up + (i ? 0 : 0.8));
+          fl.send(i, 'climb', v2, v3, SNATCH.up + (i ? 0 : 0.8), 'wheel', under ? UNDER.ease : 0.1);
         };
         // One goes down alone (the camera goes with it); a pause once it has its spirit, and then the rest all but at once.
         for (let i = 0; i < n; i++) {
@@ -556,12 +575,14 @@ export class Visit {
     const took = SNATCH.lead + SNATCH.leadDown;
     let k = 1;
     if (b.state === 'dive' && t < took) {
-      if (!this.filming) { this.inDir.set(m.x - b.a.x, 0, m.z - b.a.z).normalize(); this.placeBeside(); }
+      if (!this.filming) { this.inDir.set(b.c.x - b.b.x, 0, b.c.z - b.b.z).normalize(); this.placeBeside(); }
       k = THREE.MathUtils.smoothstep(b.t, 0.45, 0.92);
     }
     // Behind and a little above it, the way it's flying (and no more through the giant than it is).
     v2.copy(b.pos).addScaledVector(b.dir, -15).setY(v2.y + 3.5);
+    const y = v2.y;
     this.clear(v2);
+    v2.y = THREE.MathUtils.lerp(y, v2.y, b.kept);
     v2.lerp(this.beside, k);
     v3.copy(b.pos).addScaledVector(b.dir, 4 * (1 - k));
     v1.copy(m).setY(m.y + 2.4);

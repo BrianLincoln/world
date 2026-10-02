@@ -6,7 +6,7 @@ import * as THREE from 'three';
 // in-world billboards (as textures), so an icon always looks the same
 // wherever it appears.
 
-export type IconName = 'axe' | 'log' | 'stone' | 'flame' | 'heart' | 'home' | 'check' | 'hand' | 'hammer' | 'pick' | 'smash' | 'antlers' | 'up' | 'down' | 'ember' | 'bike' | 'finger' | 'mouse' | 'mouseDown' | 'fingerDown' | 'pat' | 'lasso' | 'stable' | 'creature' | 'parachute';
+export type IconName = 'axe' | 'log' | 'stone' | 'flame' | 'heart' | 'home' | 'check' | 'hand' | 'hammer' | 'pick' | 'smash' | 'antlers' | 'up' | 'down' | 'ember' | 'bike' | 'finger' | 'mouse' | 'mouseDown' | 'fingerDown' | 'pat' | 'lasso' | 'stable' | 'creature' | 'parachute' | 'prints';
 
 const INK = '#4a2e36';
 const SIZE = 128;
@@ -673,7 +673,40 @@ function drawParachute(g: CanvasRenderingContext2D) {
   g.fill();
 }
 
+/** The giant's trail: three of its prints going away up the bubble, left, right, left, each smaller and cooler than the last. */
+function drawPrints(g: CanvasRenderingContext2D) {
+  const one = (x: number, y: number, s: number, lean: number, fill: string) => {
+    g.save();
+    g.translate(x, y);
+    g.rotate(lean);
+    g.scale(s, s);
+    // The sole: broad at the toes, narrow at the heel.
+    g.beginPath();
+    g.moveTo(0, 26);
+    g.bezierCurveTo(-15, 26, -17, 6, -18, -8);
+    g.bezierCurveTo(-19, -24, 19, -24, 18, -8);
+    g.bezierCurveTo(17, 6, 15, 26, 0, 26);
+    g.closePath();
+    g.fillStyle = fill;
+    g.fill();
+    ink(g, 5 / s);
+    // Three blunt toes.
+    for (const [tx, ty] of [[-12, -31], [0, -35], [12, -31]]) {
+      g.beginPath();
+      g.arc(tx, ty, 5.5, 0, Math.PI * 2);
+      g.fillStyle = fill;
+      g.fill();
+      ink(g, 4 / s);
+    }
+    g.restore();
+  };
+  one(86, 26, 0.42, 0.3, '#f6c9a4');
+  one(48, 54, 0.62, 0.12, '#f3ad84');
+  one(78, 92, 0.9, 0.2, '#ee8f6c');
+}
+
 const DRAW: Record<IconName, (g: CanvasRenderingContext2D) => void> = {
+  prints: drawPrints,
   parachute: drawParachute,
   up: drawUp, down: drawDown, ember: drawEmber, bike: drawBike,
   antlers: drawAntlers, pat: drawPat, lasso: drawLasso, stable: drawStable, creature: drawCreature,

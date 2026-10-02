@@ -9,6 +9,7 @@ import type { Plot, VillageSite } from '../world/storySite';
 import { gable, K, kbox, merge, rbox } from './geometry';
 import { glintMat, propMesh } from './props';
 import { Spirit } from './spirit';
+import type { Gesture } from './spirit';
 
 // The village: the other hearth spirits' houses, whole and lived in, down
 // the lane from the guide's cabin (the plots are in world/storySite.ts).
@@ -16,6 +17,10 @@ import { Spirit } from './spirit';
 // the doorstep, a lit window and a wisp of smoke. The giant treads on them
 // (`smash`): a house bursts into boards and stones that stay where they
 // land, and its spirit is gone (giant/visit.ts carries it off).
+//
+// Until then (and for anyone who's home again) they mill about: in at the
+// door and out again, a stroll along the lane, over to a neighbour to talk
+// with their arms, a wave across the way or at you (`mill`).
 
 /** Hut scale: the door (1.2 m) is for a spirit, not for you. */
 const S = 1.8;
@@ -29,7 +34,7 @@ const HUTS: HutSpec[] = [
 const BASE = 0.18, OVER = 0.22;
 
 /** A spirit's house: local +z is the door side, the ridge runs along x, y = 0 at the ground. */
-function buildHut(v: number): { geo: THREE.BufferGeometry; door: THREE.Vector3; chimney: THREE.Vector3 } {
+function buildHut(v: number): { geo: THREE.BufferGeometry; leaf: THREE.BufferGeometry; hinge: THREE.Vector3; doorX: number; door: THREE.Vector3; chimney: THREE.Vector3 } {
   const { w, d, h, rise, wall, roof } = HUTS[v];
   const top = BASE + h, hd = d / 2;
   const parts: THREE.BufferGeometry[] = [];
@@ -52,9 +57,14 @@ function buildHut(v: number): { geo: THREE.BufferGeometry; door: THREE.Vector3; 
   parts.push(kbox(w + 0.56, 0.1, 0.16, 0, top + rise + 0.1, 0, K.trim));
   // The door, a lintel, a step.
   const dx = -w * 0.17;
-  parts.push(kbox(0.44, 0.66, 0.06, dx, BASE + 0.33, hd + 0.02, K.door));
+  // (The doorway is the dark inside; the door is its own mesh, hung
+  // on its left edge, and swings in.)
+  parts.push(kbox(0.42, 0.63, 0.024, dx, BASE + 0.335, hd + 0.01, K.soot));
   parts.push(kbox(0.56, 0.07, 0.09, dx, BASE + 0.7, hd + 0.03, K.trim));
-  parts.push(kbox(0.05, 0.05, 0.05, dx + 0.14, BASE + 0.32, hd + 0.06, K.trim));
+  const leaf = merge([kbox(0.44, 0.64, 0.04, 0.22, BASE + 0.34, 0, K.door), kbox(0.05, 0.05, 0.05, 0.36, BASE + 0.32, 0.03, K.trim)]);
+  leaf.scale(S, S, S);
+  leaf.computeVertexNormals();
+  leaf.computeBoundingSphere();
   parts.push(rbox(0.6, 0.14, 0.3, 0.05, dx, BASE - 0.06, hd + 0.16, K.stone));
   // A window by the door (a cross of glazing bars) and a small one in the gable.
   const wx = w * 0.24, wy = BASE + h * 0.58, ws = 0.24;
@@ -72,20 +82,44 @@ function buildHut(v: number): { geo: THREE.BufferGeometry; door: THREE.Vector3; 
   geo.scale(S, S, S);
   geo.computeVertexNormals();
   geo.computeBoundingSphere();
-  return { geo, door: new THREE.Vector3(dx * S, 0, (hd + 0.62) * S), chimney: new THREE.Vector3(cx * S, (cTop + 0.1) * S, cz * S) };
+  return { geo, leaf, hinge: new THREE.Vector3((dx - 0.22) * S, 0, (hd + 0.045) * S), doorX: dx * S, door: new THREE.Vector3(dx * S, 0, (hd + 0.62) * S), chimney: new THREE.Vector3(cx * S, (cTop + 0.1) * S, cz * S) };
 }
 
 export interface House {
   plot: Plot; hw: number; hd: number; wallTop: number; rise: number; door: THREE.Vector3; chimney: THREE.Vector3;
   meshes: THREE.Object3D[]; smashed: boolean;
+  /** The door: where it is along the front (house-local), its leaf, and how far it's swung in (0..1). */
+  doorX: number; leaf: THREE.Object3D; ajar: number;
 }
+
+type Doing = 'home' | 'stroll' | 'look' | 'back' | 'meet' | 'chat' | 'part' | 'in' | 'inside' | 'out';
+/** What one of them is up to while nothing's wrong. */
+interface Life {
+  doing: Doing;
+  /** Seconds left of it; on the way somewhere, seconds at it (to give up on). */
+  t: number;
+  /** Who it's meeting (-1: nobody). The lower of the two keeps the talk's clock: whose `turn`, and when the `next` is. */
+  mate: number; turn: number; next: number;
+  /** Its place by its door, and whether it sits there. */
+  spot: THREE.Vector3; sits: boolean;
+  /** What it looks at when it has nothing to say, and how long what it's saying has left. */
+  face: THREE.Vector3; gt: number;
+  /** Something to say in a moment (a wave back, a look where the other's pointing). */
+  due: { t: number; g: Gesture | null; secs: number; face?: THREE.Vector3 } | null;
+  /** Until it next hails a neighbour, and until it'll wave at you again. */
+  hailT: number; greetT: number;
+  /** Which side of the lane's middle it keeps to (m). */
+  side: number;
+}
+/** Eye height (for looking one another in the face). */
+const EYE = 0.34;
 
 /** A board or a stone thrown out of a smashed house. */
 interface Piece { stone: boolean; pos: THREE.Vector3; vel: THREE.Vector3; rot: THREE.Euler; spin: THREE.Vector3; size: THREE.Vector3; tint: THREE.Color; rest: boolean }
 const BOARDS = 26, STONES = 8;
 const WALL_TINT = [BIOME.cabinWall, BIOME.cabinWall2, BIOME.cabinWall];
 const ROOF_TINT = [BIOME.cabinRoof, BIOME.moss, BIOME.cabinRoof];
-const m4 = new THREE.Matrix4(), q = new THREE.Quaternion();
+const m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), v1 = new THREE.Vector3();
 
 export interface VillageDeps {
   seed: number;
@@ -99,9 +133,14 @@ export class Village {
   readonly spirits: Spirit[] = [];
   readonly home: number[] = [];
   readonly taken: boolean[] = [];
-  /** Where each one's door lets out on to the lane (an index into it), and the way it's running (set by `panic`). */
+  /** Where each one's door lets out on to the lane (an index into it), and the way it's going (null: straight there). */
   private laneAt: number[] = [];
-  private flee: (THREE.Vector3[] | null)[] = [];
+  private way: (THREE.Vector3[] | null)[] = [];
+  /** Nothing's wrong, and they're milling about (until the first `flinch`). */
+  private calm = true;
+  private life: Life[] = [];
+  private eyes: THREE.Vector3[] = [];
+  private mid = new THREE.Vector3();
   private gy: (x: number, z: number) => number;
   private smoke = new Puffs('#f3ebe0', 40, 0, 0.55);
   private smokeT: number[] = [];
@@ -128,7 +167,10 @@ export class Village {
       shade.position.copy(mesh.position);
       shade.rotation.y = p.rot;
       shade.layers.set(SHADOW_LAYER);
-      this.group.add(mesh, shade);
+      const leaf = propMesh(built.leaf, this.mat);
+      leaf.position.copy(built.hinge).applyMatrix4(mesh.matrixWorld);
+      leaf.rotation.y = p.rot;
+      this.group.add(mesh, shade, leaf);
       const door = built.door.clone().applyMatrix4(mesh.matrixWorld);
       const chimney = built.chimney.clone().applyMatrix4(mesh.matrixWorld);
       const sp = HUTS[p.variant];
@@ -143,19 +185,29 @@ export class Village {
         const n = this.spirits.length;
         const at = door.clone();
         if (k) { at.x += Math.cos(p.rot) * 1.5; at.z -= Math.sin(p.rot) * 1.5; at.y = d.ground(at.x, at.z); }
-        const spirit = new Spirit({ ground: d.ground, route: (_a, b) => this.flee[n]?.slice() ?? [b], sound: () => {}, sparkle: () => {} }, at);
+        // (Its ground is the house's floor, once it's over the step.)
+        const spirit = new Spirit({ ground: (x, z) => this.floor(i, x, z), route: (_a, b) => this.way[n]?.slice() ?? [b], sound: () => {}, sparkle: () => {} }, at);
         this.laneAt.push(vi);
-        this.flee.push(null);
-        spirit.want = { at: at.clone(), face: new THREE.Vector3(mid.x, 0, mid.z), pose: hash01(n, 1, d.seed, 979) < 0.4 ? 'sit' : 'stand', icon: null, lead: false, settled: true };
+        this.way.push(null);
+        const sits = hash01(n, 1, d.seed, 979) < 0.4;
+        spirit.want = { at: at.clone(), face: this.mid, pose: sits ? 'sit' : 'stand', icon: null, lead: false, settled: true };
         spirit.holdWarmth = 0.8 + hash01(n, 7, d.seed, 979) * 0.2;
         spirit.heading = p.rot;
+        // A potter, not the guide's trot.
+        spirit.haste = 1.6 + hash01(n, 3, d.seed, 979) * 0.5;
+        this.life.push({
+          doing: 'home', t: 1.5 + hash01(n, 4, d.seed, 979) * 10, mate: -1, turn: 0, next: 0, spot: at.clone(), sits, face: this.mid, gt: 0, due: null,
+          hailT: 3 + hash01(n, 5, d.seed, 979) * 12, greetT: 0, side: (n % 2 ? 1 : -1) * (0.5 + hash01(n, 6, d.seed, 979) * 0.8),
+        });
+        this.eyes.push(at.clone().setY(at.y + EYE));
         this.spirits.push(spirit);
         this.home.push(i);
         this.taken.push(false);
         this.group.add(spirit.group);
       }
-      this.houses.push({ plot: p, hw: (sp.w / 2) * S, hd: (sp.d / 2) * S, wallTop: (BASE + sp.h) * S, rise: sp.rise * S, door, chimney, meshes: [mesh, shade], smashed: false });
+      this.houses.push({ plot: p, hw: (sp.w / 2) * S, hd: (sp.d / 2) * S, wallTop: (BASE + sp.h) * S, rise: sp.rise * S, door, chimney, meshes: [mesh, shade, leaf], smashed: false, doorX: built.doorX, leaf, ajar: 0 });
     }
+    this.mid.set(mid.x, d.ground(mid.x, mid.z) + EYE, mid.z);
     this.group.add(this.smoke.group, this.boards.mesh, this.stones.mesh);
   }
 
@@ -212,6 +264,7 @@ export class Village {
     const lane = this.site.lane;
     /** Where each stands, across the way they're looking and back from it: twos and threes, not a rank. */
     const SPOT = [[-4.7, 0.5], [-3.6, -1.7], [-2.6, 2.0], [-0.7, -0.4], [0.4, 2.7], [1.1, -2.3], [3.2, 1.0], [4.3, -1.3], [2.2, 3.4], [-1.9, 3.6]];
+    this.still();
     let tail = 0, far = 0;
     const runs: { k: number; len: number; go: () => void }[] = [];
     for (const [k, s] of this.spirits.entries()) {
@@ -222,9 +275,11 @@ export class Village {
       at.y = this.gy(at.x, at.z);
       // Each keeps to its own side of the way, so the pack is a pack and not a string.
       const off = r(3) * 4.4, path: THREE.Vector3[] = [];
-      const step = laneTo < this.laneAt[k] ? -1 : 1;
+      // (From wherever along the lane it had got to.)
+      const from = this.nearest(s.pos);
+      const step = laneTo < from ? -1 : 1;
       const side = (p: { x: number; z: number }, q: { x: number; z: number }) => { const l = Math.hypot(q.x - p.x, q.z - p.z) || 1; return new THREE.Vector3(p.x + ((q.z - p.z) / l) * off, 0, p.z - ((q.x - p.x) / l) * off); };
-      for (let j = this.laneAt[k]; j !== laneTo; j += step) path.push(side(lane[j], lane[j + step]));
+      for (let j = from; j !== laneTo; j += step) path.push(side(lane[j], lane[j + step]));
       const end = via[0] ?? at;
       path.push(side(lane[laneTo], end));
       for (const [n, w] of via.entries()) path.push(side(w, via[n + 1] ?? at).lerp(w, 0.6));
@@ -235,7 +290,7 @@ export class Village {
       s.mood = 'scared';
       s.want.face = face;
       s.want.pose = 'stand';
-      runs.push({ k, len, go: () => { this.flee[k] = path; s.want = { at, face, pose: 'stand', icon: null, lead: false, settled: true }; } });
+      runs.push({ k, len, go: () => { this.way[k] = path; s.teleport(s.pos); s.want = { at, face, pose: 'stand', icon: null, lead: false, settled: true }; } });
     }
     const speed = THREE.MathUtils.clamp(far / secs, 5, 11.5);
     this.fleeT = 0;
@@ -252,6 +307,7 @@ export class Village {
 
   /** Something came down close by: they all start. */
   flinch() {
+    this.still();
     for (const [k, s] of this.spirits.entries()) if (!this.taken[k]) s.flinch();
   }
 
@@ -308,10 +364,268 @@ export class Village {
       this.fleeT += dt;
       this.waiting = this.waiting.filter((w) => { if (w.at > this.fleeT) return true; w.go(); return false; });
     }
+    if (this.calm) this.mill(dt, player);
+    for (const [i, h] of this.houses.entries()) {
+      if (h.smashed) continue;
+      // The door swings in ahead of whoever's coming through it, and to behind them.
+      let open = 0;
+      for (const [k, s] of this.spirits.entries()) {
+        if (this.home[k] !== i || this.taken[k]) continue;
+        const l = this.life[k], t = this.world(h, h.doorX, h.hd, v1), near = Math.hypot(s.pos.x - t.x, s.pos.z - t.z);
+        if ((l.doing === 'in' && near < 2.4) || (l.doing === 'inside' && l.t < 0.45) || (l.doing === 'out' && near < 1.5)) open = 1;
+      }
+      if (Math.abs(open - h.ajar) < 1e-3) continue;
+      h.ajar += (open - h.ajar) * (1 - Math.exp(-7 * dt));
+      h.leaf.rotation.y = h.plot.rot + h.ajar * 1.75;
+    }
     for (const [k, s] of this.spirits.entries()) {
-      if (this.taken[k] && !s.carried) continue;
+      // (Carried off, or indoors.)
+      if (!s.group.visible) continue;
       s.player.copy(player);
       s.update(dt);
+      this.eyes[k].copy(s.pos).y += EYE;
+    }
+  }
+
+  /** House-local (x, z) in the world, at height `y`. */
+  private world(h: House, lx: number, lz: number, out: THREE.Vector3, y = 0) {
+    const c = Math.cos(h.plot.rot), s = Math.sin(h.plot.rot);
+    return out.set(h.plot.x + c * lx + s * lz, y, h.plot.z - s * lx + c * lz);
+  }
+
+  /** The ground for someone who lives at house `i`: up its step and on to its floor. */
+  private floor(i: number, x: number, z: number): number {
+    const h = this.houses[i], g = this.gy(x, z);
+    if (!h || h.smashed) return g;
+    const l = this.local(h, x, z, this.l);
+    if (Math.abs(l.x - h.doorX) > 0.3 * S || l.z > h.hd + 0.31 * S + 0.25 || l.z < -h.hd) return g;
+    return Math.max(g, h.plot.y + BASE * S);
+  }
+
+  /** The lane point nearest `p`. */
+  private nearest(p: { x: number; z: number }): number {
+    let best = 0, bd = Infinity;
+    for (const [j, q] of this.site.lane.entries()) { const d = Math.hypot(q.x - p.x, q.z - p.z); if (d < bd) { bd = d; best = j; } }
+    return best;
+  }
+
+  /** The way for `k` from where it is to `at`, which is by lane point `to`: out to the lane, along its own side of it, and off. */
+  private along(k: number, to: number, at: THREE.Vector3): THREE.Vector3[] | null {
+    const lane = this.site.lane, p = this.spirits[k].pos, from = this.nearest(p);
+    if (from === to) return null;
+    const step = to < from ? -1 : 1, off = this.life[k].side * step, path: THREE.Vector3[] = [];
+    for (let j = from; j !== to + step; j += step) {
+      // (Not back to a point it's all but at, or on past the one it's leaving the lane by.)
+      if ((j === from && Math.hypot(lane[j].x - p.x, lane[j].z - p.z) < 3) || (j === to && Math.hypot(lane[j].x - at.x, lane[j].z - at.z) < 3)) continue;
+      const a = lane[Math.max(0, j - 1)], b = lane[Math.min(lane.length - 1, j + 1)], len = Math.hypot(b.x - a.x, b.z - a.z) || 1;
+      path.push(new THREE.Vector3(lane[j].x + ((b.z - a.z) / len) * off, 0, lane[j].z - ((b.x - a.x) / len) * off));
+    }
+    path.push(at);
+    return path;
+  }
+
+  /** Send `k` off to `at` to be `doing` something, by `path` (which ends there) or straight. */
+  private go(k: number, at: THREE.Vector3, doing: Doing, path: THREE.Vector3[] | null = null) {
+    const s = this.spirits[k], l = this.life[k];
+    at.y = this.floor(this.home[k], at.x, at.z);
+    this.way[k] = path;
+    // (So it asks the way again, however near the last place this is.)
+    s.teleport(s.pos);
+    s.gesture = null;
+    l.gt = 0;
+    l.due = null;
+    s.want = { at, face: l.face, pose: 'stand', icon: null, lead: false, settled: true };
+    l.doing = doing;
+    l.t = 0;
+  }
+
+  /** `k` says `g` (or just looks) for `secs`, to `face` (or whoever it's with); 'point' points out `at`. */
+  private say(k: number, g: Gesture | null, secs: number, face?: THREE.Vector3, at?: THREE.Vector3) {
+    const s = this.spirits[k], l = this.life[k];
+    s.gesture = g;
+    s.pointing = at ?? null;
+    s.want.face = face ?? l.face;
+    l.gt = secs;
+  }
+
+  /** Back on its doorstep with nothing to do for a while. */
+  private settleHome(k: number) {
+    const s = this.spirits[k], l = this.life[k];
+    l.doing = 'home';
+    l.t = 5 + Math.random() * 12;
+    l.mate = -1;
+    l.face = this.mid;
+    s.want = { at: l.spot.clone(), face: l.face, pose: l.sits ? 'sit' : 'stand', icon: null, lead: false, settled: true };
+  }
+
+  private goHome(k: number) {
+    const l = this.life[k];
+    l.mate = -1;
+    l.face = this.mid;
+    this.go(k, l.spot.clone(), 'back', this.along(k, this.laneAt[k], l.spot));
+  }
+
+  /** A wander a little way along the lane, to stand and look at something. */
+  private stroll(k: number) {
+    const lane = this.site.lane, l = this.life[k];
+    const to = THREE.MathUtils.clamp(this.nearest(this.spirits[k].pos) + Math.round((Math.random() - 0.5) * 4), 0, lane.length - 1);
+    const a = Math.random() * 6.283, r = 0.6 + Math.random() * 1.4;
+    const at = new THREE.Vector3(lane[to].x + Math.cos(a) * r, 0, lane[to].z + Math.sin(a) * r);
+    l.mate = -1;
+    l.face = this.mid;
+    this.go(k, at, 'stroll', this.along(k, to, at));
+  }
+
+  /** Something worth looking at or pointing out: a chimney's smoke, or either end of the lane. */
+  private sight(): THREE.Vector3 {
+    const lane = this.site.lane, r = Math.random();
+    const up = this.houses.filter((h) => !h.smashed);
+    if (r < 0.55 && up.length) return up[Math.floor(Math.random() * up.length)].chimney;
+    const q = r < 0.8 ? lane[0] : lane[lane.length - 1];
+    return new THREE.Vector3(q.x, this.gy(q.x, q.z) + 2, q.z);
+  }
+
+  /** `a` and `b` go and meet: where they are if they're neighbours, or out in the lane between their doors. */
+  private meet(a: number, b: number) {
+    const lane = this.site.lane, sa = this.life[a].spot, sb = this.life[b].spot;
+    const d = Math.hypot(sb.x - sa.x, sb.z - sa.z) || 1, ux = (sb.x - sa.x) / d, uz = (sb.z - sa.z) / d;
+    const mi = Math.round((this.laneAt[a] + this.laneAt[b]) / 2);
+    const p = d < 5 ? new THREE.Vector3().addVectors(sa, sb).multiplyScalar(0.5) : new THREE.Vector3(lane[mi].x + (Math.random() - 0.5) * 2.4, 0, lane[mi].z + (Math.random() - 0.5) * 2.4);
+    for (const [k, o, sg] of [[a, b, -1], [b, a, 1]]) {
+      const l = this.life[k], at = new THREE.Vector3(p.x + ux * 0.8 * sg, 0, p.z + uz * 0.8 * sg);
+      l.mate = o;
+      l.face = this.eyes[o];
+      this.go(k, at, 'meet', d < 5 ? null : this.along(k, mi, at));
+    }
+  }
+
+  /** The talk between `a` and its mate (`a` keeps the clock): they take turns, one saying something with its arms and the other taking it in. */
+  private talk(a: number, dt: number) {
+    const la = this.life[a], b = la.mate;
+    la.t -= dt;
+    if ((la.next -= dt) > 0) return;
+    if (la.t <= 0) {
+      // A wave, and they go their ways.
+      for (const k of [a, b]) { this.say(k, 'wave', 1.2); this.life[k].doing = 'part'; this.life[k].t = 1.3 + (k === a ? 0 : 0.3); }
+      return;
+    }
+    const k = la.turn++ % 2 ? b : a, o = k === a ? b : a;
+    const r = Math.random(), secs = 1.1 + Math.random() * 0.9;
+    const g: Gesture = la.turn === 1 || r > 0.9 ? 'wave' : r < 0.32 ? 'wide' : r < 0.56 ? 'point' : r < 0.78 ? 'hop' : 'cheer';
+    if (g === 'point') {
+      // "Look at that": and the other does.
+      const at = this.sight();
+      this.say(k, g, secs + 0.5, undefined, at);
+      this.life[o].due = { t: 0.5, g: null, secs, face: at };
+    } else {
+      this.say(k, g, secs);
+      if (la.turn === 1) this.life[o].due = { t: 0.6, g: 'wave', secs: 1.1 };
+      else if (Math.random() < 0.65) this.life[o].due = { t: secs * 0.6, g: g === 'cheer' ? 'cheer' : 'nod', secs: 0.8 };
+    }
+    la.next = secs + 0.5 + Math.random() * 0.9;
+  }
+
+  /** An ordinary day: each of them at something, and on to the next thing when it's done. */
+  private mill(dt: number, player: THREE.Vector3) {
+    for (const [k, s] of this.spirits.entries()) {
+      if (this.taken[k]) continue;
+      const l = this.life[k], h = this.houses[this.home[k]];
+      if (l.due && (l.due.t -= dt) <= 0) { this.say(k, l.due.g, l.due.secs, l.due.face); l.due = null; }
+      if (l.gt > 0 && (l.gt -= dt) <= 0) { s.gesture = null; s.want.face = l.face; }
+      const idle = (l.doing === 'home' || l.doing === 'look') && l.gt <= 0 && !l.due;
+      // You, close by: a wave.
+      l.greetT -= dt;
+      if (idle && l.greetT <= 0 && Math.hypot(player.x - s.pos.x, player.z - s.pos.z) < 5.5) {
+        this.say(k, 'wave', 1.4, s.player);
+        l.greetT = 20 + Math.random() * 12;
+        continue;
+      }
+      switch (l.doing) {
+        case 'home': {
+          // Now and then, a wave across the way to whoever else is out on their step (who waves back).
+          if (idle && (l.hailT -= dt) <= 0) {
+            l.hailT = 9 + Math.random() * 14;
+            const out = this.spirits.map((_q, m) => m).filter((m) => m !== k && !this.taken[m] && this.life[m].doing === 'home' && this.life[m].gt <= 0 && this.eyes[m].distanceTo(s.pos) < 32);
+            if (out.length) {
+              const m = out[Math.floor(Math.random() * out.length)];
+              this.say(k, 'wave', 1.5, this.eyes[m]);
+              this.life[m].due = { t: 0.8, g: 'wave', secs: 1.3, face: this.eyes[k] };
+            }
+          }
+          if ((l.t -= dt) > 0 || !idle) break;
+          const r = Math.random();
+          if (r < 0.3 && !h.smashed) {
+            // Indoors for a bit: to the door and in.
+            const inside = this.world(h, h.doorX, h.hd - 0.85, new THREE.Vector3());
+            this.go(k, inside, 'in', [h.door.clone(), inside]);
+          } else if (r < 0.72) {
+            const free = this.spirits.map((_q, m) => m).filter((m) => m !== k && !this.taken[m] && this.life[m].doing === 'home' && this.life[m].spot.distanceTo(l.spot) < 70);
+            if (free.length) this.meet(k, free[Math.floor(Math.random() * free.length)]);
+            else this.stroll(k);
+          } else this.stroll(k);
+          break;
+        }
+        case 'stroll':
+          if (s.arrived || (l.t += dt) > 40) {
+            l.doing = 'look';
+            l.t = 3 + Math.random() * 5;
+            s.want.face = l.face = this.sight();
+          }
+          break;
+        case 'look':
+          if ((l.t -= dt) <= 0 && idle) { if (Math.random() < 0.35) this.stroll(k); else this.goHome(k); }
+          break;
+        case 'back':
+        case 'out':
+          if (s.arrived || (l.t += dt) > 40) this.settleHome(k);
+          break;
+        case 'meet': {
+          const m = l.mate, lm = this.life[m];
+          l.t += dt;
+          // (Stood up: the other's off at something else.)
+          if (lm.mate !== k || (lm.doing !== 'meet' && lm.doing !== 'chat')) { this.goHome(k); break; }
+          if (k > m) break;
+          if (s.arrived && this.spirits[m].arrived) {
+            l.doing = lm.doing = 'chat';
+            l.t = 7 + Math.random() * 10;
+            l.turn = 0;
+            l.next = 0.4;
+          } else if (l.t > 45) { this.goHome(k); this.goHome(m); }
+          break;
+        }
+        case 'chat':
+          if (k < l.mate) this.talk(k, dt);
+          break;
+        case 'part':
+          if ((l.t -= dt) <= 0) { if (Math.random() < 0.3) this.stroll(k); else this.goHome(k); }
+          break;
+        case 'in':
+          // Through the door and gone; it shuts behind.
+          if (s.arrived || (l.t += dt) > 15) { s.group.visible = false; l.doing = 'inside'; l.t = 5 + Math.random() * 12; }
+          break;
+        case 'inside':
+          if ((l.t -= dt) <= 0) {
+            s.group.visible = true;
+            this.go(k, l.spot.clone(), 'out', [h.door.clone(), l.spot.clone()]);
+          }
+          break;
+      }
+    }
+  }
+
+  /** Something's wrong: whatever they were at, they stop where they are (anyone indoors comes out to see). */
+  private still() {
+    if (!this.calm) return;
+    this.calm = false;
+    for (const [k, s] of this.spirits.entries()) {
+      if (this.taken[k]) continue;
+      const l = this.life[k], h = this.houses[this.home[k]];
+      l.face = this.mid;
+      if (l.doing === 'in' || l.doing === 'inside' || l.doing === 'out') {
+        s.group.visible = true;
+        this.go(k, l.spot.clone(), 'out', [h.door.clone(), l.spot.clone()]);
+      } else this.go(k, s.pos.clone(), 'home');
+      s.want.pose = 'stand';
     }
   }
 

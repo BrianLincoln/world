@@ -41,6 +41,16 @@ const STEP = 0.6, TALL = 1.7;
 /** The pebble shapes' seeds; their lumps (see `pebbleRadius`) never reach past LUMP_MAX. */
 const PEBBLE_SEEDS = [11, 23, 37];
 const LUMP_MAX = 1.14;
+/** Where its mouth is on its head, as a direction from the head's middle (y, z; the eyes are at y 0.2): GIANT_FRAG draws it there. */
+const MOUTH = [-0.3, 0.95];
+/** The way out through the middle of its open mouth, from the head's middle (unit; the hole sits a little under MOUTH). */
+const GAPE = new THREE.Vector3(0, -0.421, 0.907);
+/** With its mouth open it lifts its head and tips it back, clear of its chest: how far up and forward (m), and back (rad). */
+const CHIN_UP = 3.5, CHIN_OUT = 1.5, CHIN_BACK = 0.45;
+/** The head bone on the torso. */
+const NECK: [number, number] = [26, 13.5];
+/** The head boulder: where on the head bone, and its radii. */
+const HEAD_AT: [number, number, number] = [0, 4, 0], HEAD_R: [number, number, number] = [9, 9.4, 8.8];
 
 interface Stone {
   inv: THREE.Matrix4;
@@ -134,7 +144,7 @@ export interface GiantHost {
   ground: (x: number, z: number) => number;
   /** A foot comes down: the ground under its ankle, which foot, and the way it points. */
   onStep?: (at: THREE.Vector3, foot: number, yaw: number) => void;
-  /** It breathes out: the mouth, and the way it faces. */
+  /** It breathes out (walking only): the mouth, and the way it faces. */
   onBreath?: (at: THREE.Vector3, dir: THREE.Vector3) => void;
 }
 
@@ -154,9 +164,34 @@ export class Giant {
   hug = 0;
   private hugNow = 0;
   /**
-   * Dormant: it gives up, wraps its arms round itself, shuts its eyes and
-   * settles down into the ground until only its hump, shoulders and the top
-   * of its head show: a hill with trees on it. (`settle()` is the same at once.)
+   * Awake where it lies (the offering, giant/offering.ts): its eyes open and
+   * it breathes out, but it stays sunk and solid. `wide`: how far its eyes
+   * open past their usual half (0..1); `mouth`: its mouth open (0..1;
+   * eased), a real hole into the hollow of its head, which things can fly
+   * into (`throat`); `gulp`, a light in there (0..1) at `gulpAt`, which
+   * lights the hollow round it; `grin`: a small shut mouth, its ends turned
+   * up (0..1; it has no mouth at all otherwise); `look`: what its head
+   * turns to.
+   */
+  awake = false;
+  wide = 0;
+  mouth = 0;
+  gulp = 0;
+  readonly gulpAt = new THREE.Vector3();
+  grin = 0;
+  look: THREE.Vector3 | null = null;
+  private mouthNow = 0;
+  /** Its head lifted for its open mouth (0..1): up with the mouth, and down again slowly once that's shut. */
+  private chinNow = 0;
+  private lidNow = 0.45;
+  private grinNow = 0;
+  private lookNow = new THREE.Vector2();
+  /**
+   * Dormant: it gives up, shuts its eyes and settles down into the ground,
+   * its arms hanging straight down at its sides into the earth like two
+   * stacks of boulders, until it's a hill with trees on it. (`settle()` is
+   * the same at once.) It used to wrap its arms round itself: with them
+   * drawn where they belong, the owner found that "weird and bad".
    */
   dormant = false;
   private sink = 0;
@@ -173,6 +208,8 @@ export class Giant {
   private walkT = 0;
   private time = 0;
   private readonly mat = makeGiantMaterial();
+  private readonly hollowMat = makeGiantMaterial(true);
+  private hollow: THREE.Mesh;
   private batches: { mesh: THREE.InstancedMesh; parts: PartDef[]; local: THREE.Matrix4[] }[] = [];
   private pelvis = new THREE.Object3D();
   private torso = new THREE.Object3D();
@@ -198,7 +235,7 @@ export class Giant {
     torso.add(head);
     torso.position.set(0, 5, 0);
     torso.rotation.x = LEAN;
-    head.position.set(0, 26, 13.5);
+    head.position.set(0, ...NECK);
     head.rotation.x = -LEAN * 0.7;
     pelvis.updateMatrixWorld(true);
 
@@ -210,7 +247,7 @@ export class Giant {
       { bone: torso, pos: [0, 30, -8], r: [24, 13.5, 18], rot: [0, 0.2, 0], turf: -0.1, snow: 0.78 },
       { bone: torso, pos: [-13, 21, -15], r: [10, 9, 9], rot: [0.3, 0.5, 0], turf: 0.15 },
       { bone: torso, pos: [14, 14, -14], r: [9, 8, 8], rot: [0, 2.2, 0.4], turf: 0.3 },
-      { bone: head, pos: [0, 4, 0], r: [9, 9.4, 8.8], turf: 9, snow: 0.4, face: true },
+      { bone: head, pos: HEAD_AT, r: HEAD_R, turf: 9, snow: 0.4, face: true },
     ];
     for (const s of [1, -1]) {
       const i = s > 0 ? 0 : 1;
@@ -259,6 +296,15 @@ export class Giant {
       this.group.add(mesh);
       this.batches.push({ mesh, parts, local });
     });
+
+    // The hollow of its mouth: the head boulder again, drawn from inside. It's only seen through the hole the
+    // open mouth cuts in the head (GIANT_FRAG).
+    this.hollow = new THREE.Mesh(buildPebble(PEBBLE_SEEDS[P.findIndex((p) => p.face) % PEBBLE_SEEDS.length], 10), this.hollowMat);
+    this.hollow.position.set(...HEAD_AT);
+    this.hollow.scale.set(...HEAD_R);
+    this.hollow.frustumCulled = false;
+    this.hollow.visible = false;
+    head.add(this.hollow);
 
     // Whole conifers on the hump and shoulders, growing straight up as it
     // rests (so they tip with it when it leans).
@@ -319,7 +365,26 @@ export class Giant {
   private rising = false;
   private riseTime = 1;
 
-  settle() { this.dormant = true; this.sink = 1; this.hug = 1; this.hugNow = 1; this.pose(0); }
+  settle() { this.dormant = true; this.sink = 1; this.hug = 0; this.hugNow = 0; this.pose(0); }
+
+  /** Whatever it has been told to do with its face, done at once (a restored save). */
+  snap() {
+    this.grinNow = this.grin;
+    this.mouthNow = this.mouth;
+    this.chinNow = this.mouth > 0 ? 1 : 0;
+    this.lidNow = this.lidWant(0);
+    this.pose(0);
+  }
+
+  /** The middle of its face, and its mouth. */
+  face(out: THREE.Vector3) { return this.head.localToWorld(out.set(0, 5, 8.5)); }
+  mouthAt(out: THREE.Vector3) { return this.head.localToWorld(out.set(0, 4 + MOUTH[0] * 9.4, MOUTH[1] * 8.8)); }
+  /** A point on the line out through the middle of its open mouth: `k` = 1 at the lips, 0 the middle of its head, more than 1 out in front, less than 0 the back of the hollow. */
+  throat(out: THREE.Vector3, k: number) { return this.hollow.localToWorld(out.copy(GAPE).multiplyScalar(k)); }
+
+  private lidWant(blink: number) {
+    return this.dormant && !this.awake ? Math.min(1, 0.45 + this.sink * 3) : Math.max(0.45 - 0.3 * this.wide, 0) + (0.55 + 0.3 * this.wide) * blink;
+  }
 
   /** Carry on after a pause. */
   resume() { this.pauseAt = null; this.walkT = 0; this.walking = true; }
@@ -518,18 +583,49 @@ export class Giant {
     }
 
     if (this.under > 0 && this.rising) this.under = Math.max(0, this.under - dt / this.riseTime);
-    if (this.dormant) { this.hug = 1; this.sink = Math.min(1, this.sink + dt / 9); }
+    if (this.dormant) { this.hug = 0; this.sink = Math.min(1, this.sink + dt / 9); }
     this.hugNow += (this.hug - this.hugNow) * (1 - Math.exp(-1.5 * dt));
+    // Its head turns to what it's looking at (not far: it is stone).
+    {
+      let yaw = 0, pitch = 0;
+      if (this.look && this.awake) {
+        this.head.getWorldPosition(va);
+        const dx = this.look.x - va.x, dz = this.look.z - va.z;
+        yaw = Math.atan2(dx, dz) - this.pelvis.rotation.y;
+        yaw = THREE.MathUtils.clamp(Math.atan2(Math.sin(yaw), Math.cos(yaw)), -0.55, 0.55);
+        pitch = THREE.MathUtils.clamp(Math.atan2(va.y - this.look.y, Math.hypot(dx, dz)) - 0.1, -0.1, 0.3);
+      }
+      const k = 1 - Math.exp(-1.1 * dt);
+      this.lookNow.x += (yaw - this.lookNow.x) * k;
+      this.lookNow.y += (pitch - this.lookNow.y) * k;
+    }
+    this.chinNow = this.mouth > 0 ? Math.min(1, this.chinNow + dt / 2.2) : this.mouthNow > 0 ? this.chinNow : Math.max(0, this.chinNow - dt / 2.6);
     this.pose(dt);
 
     // Slow blinks, the way the spirit does; the lids never open far.
     this.blinkT -= dt;
     if (this.blinkT < -0.9) this.blinkT = 4 + 5 * Math.random(); // presentation only
     const blink = this.blinkT < 0 ? Math.sin((-this.blinkT / 0.9) * Math.PI) : 0;
-    this.lids = this.dormant ? Math.min(1, 0.45 + this.sink * 3) : 0.45 + 0.55 * blink;
+    // (Waking, they open slowly; a blink is quick.)
+    const lid = this.lidWant(blink);
+    this.lidNow += (lid - this.lidNow) * (1 - Math.exp(-(blink > 0 ? 30 : 2.2) * dt));
+    this.lids = this.lidNow;
+    this.grinNow += (this.grin - this.grinNow) * (1 - Math.exp(-2.5 * dt));
+    this.mat.uniforms.uGrin.value = this.grinNow;
+    // (Its mouth opens slowly, as everything it does, and shuts a little quicker.)
+    this.mouthNow = this.mouthNow < this.mouth ? Math.min(this.mouth, this.mouthNow + dt / 2.6) : Math.max(this.mouth, this.mouthNow - dt / 0.7);
+    this.mat.uniforms.uMouth.value = this.mouthNow * this.mouthNow * (3 - 2 * this.mouthNow);
+    // The hollow behind it, and whatever light has been carried in.
+    this.hollow.visible = this.mouthNow > 0.01;
+    if (this.hollow.visible) {
+      this.hollow.worldToLocal(va.copy(this.gulpAt));
+      this.hollowMat.uniforms.uGlowAt.value.set(va.x, va.y, va.z, this.gulp);
+      this.mat.uniforms.uHeadInv.value.copy(this.hollow.matrixWorld).invert();
+    }
 
     this.breathT -= dt;
-    if (this.breathT <= 0 && !this.dormant && this.under < 0.5) {
+    // (Its breath shows only while it walks: standing or sat, the clouds round it were a distraction.)
+    if (this.breathT <= 0 && this.walking && this.under < 0.5) {
       this.breathT = 5.5;
       this.head.updateWorldMatrix(true, false);
       const at = this.head.localToWorld(va.set(0, 0.5, 9.5));
@@ -602,14 +698,23 @@ export class Giant {
 
     torso.rotation.set(LEAN + 0.035 * Math.sin(phi * Math.PI * 2) * (this.walking ? 1 : 0) + 0.012 * breathe, -twist * 1.5, -0.07 * sway);
     torso.scale.setScalar(1 + 0.008 * breathe);
-    head.rotation.set(-LEAN * 0.7 - 0.02 * breathe, twist * 0.6, 0.03 * sway);
+    const chin = this.chinNow * this.chinNow * (3 - 2 * this.chinNow);
+    head.position.set(0, NECK[0] + CHIN_UP * chin, NECK[1] + CHIN_OUT * chin);
+    head.rotation.set(-LEAN * 0.7 - 0.02 * breathe + this.lookNow.y - CHIN_BACK * chin, twist * 0.6 + this.lookNow.x, 0.03 * sway);
     pelvis.updateMatrixWorld(true);
 
+    // The limbs' bones hang off the group, not the pelvis, so they're placed in the group's own space: what
+    // `localToWorld` gives, less however far the group has sunk. (They used to be given the sunk place and
+    // then sank again with the group: a dormant giant's arms and legs lay 43 m under where they belonged.)
+    const off = this.group.matrixWorld.elements[13];
+    const sk = this.sink * this.sink * (3 - 2 * this.sink);
+    const gy = -SINK * sk - DEEP * this.under * this.under * (3 - 2 * this.under);
     const pole = new THREE.Vector3();
     const knee = new THREE.Vector3(), hip = new THREE.Vector3(), tgt = new THREE.Vector3();
     feet.forEach((f, i) => {
       const side = i === 0 ? 1 : -1;
       pelvis.localToWorld(hip.set(side * HIP_W, 0, 0));
+      hip.y -= off;
       tgt.copy(f.ankle);
       // Knees forward and a little out.
       pole.set(Math.sin(f.yaw) + Math.cos(h) * side * 0.25, 0.15, Math.cos(f.yaw) - Math.sin(h) * side * 0.25);
@@ -627,6 +732,7 @@ export class Giant {
       const side = i === 0 ? 1 : -1;
       const hg = this.hugNow;
       torso.localToWorld(sh.set(side * SHOULDER.x, SHOULDER.y, SHOULDER.z));
+      sh.y -= off;
       const sw = this.walking ? side * 0.34 * stepWave : 0;
       const reach = (A1 + A2) * 0.95;
       hang.set(side * (SHOULDER.x + 5), 0, 0).applyAxisAngle(Y, h).add(pelvis.position);
@@ -634,6 +740,7 @@ export class Giant {
       hang.addScaledVector(fwd, 5 + reach * Math.sin(sw));
       // Hands on the opposite arm, one above the other.
       torso.localToWorld(tgt.set(-side * 12, 14.5 + side * 3.4, 24.5 + side * 1.2));
+      tgt.y -= off;
       tgt.lerpVectors(hang, tgt, hg);
       pole.set(side * 0.5, -0.4 - 0.5 * hg, -1 + 2.3 * hg).applyAxisAngle(Y, h);
       bend(sh, tgt, A1, A2, pole, elbow);
@@ -659,12 +766,10 @@ export class Giant {
     }
 
     // Dormant, the whole of it goes down into the ground (slowly, then it's still).
-    const sk = this.sink * this.sink * (3 - 2 * this.sink);
-    this.group.position.y = -SINK * sk - DEEP * this.under * this.under * (3 - 2 * this.under);
+    this.group.position.y = gy;
     this.group.updateMatrixWorld(true);
     for (const b of this.batches) {
       // (The batches hang off the group, which has sunk; the bones' world matrices already have.)
-      const gy = this.group.position.y;
       b.parts.forEach((p, i) => { m4.multiplyMatrices(p.bone.matrixWorld, b.local[i]); m4.elements[13] -= gy; b.mesh.setMatrixAt(i, m4); });
       b.mesh.instanceMatrix.needsUpdate = true;
     }

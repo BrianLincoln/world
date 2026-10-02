@@ -277,6 +277,25 @@ export class WorldGen {
       this.poiCache.clear();
       this.pathCache.clear();
       if (!best) {
+        // No way reaches anywhere. Then at least somewhere a ring can stand: the most level, open, dry spot
+        // of the same sweep, and a straight line to 48 m short of it for a way (the giant doesn't mind what it
+        // walks over; you may have to go round). Before this, such seeds got the last resort below, which
+        // could be a mountainside, with the giant coming to rest on top of the ring.
+        let pick: DungeonSite | null = null, top = -Infinity;
+        for (const r of [1300, 1150, 1450, 1000, 1600, 850]) for (let ai = 0; ai < 48; ai++) {
+          const a = (ai / 48) * Math.PI * 2 + hash01(Math.round(r), 0, this.seed, 953);
+          const c = fit(yard.x + Math.cos(a) * r, yard.z + Math.sin(a) * r, 1);
+          if (!c) continue;
+          const score = -this.forestBase(c.x, c.z, c.y) * 6 - Math.abs(r - 1300) * 0.004 - c.y * 0.02;
+          if (score > top) { top = score; pick = c; }
+        }
+        if (pick) {
+          const l = Math.hypot(pick.x - yard.x, pick.z - yard.z), n = Math.ceil((l - 48) / 40);
+          for (let i = 0; i <= n; i++) { const k = ((l - 48) / l) * (i / n); pick.way.push([yard.x + (pick.x - yard.x) * k, yard.z + (pick.z - yard.z) * k]); }
+          best = pick;
+        }
+      }
+      if (!best) {
         // Last resort: 1.2 km out toward the second tower, wherever that is.
         const nx = this.nextTower, dl = Math.hypot(nx.x - yard.x, nx.z - yard.z) || 1;
         const x = yard.x + ((nx.x - yard.x) / dl) * 1200, z = yard.z + ((nx.z - yard.z) / dl) * 1200;

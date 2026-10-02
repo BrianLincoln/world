@@ -23,6 +23,8 @@ export interface RingDeps {
 
 /** Reaching up for you, holding a beat, pulling you under; and bringing you back up and letting go (s). */
 const REACH = 0.5, HOLD = 0.14, PULL = 0.6, RISE = 0.7, LET_GO = 0.45;
+/** Shutting for good: the field closing and the dark spirit going down with it (s). */
+const SEAL = 3;
 /** How far on to the field you walk before it takes you (m in from its lip). */
 const WELL_ON = 3;
 /** How far under the field the arms start from and take you to (m). */
@@ -77,6 +79,13 @@ export class Ring {
   /** The forcefield: translucent, so the overlay scene. */
   readonly overlay = new THREE.Group();
   open = false;
+  /**
+   * Done with (the light below has been taken): the field closes in to its
+   * middle and the dark spirit goes down through the last of it. What stands
+   * there after is the shrine (giant/offering.ts). `sealK`: how far along (0..1).
+   */
+  sealed = false;
+  sealK = 0;
   /** Called when the arms have you under the field: the dungeon takes over. */
   onTaken: (() => void) | null = null;
   private openNow = 0;
@@ -155,13 +164,20 @@ export class Ring {
   }
 
   /** Back from the dungeon: the arms lift you out through the middle of the field and let go. */
-  emerge(ground: number) {
-    const b = this.d.body, c = this.centre;
-    b.pos.set(c.x, ground - UNDER, c.z);
+  emerge(ground: number, x = this.centre.x, z = this.centre.z) {
+    const b = this.d.body;
+    b.pos.set(x, ground - UNDER, z);
     b.vel.set(0, 0, 0);
     this.d.setMode('carried');
-    this.take = { phase: 'rise', t: 0, from: new THREE.Vector3(c.x, ground, c.z) };
+    this.take = { phase: 'rise', t: 0, from: new THREE.Vector3(x, ground, z) };
     this.disarmed = true;
+  }
+
+  /** Shut for good (`now`: it already was, a restored save). */
+  seal(now = false) {
+    this.sealed = true;
+    this.open = false;
+    if (now) { this.sealK = 1; this.openNow = 0; this.fall = -1; this.spirit.visible = false; this.field.visible = false; }
   }
 
   /** The giant lets it go from `from`: it drops into the ring, and the ring opens. */
@@ -174,6 +190,7 @@ export class Ring {
 
   /** Open already (a save from after). */
   setOpen() {
+    if (this.sealed) return;
     this.open = true;
     this.openNow = 1;
     this.fall = -1;
@@ -196,11 +213,20 @@ export class Ring {
     } else if (this.open) {
       this.spirit.position.copy(hover);
       this.spirit.rotation.z = Math.sin(t * 0.9) * 0.06;
+    } else if (this.sealed && this.sealK < 1 && !this.take) {
+      // Down through the middle of its own field as that closes, growing small, and gone.
+      this.sealK = Math.min(1, this.sealK + dt / SEAL);
+      const e = THREE.MathUtils.smoothstep(this.sealK, 0, 0.62);
+      this.spirit.position.copy(hover).setY(hover.y - (4.6 + 1.6) * e * e);
+      this.spirit.scale.setScalar(1.25 * (1 - 0.45 * e));
+      if (e >= 1) this.spirit.visible = false;
     }
-    this.openNow += ((this.open ? 1 : 0) - this.openNow) * (1 - Math.exp(-1.4 * dt));
+    // (Sealing, it closes steadily, lip and all, rather than easing off.)
+    if (this.sealed) this.openNow = this.take ? this.openNow : Math.max(0, Math.min(this.openNow, 1 - THREE.MathUtils.smoothstep(this.sealK, 0.05, 0.8)));
+    else this.openNow += ((this.open ? 1 : 0) - this.openNow) * (1 - Math.exp(-1.4 * dt));
     this.field.visible = this.openNow > 0.01;
     (this.field.material as THREE.ShaderMaterial).uniforms.uOpen.value = this.openNow;
-    if (!this.spirit.visible) { this.hideArms(); return; }
+    if (!this.spirit.visible && !this.take) { this.hideArms(); return; }
     // It watches whoever is nearest: you.
     const off = Math.hypot(player.x - ctr.x, player.z - ctr.z);
     const look = off < 60 ? player : camera;

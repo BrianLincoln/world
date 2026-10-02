@@ -23,6 +23,8 @@ export const CHECKPOINTS: Checkpoint[] = [
   ...PHASE3.steps.map((s, i): Checkpoint => ({ id: s.id, label: `3.${i + 1} ${s.id}`, kind: 'stable', giantGone: true })),
   // Not a story step yet: stands you by the first dungeon's ring, opened.
   { id: 'ring', label: '4.1 ring (dungeon 1)', kind: 'ring', giantGone: true },
+  // The dungeon done: coming up with its light, the ring shutting into a shrine (giant/offering.ts).
+  { id: 'offer', label: '4.2 offering (dungeon 1 done)', kind: 'ring', giantGone: true },
 ];
 
 const SHOW_KEY = 'ow.cp.show';

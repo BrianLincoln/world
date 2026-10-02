@@ -8,7 +8,7 @@ import { Prints, soleSdf } from '../world/prints';
 
 // What the giant leaves behind: wherever a foot comes down, a permanent
 // print (world/prints.ts), the trees under the sole pressed flat and fanned
-// outward, and steam off the prints that are still warm.
+// outward, and steam off the prints that are still warm while it walks on.
 
 /** Flattened trees kept lying about (the oldest are cleared away). */
 const MAX_FLAT = 90;
@@ -67,11 +67,12 @@ export class Trail {
     return true;
   }
 
-  update(dt: number, near: THREE.Vector3) {
+  /** `walking`: the giant is on the move. (Stood or sat on its last prints, their steam was a cloud round it for good.) */
+  update(dt: number, near: THREE.Vector3, walking: boolean) {
     // Steam off the warm ones near you: soft puffs that rise and thin.
     this.steamT -= dt;
     const L = this.prints.list;
-    if (this.steamT <= 0 && L.length) {
+    if (this.steamT <= 0 && L.length && walking) {
       this.steamT = 0.07;
       const p = L[Math.max(0, L.length - 1 - Math.floor(Math.random() * 10))]; // presentation only
       const w = this.prints.warmth(p);

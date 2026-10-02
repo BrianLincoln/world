@@ -143,7 +143,9 @@ to stay inside the art direction (`docs/BRIEF.md`) and "nothing scary".
   water, and goes by a tower where it can. *(Built: see NOTES.md.)*
 - **The giant at the end of it** gives up and settles into the ground: a
   boulder hill with its trees on top and its crows roosting in them with
-  their lights. *(Built.)*
+  their lights. *(Built. Its arms hang straight down into the ground at
+  its sides, like two stacks of boulders: the owner found them wrapped
+  round its chest "weird and bad".)*
 - **Dungeons are rings of standing stones,** dotted about the world as
   the towers are. The giant frees a **dark spirit** at one, and that
   spirit becomes its way in: a forcefield on the ground inside the ring,
@@ -166,9 +168,27 @@ to stay inside the art direction (`docs/BRIEF.md`) and "nothing scary".
   it and carries it to the giant, who opens its eyes, grins a little,
   holds out a hand palm up, closes its fist on the light and glows orange
   there (warmed); a crow flies one spirit home to the village; the giant
-  gets up and walks on to the next dungeon's site. *(Built: the
-  celebration, the trip to the surface on the mount, the ring refusing you
-  after. Not built: everything from the guide on. `docs/NEXT-dungeon1.md`.)*
+  gets up and walks on to the next dungeon's site. **Changed by the owner
+  after two builds of the hand: the giant opens its mouth wide and the
+  crow flies in with the light and is gone; then it smiles** (no smile
+  before). *(Built, up to the smile: all of it is a cutscene from the
+  moment you come up, hands off; the guide is not there; the ring's field
+  closes into paving and the dark spirit goes down with it; the shrine is
+  the mount you found below, in stone, with a bowl on its back; the light
+  goes to the bowl by itself; a crow comes off the giant's head, takes it,
+  and flies into the giant's open mouth. Not built: the spirit flown
+  home, the giant getting up. `docs/NEXT-dungeon1.md`.)*
+- **Rescued spirits mend the village as you go** (owner, 2026-10-01): you
+  see them working on it and clearing up, and it steps on at each
+  checkpoint; to start with, a checkpoint is a dungeon finished. Not one
+  house rebuilt per rescue as a task for you. *(Not built. This answers
+  conflict 9's "awaiting a yes" differently.)*
+- **Stone hands stand about the world** (owner, 2026-10-01): the hand in
+  dungeon 1 didn't read as the giant's but was liked, so the shape is
+  reused out of doors, on islands, headlands and summits. They do nothing
+  yet; they are meant to become things that trigger something, do
+  something or mean something: puzzle pieces. *(Built: placed, solid,
+  inert. `src/world/hands.ts`.)*
 - **Dungeon 1's interior** *(built; played by the owner)*: a big dark
   violet cave under the ring, a loop. Spirit lanterns on the walls wake as
   you pass and stay lit. From a fork the nearer way leads to a ledge with
@@ -449,7 +469,13 @@ it is Conflict 2; this is the shape once that's settled.
 1. The village: arrive, meet the guide, repair with it.
 2. The giant comes: the village is smashed, the spirits are taken, the
    guide is left with you.
-3. Follow the footprints to the first dungeon.
+3. Follow the footprints to the first dungeon. *(The send-off is built,
+   2026-10-01: once a creature lives at the stable, the guide looks at a
+   wrecked house, walks you to the edge of the village and points down
+   the trail with a footprints bubble, its face brave and defiant: go
+   that way, save my people. It stays behind. Mounted or on foot is up to
+   you. It does it again each time you come home, until you've found the
+   ring.)*
 4. Catch the creature that lives near it.
 5. Solve the dungeon and rescue one spirit. The giant shrugs you off and
    walks on. A new trail starts from where it stood.
@@ -497,8 +523,9 @@ into yet; the dungeon itself is a later slice.
 **Phase 3: the stable** (built, first pass)
 1. After the giant, when you come down from the home tower, the spirit
    walks home on its own, slow and downcast, its bike forgotten at the
-   tower. In the village it keeps to itself for a few minutes among the
-   wrecked houses. Only after that, and only once you're in the village,
+   tower. In the village it keeps to itself for a minute or so among the
+   wrecked houses (a pat, or your company by its fire, brings it round
+   sooner). Only after that, and only once you're in the village,
    it greets you and leads you to the pasture ground, where marker stakes
    show where the stable will go.
 2. Break rocks for stones and build the footing and trough.

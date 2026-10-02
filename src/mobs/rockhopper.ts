@@ -134,3 +134,41 @@ export class Rockhopper extends Beast {
     }
   }
 }
+
+/**
+ * The rockhopper standing still, as one plain shape (positions and normals
+ * only): for carving it in stone (the shrine, giant/offering.ts). Its feet
+ * are at y = 0 and it faces +z.
+ */
+export function rockhopperStatue(): THREE.BufferGeometry {
+  const pos: number[] = [], nor: number[] = [];
+  const m = new THREE.Matrix4(), n3 = new THREE.Matrix3(), v = new THREE.Vector3();
+  const add = (g: THREE.BufferGeometry, at: THREE.Matrix4) => {
+    const flat = g.index ? g.toNonIndexed() : g;
+    const p = flat.getAttribute('position'), n = flat.getAttribute('normal');
+    n3.getNormalMatrix(at);
+    for (let i = 0; i < p.count; i++) {
+      v.fromBufferAttribute(p, i).applyMatrix4(at);
+      pos.push(v.x, v.y, v.z);
+      v.fromBufferAttribute(n, i).applyMatrix3(n3).normalize();
+      nor.push(v.x, v.y, v.z);
+    }
+  };
+  const Y0 = 0.92;
+  const body = new THREE.Matrix4().makeTranslation(0, Y0, 0);
+  add(bodyGeometry(), body);
+  // Head up, looking ahead.
+  const neck = body.clone().multiply(m.makeTranslation(0, 0.18, 0.42)).multiply(new THREE.Matrix4().makeRotationX(0.25));
+  const head = neck.clone().multiply(m.makeTranslation(0, 0.1, 0.16)).multiply(new THREE.Matrix4().makeRotationX(-0.2));
+  add(headGeometry(), head);
+  for (const s of [1, -1]) add(earGeometry(), head.clone().multiply(m.makeTranslation(s * 0.12, 0.06, -0.06)).multiply(new THREE.Matrix4().makeRotationFromEuler(new THREE.Euler(0, s > 0 ? 0 : Math.PI, -0.35))));
+  for (const hind of [false, true]) for (const s of [1, -1]) {
+    const hip = body.clone().multiply(m.makeTranslation(s * (hind ? 0.18 : 0.17), hind ? -0.16 : -0.18, hind ? -0.32 : 0.32));
+    add(legGeometry(hind, true), hip);
+    add(legGeometry(hind, false), hip.clone().multiply(m.makeTranslation(0, -0.34, 0)));
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  g.setAttribute('normal', new THREE.Float32BufferAttribute(nor, 3));
+  return g;
+}

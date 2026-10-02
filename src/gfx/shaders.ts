@@ -811,6 +811,8 @@ uniform vec2 uPupil;
 uniform vec2 uLookRange;
 /** Eye rotation: + lifts the outer corners. */
 uniform float uEyeTilt;
+/** 0..1: a set brow. The top of each eye is cut on a slant, low at the inner corner (resolve, not anger: the eye stays wide). */
+uniform float uBrow;
 uniform vec3 uMouthOrigin;
 /** Mouth: (y centre, half width, curve), in radians around uMouthOrigin. */
 uniform vec3 uMouth;
@@ -902,6 +904,7 @@ void main() {
       vec2 r = vec2(uEyeSize.x, uEyeSize.y * lids);
       vec2 qq = (me - uEyePos) / r;
       d = (length(qq) - 1.0) * min(r.x, r.y);
+      if (uBrow > 0.0) d = max(d, (me.y - uEyePos.y) - uEyeSize.y * (1.05 - 0.8 * uBrow) - (me.x - uEyePos.x) * 0.55 * uBrow);
       float white = fillE(d, aa);
       col = mix(col, uWhite * mix(uLightCol, vec3(1.0), 0.55 - 0.25 * uNight), white);
       // Pupils share one look direction so they never cross.
@@ -1515,6 +1518,7 @@ out vec3 vN;
 out vec3 vView;
 out vec3 vObj;
 out vec3 vUnit;
+out vec3 vWorld;
 out float vKind;
 out float vCap;
 flat out vec4 vPart;
@@ -1533,7 +1537,9 @@ void main() {
   vN = normalize(m3 * (normal / (sc * sc)));
   vKind = aKind;
   vPart = aPart;
-  vec4 vp = viewMatrix * (m * vec4(position, 1.0));
+  vec4 w = m * vec4(position, 1.0);
+  vWorld = w.xyz;
+  vec4 vp = viewMatrix * w;
   vView = vp.xyz;
   gl_Position = projectionMatrix * vp;
 }
@@ -1546,6 +1552,7 @@ in vec3 vN;
 in vec3 vView;
 in vec3 vObj;
 in vec3 vUnit;
+in vec3 vWorld;
 in float vKind;
 in float vCap;
 flat in vec4 vPart;
@@ -1560,6 +1567,17 @@ uniform vec3 cInk;
 uniform float uKeep;
 /** Eyelids: 0 = wide open, 1 = shut. It lives at about half. */
 uniform float uLid;
+/** A small grin under the eyes (0: no mouth at all, as it has always been). */
+uniform float uGrin;
+/** Its mouth open (0..1): a hole in its head, with the hollow inside it seen through. */
+uniform float uMouth;
+/** 1: this is that hollow, the head's own shape drawn from inside. */
+uniform float uInside;
+/** A light in the hollow: where (in the head's unit space), and how strong (0..1). */
+uniform vec4 uGlowAt;
+/** The world to the head's unit space: while its mouth is open, what the other boulders have inside its head isn't drawn (its chest runs up into it). */
+uniform mat4 uHeadInv;
+uniform vec3 cWarm;
 // The towers' and spirits' eyes: tall rounded rectangles, set high.
 const vec2 EYE_SIZE = vec2(0.13, 0.27);
 vec2 eyeUV(vec3 d, vec3 c) {
@@ -1571,6 +1589,18 @@ float eyeR(vec2 q) {
   vec2 a = abs(q);
   return pow(pow(a.x, 5.0) + pow(a.y, 5.0), 0.2);
 }
+// Where its mouth is on its head (a direction from the head's middle), and the hole it opens: under 1 inside it.
+const vec3 MOUTH_C = vec3(0.0, -0.3012, 0.9536);
+vec2 mouthUV(vec3 d) {
+  vec3 mr = normalize(cross(vec3(0.0, 1.0, 0.0), MOUTH_C));
+  return vec2(dot(d, mr), dot(d, cross(MOUTH_C, mr)));
+}
+float gape(vec3 d) {
+  if (dot(d, MOUTH_C) < 0.4) return 9.0;
+  vec2 mq = mouthUV(d);
+  vec2 o = vec2(mq.x / (0.2 + 0.2 * uMouth), (mq.y + 0.13 * uMouth) / (0.33 * uMouth + 1e-3));
+  return dot(o, o);
+}
 void main() {
   vec3 n = normalize(vN);
   int k = int(vKind + 0.5);
@@ -1578,6 +1608,33 @@ void main() {
   vec3 c;
   float em = -uKeep;
   bool unlit = false;
+  if (uInside > 0.5) {
+    // The hollow of its mouth: dark, and what's carried into it lights the stone round it in two hard rings.
+    float dd = length(vUnit - uGlowAt.xyz);
+    c = cInk * 0.8;
+    em = -0.85;
+    if (dd < 1.25) c = mix(c, cWarm * 0.55, uGlowAt.w);
+    if (dd < 0.85) { c = mix(cInk * 0.8, cWarm, uGlowAt.w); em = mix(-0.85, 0.3, uGlowAt.w); }
+    writeG(c, em, -n, vView);
+    return;
+  }
+  if (uMouth > 0.01 && vPart.y < 0.5) {
+    vec3 h = (uHeadInv * vec4(vWorld, 1.0)).xyz;
+    float hh = dot(h, h);
+    if (hh < 0.74) discard;
+    if (hh < 1.7) {
+      // (And the skin of them between that and the head's lumpy inside, wherever it's being looked at through the mouth.)
+      vec3 eye = (uHeadInv * vec4(cameraPosition, 1.0)).xyz;
+      vec3 rd = h - eye;
+      float far = length(rd);
+      rd /= far;
+      float b = dot(eye, rd), disc = b * b - dot(eye, eye) + 1.0;
+      if (disc > 0.0) {
+        float t = -b - sqrt(disc);
+        if (t > 0.0 && far > t && gape(normalize(eye + rd * t)) < 1.0) discard;
+      }
+    }
+  }
   if (k == 0) c = cFoliage;
   else if (k == 1) c = cTrunk;
   else {
@@ -1591,6 +1648,21 @@ void main() {
     if (vPart.y > 0.5) {
       vec3 d = normalize(vUnit);
       if (d.z > 0.4) {
+        // The mouth, under the eyes: shut, a short ink line with its ends turned up; open, a tall hole right through the stone.
+        if (uGrin > 0.02 || uMouth > 0.01) {
+          vec2 mq = mouthUV(d);
+          float half_ = 0.08 + 0.14 * max(uGrin, uMouth);
+          float up = mq.x * mq.x * 1.9 * uGrin * (1.0 - uMouth);
+          if (abs(mq.x) < half_ && abs(mq.y - up) < 0.026 * min(1.0, (half_ - abs(mq.x)) * 30.0 + 0.55)) { c = cInk; unlit = true; em = -0.85; }
+          float hole = gape(d);
+          if (uMouth > 0.01 && hole < 1.0) {
+            // (A lip of ink round it; inside the lip there's no stone: the hollow shows, and what flies in goes in.)
+            if (hole < 0.8) discard;
+            c = cInk;
+            unlit = true;
+            em = -0.85;
+          }
+        }
         for (int i = 0; i < 2; i++) {
           vec2 q = eyeUV(d, normalize(vec3(i == 0 ? -0.3 : 0.3, 0.2, 0.93)));
           if (eyeR(q) < 1.0) {

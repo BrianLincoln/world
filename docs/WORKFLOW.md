@@ -42,6 +42,9 @@ change goes through this loop:
   side, close up, and (`prints`) the footprints it leaves walking off from
   the cabin. It shoots from just over the treetops on open ground.
   `__ow.trail.prints.list` is every print so far.
+- `scripts/mill.mjs <dir>`: the village milling about (one in at its door and
+  out again, two talking in the lane, then the lane left to itself with what
+  each is doing printed). It drives `Village`'s private `go` / `meet`.
 - `scripts/village.mjs <dir> [seed=..] [survey]`: the village lane from above,
   from the yard and from its far end (day, dusk, night), each kind of house
   at eye level, and a footprint on a house for scale. `survey` lists which
@@ -59,11 +62,24 @@ change goes through this loop:
   whole thing by the keys** from the well (the wrong way and failing the
   ledge on foot, the long way, a fall into the pit and back up the tunnel,
   the stepping stones, the rockfall, the ride off the balcony, the bound,
-  the light), prints ok/FAIL per step and the game time it took, and exits
+  the light, and then above ground the ring shutting and the whole
+  offering), prints ok/FAIL per step and the game time it took, and exits
   1 on a failure; `perf` (add `uncapped`) is frame cost in six places, dark
   and with every lantern lit, and the build hitch. Needs `npx vite build`
   first. It injects `window.__bot` (walk to a place, hop a stone, stand
   somewhere): places are `layout.at`'s names.
+- `scripts/offering.mjs <dir> [seed=..] [t=22.5] [every=1] [sandbox] [play,reload,views]`:
+  the offering (dungeon 1, slice B), in the story from `?cp=ring` as if the
+  light had just been taken. It is a cutscene, so `play` only holds W from
+  coming up to the end (nothing may move you) and shoots every `every`
+  seconds; `reload` reloads with the light held, in
+  the bowl and given; `views` is the giant asleep beforehand and what you
+  see from the saddle after. Prints ok/FAIL, exits 1 on a failure.
+  **Look at the frames**: tile them with `sheet.mjs`. `?fresh=1&cp=offer`
+  starts there by hand; `__ow.offering()` (`.state`, `.clock`, `.cues`,
+  `.debug('held'|'placed'|'given')`), `__ow.winDungeon()`.
+- Stone hands about the world: `__ow.hands().list` (found so far),
+  `__ow.hands().survey(x, z, cells)` (look further at once; returns them).
 - `scripts/dungeon-plan.mjs <out.png> [seed=..]`: the plan from above (floor
   height, lanterns, stones, named places) and a flood fill of what you can
   reach on foot, past the stones, with the rockfall open, and mounted; the
@@ -77,6 +93,9 @@ change goes through this loop:
   `dungeon()` is it (`.goTo('lip')`, `.debugFree()`, `.debugLight()`,
   `.buildMs`, `.layout.at`), `goToRing()` stands you by the ring,
   `mode()` / `riding()` say how you're getting about.
+- `scripts/sendoff.mjs <dir> [seed=..]`: the guide walking you to the edge
+  of the village and pointing down the trail (`?cp=ranch`): close shots of
+  its face and the bubble, then leaving, coming back, and finding the ring.
 - `scripts/trudge.mjs <dir> [seed=..]`: the guide after the giant: its walk
   home from the tower (close up), keeping to itself in the village, and the
   stable beginning only once the minutes have passed and you're there. It

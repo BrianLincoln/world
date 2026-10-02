@@ -4,8 +4,11 @@
 //   leave:  back on the mark: lifted, and put out on the field
 //   quest:  the whole of it played with the keys, from the well: the wrong way (and failing
 //           the ledge on foot, jump and parachute), the long way round, the stepping stones,
-//           the rockfall, the ride off the balcony, the bound, the light. Prints what happened
-//           and how long it took; exits 1 if a step failed.
+//           the rockfall, the ride off the balcony, the bound, the light; then above ground,
+//           the ring shutting into a shrine and the cutscene of the crow and the giant taking
+//           the light (see also scripts/offering.mjs, which does that part in the story and
+//           reloads at each step). Prints what happened and how long it took;
+//           exits 1 if a step failed.
 //   perf:   frame cost standing in four places with every lantern awake (add `uncapped`)
 // Uses the build in dist/ (run `npx vite build` first). See also dungeon-plan.mjs, dungeon-cam.mjs.
 import { chromium } from 'playwright';
@@ -335,9 +338,41 @@ if (kinds.includes('quest')) {
   await shot('q-20-surface');
   const out = await run(() => { const ow = window.__ow, g = ow.gen().dungeon, p = ow._body.pos; return { inside: ow.dungeon().inside, mode: ow.mode(), ring: ow.ring().busy, fromRing: +Math.hypot(p.x - g.x, p.z - g.z).toFixed(1), above: +(p.y - ow.height(p.x, p.z)).toFixed(1) }; });
   check('put out on the surface, on the rockhopper', out.inside === false && out.mode === 'ride' && !out.ring && out.fromRing < 8 && Math.abs(out.above) < 1.5, JSON.stringify(out));
-  // The dungeon is shut: riding or walking back on to the ring does nothing.
-  const shut = await run(() => { const ow = window.__ow, b = window.__bot, g = ow.gen().dungeon; b.key('KeyE', true); b.tick(2); b.key('KeyE', false); b.tick(40); const p = ow._body.pos; ow.lockInput(Math.atan2(p.x - g.x, p.z - g.z)); b.key('KeyW', true); b.tick(60); ow.lockInput(Math.atan2(g.x - p.x, g.z - p.z)); b.tick(200); b.up(); b.tick(120); return { mode: ow.mode(), inside: ow.dungeon().inside, ring: ow.ring().busy }; });
-  check('the ring does not take you again', !shut.inside && !shut.ring, JSON.stringify(shut));
+  // The ring shuts behind you: the field closes, the dark spirit goes down with it, a shrine comes up in the middle.
+  for (let f = 0; f < 4; f++) { await run(() => window.__bot.tick(55)); await shot(`q-21-shut-${f}`); }
+  const offer = () => run(() => { const ow = window.__ow, o = ow.offering(), g = ow.giant(), p = ow._body.pos, c = o.shrineAt; return { state: o.state, busy: o.busy, clock: +o.clock.toFixed(1), mode: ow.mode(), sealed: ow.ring().sealed, sealK: ow.ring().sealK, off: +Math.hypot(p.x - c.x, p.z - c.z).toFixed(1), mouth: g?.mouth, grin: g ? +g.grin.toFixed(2) : -1, awake: g?.awake }; });
+  let o = await offer();
+  check('the ring has shut into a shrine', o.sealed && o.sealK >= 1 && o.mode === 'ride' && (o.state === 'held' || o.state === 'placed'), JSON.stringify(o));
+  // It is a cutscene from here: with W held, the light leaves your shoulder for the bowl by itself.
+  const rode = await run(() => {
+    const ow = window.__ow, b = window.__bot, of = ow.offering();
+    b.key('KeyW', true);
+    let f = 0;
+    for (; f < 600 && of.state === 'held'; f++) b.tick();
+    return { frames: f, state: of.state, mode: ow.mode() };
+  });
+  check('the light goes to the bowl by itself', rode.state === 'placed' && rode.mode === 'ride', JSON.stringify(rode));
+  // The crow, the giant's open mouth, the smile: hands off (W is held all through) until it's done.
+  const cues = await run(() => window.__ow.offering().cues);
+  const from = await run(() => window.__ow._body.pos.toArray());
+  await run(() => window.__bot.key('KeyW', true));
+  let seen = { mouth: false }, k = 0, moved = 0;
+  for (let t = 0; t < cues.end + 2; t += 2) {
+    await run(() => window.__bot.tick(120));
+    o = await offer();
+    if (o.busy) { const p = await run(() => window.__ow._body.pos.toArray()); moved = Math.max(moved, Math.hypot(p[0] - from[0], p[2] - from[2])); }
+    seen = await run((s) => { const g = window.__ow.giant(); return { mouth: s.mouth || g.mouth > 0 }; }, seen);
+    await shot(`q-22-offer-${String(k++).padStart(2, '0')}`);
+  }
+  await run(() => window.__bot.up());
+  check('hands off while the crow and the giant have it', moved < 0.3, `moved ${moved.toFixed(2)} m with W held`);
+  check('the giant opened its mouth', seen.mouth, JSON.stringify(seen));
+  check('the giant has the light: awake, mouth shut, smiling; you are still on the rockhopper', o.state === 'given' && !o.busy && o.mouth === 0 && o.grin > 0.4 && o.awake && o.mode === 'ride', JSON.stringify(o));
+  await run(() => window.__bot.tick(90));
+  await shot('q-23-after');
+  // The dungeon is shut: walking about on what was the field does nothing.
+  const shut = await run(() => { const ow = window.__ow, b = window.__bot, g = ow.gen().dungeon; b.key('KeyE', true); b.tick(2); b.key('KeyE', false); b.tick(40); const p = ow._body.pos; ow.lockInput(Math.atan2(p.x - g.x, p.z - g.z) + 0.6); b.key('KeyW', true); b.tick(160); ow.lockInput(Math.atan2(p.x - g.x, p.z - g.z) - 2.4); b.tick(160); b.up(); b.tick(60); return { mode: ow.mode(), inside: ow.dungeon().inside, ring: ow.ring().busy }; });
+  check('the ring does not take you again', shut.mode === 'walk' && !shut.inside && !shut.ring, JSON.stringify(shut));
   console.log(`played in ${end.secs} s of game time (a beeline that knows the way, sprinting; the failed tries at the ledge and one fall into the pit included)`);
 }
 

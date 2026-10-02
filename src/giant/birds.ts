@@ -20,7 +20,8 @@ export const GRIP = 1.6;
 /** Soot: the crow's ink, nearly put out. */
 const SOOT = [0.3, 0.26, 0.34].map((k) => new THREE.Color(k, k, k * 1.12));
 
-export type BirdState = 'roost' | 'wheel' | 'dive' | 'climb';
+/** (`stand`: on the ground, wings shut, put where its owner says; `hover`: beating on the spot, likewise.) */
+export type BirdState = 'roost' | 'wheel' | 'dive' | 'climb' | 'stand' | 'hover';
 
 export interface Bird {
   pos: THREE.Vector3;
@@ -36,6 +37,10 @@ export interface Bird {
   arc: Float32Array;
   /** What it does when it gets there. */
   then: BirdState;
+  /** How much of the curve, at its start and at its end, it's let off keeping clear (`Birds.clear`) to leave and arrive where it was sent. */
+  ease: [number, number];
+  /** How far it's being kept clear just now (0: flying the curve as sent; 1: wholly). */
+  kept: number;
   /** Carrying a spirit: its light hangs under it (and how far it has come up, 0..1). */
   light: THREE.Mesh | null;
   glow: number;
@@ -79,15 +84,19 @@ export class Birds {
     for (let i = 0; i < n; i++) {
       this.birds.push({
         pos: new THREE.Vector3(), dir: new THREE.Vector3(0, 0, 1), state: 'roost', phase: (i / n) * Math.PI * 2 + (i % 2) * 0.35, perch: i,
-        a: new THREE.Vector3(), b: new THREE.Vector3(), c: new THREE.Vector3(), t: 0, dur: 1, arc: new Float32Array(ARC + 1), then: 'wheel', light: null, glow: 0, grip: new THREE.Vector3(), flap: i * 1.7, tint: SOOT[i % SOOT.length],
+        a: new THREE.Vector3(), b: new THREE.Vector3(), c: new THREE.Vector3(), t: 0, dur: 1, arc: new Float32Array(ARC + 1), then: 'wheel', ease: [0.1, 0.1], kept: 0, light: null, glow: 0, grip: new THREE.Vector3(), flap: i * 1.7, tint: SOOT[i % SOOT.length],
       });
     }
   }
 
-  /** Send bird `i` from where it is to `to`, swinging out by way of `via`, in `dur` seconds. */
-  send(i: number, state: 'dive' | 'climb', via: THREE.Vector3, to: THREE.Vector3, dur: number, then: BirdState = 'wheel') {
+  /**
+   * Send bird `i` from where it is to `to`, swinging out by way of `via`, in `dur` seconds.
+   * (`easeIn`, `easeOut`: see `Bird.ease`. More than a little, for an end that is in under what it keeps clear of.)
+   */
+  send(i: number, state: 'dive' | 'climb', via: THREE.Vector3, to: THREE.Vector3, dur: number, then: BirdState = 'wheel', easeIn = 0.1, easeOut = 0.1) {
     const b = this.birds[i];
     b.state = state;
+    b.ease = [easeIn, easeOut];
     b.a.copy(b.pos); b.b.copy(via); b.c.copy(to);
     b.t = 0; b.dur = dur; b.then = then;
     // Measure it: the curve's own pace bunches up at a short leg (the level run at the mark), which is
@@ -127,10 +136,15 @@ export class Birds {
     for (const b of all) b.begin();
     for (const [i, b] of this.birds.entries()) {
       let fold = 0, flapRate = 7, glide = 0;
+      b.kept = 0;
       if (b.state === 'roost') {
         perch(b.perch, b.pos);
         b.dir.set(Math.sin(facing + (i % 3 - 1) * 0.5), 0, Math.cos(facing + (i % 3 - 1) * 0.5));
         fold = 1;
+      } else if (b.state === 'stand') {
+        fold = 1;
+      } else if (b.state === 'hover') {
+        flapRate = 11;
       } else if (b.state === 'wheel') {
         // Round its head, each at its own height, rising and falling a little.
         const a = b.phase + t * 0.55, r = 30 + (i % 3) * 5;
@@ -154,16 +168,18 @@ export class Birds {
         let j = 1;
         while (j < ARC && b.arc[j] < s) j++;
         const e = (j - 1 + (s - b.arc[j - 1]) / Math.max(1e-6, b.arc[j] - b.arc[j - 1])) / ARC;
+        // (Eased in and out, so it still leaves from and arrives at exactly where it was sent.)
+        const keep = (k: number) => Math.min(THREE.MathUtils.smoothstep(k, 0, b.ease[0]), THREE.MathUtils.smoothstep(1 - k, 0, b.ease[1]));
         const at = (k: number, out: THREE.Vector3) => {
           out.copy(b.a).multiplyScalar((1 - k) * (1 - k)).addScaledVector(b.b, 2 * (1 - k) * k).addScaledVector(b.c, k * k);
           if (this.clear) {
-            // (Eased in and out, so it still leaves from and arrives at exactly where it was sent.)
             const y = out.y;
             this.clear(out);
-            out.y = THREE.MathUtils.lerp(y, out.y, THREE.MathUtils.smoothstep(Math.min(k, 1 - k), 0, 0.1));
+            out.y = THREE.MathUtils.lerp(y, out.y, keep(k));
           }
           return out;
         };
+        b.kept = keep(e);
         at(e, b.pos);
         at(Math.min(1, e + 0.02), v);
         if (v.distanceToSquared(b.pos) > 1e-4) b.dir.subVectors(v, b.pos).normalize();
@@ -175,6 +191,8 @@ export class Birds {
       b.flap += dt * flapRate * (1 - glide * 0.8);
       // Body frame: +z along the way it flies. On a perch it sits up.
       bz.copy(b.dir);
+      // (Beating on the spot, it hangs back on its tail.)
+      if (b.state === 'hover') bz.setY(0).normalize().setY(0.75).normalize();
       bx.crossVectors(up, bz);
       if (bx.lengthSq() < 1e-4) bx.set(1, 0, 0);
       bx.normalize();

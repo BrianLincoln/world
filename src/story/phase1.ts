@@ -30,7 +30,7 @@ interface StepBase {
   pose?: Pose;
   /** Its thought-bubble icon. */
   icon?: IconName | null;
-  /** Spirit warmth while this step is active (0 cold .. 1 glowing). */
+  /** Spirit warmth while this step is active (0 cold .. 1 glowing). It stays ash-grey until the hearth is lit. */
   warmth: number;
   /** The hour this step begins at: the clock drifts there as it starts, then
    *  runs on naturally until the next step's hour. */
@@ -86,13 +86,13 @@ export const PHASE1: PhaseDef = {
   ],
   steps: [
     { id: 'meet', kind: 'meet', near: 'door', radius: 24, anchor: 'hearthSpot', face: 'hearth', pose: 'shiver', icon: null, warmth: 0, hour: 7.3, hint: 'tug', onDone: 'greet' },
-    { id: 'axe', kind: 'pickup', targets: 'axe', item: 'axe', anchor: 'stumpSpot', face: 'axe', icon: 'axe', warmth: 0.06, hour: 7.9, hint: 'tug', onDone: 'celebrate' },
-    { id: 'logs', kind: 'gather', targets: 'tree', resource: 'logs', for: ['roof', 'door'], anchor: 'seat', face: 'grove', pose: 'sit', icon: 'log', warmth: 0.14, hour: 9.0, hint: 'tug', onDone: 'celebrate' },
-    { id: 'repair', kind: 'build', parts: ['roof', 'door'], resource: 'logs', gather: 'logs', zone: 'yard', zoneRadius: 6.5, anchor: 'yard', face: 'roof', icon: 'log', warmth: 0.24, hour: 10.6, hint: 'tug', onDone: 'celebrate' },
-    { id: 'pick', kind: 'pickup', targets: 'pick', item: 'pick', anchor: 'pickSpot', face: 'pick', icon: 'pick', warmth: 0.36, hour: 12.2, hint: 'tug', onDone: 'celebrate' },
-    { id: 'stones', kind: 'gather', targets: 'rock', resource: 'stones', for: ['chimney'], anchor: 'pickSpot', face: 'rocks', icon: 'stone', warmth: 0.46, hour: 13.4, hint: 'tug', onDone: 'celebrate' },
-    { id: 'chimney', kind: 'build', parts: ['chimney'], resource: 'stones', gather: 'stones', zone: 'chimneySpot', zoneRadius: 5.5, anchor: 'chimneySpot', face: 'chimney', icon: 'stone', warmth: 0.58, hour: 15.0, hint: 'tug', onDone: 'celebrate' },
-    { id: 'hearth', kind: 'light', targets: 'hearth', readyAt: 0, anchor: 'hearthSpot', face: 'hearth', pose: 'warm', icon: 'flame', warmth: 0.68, hour: 16.2, hint: 'tug', onDone: 'celebrate' },
+    { id: 'axe', kind: 'pickup', targets: 'axe', item: 'axe', anchor: 'stumpSpot', face: 'axe', icon: 'axe', warmth: 0, hour: 7.9, hint: 'tug', onDone: 'celebrate' },
+    { id: 'logs', kind: 'gather', targets: 'tree', resource: 'logs', for: ['roof', 'door'], anchor: 'seat', face: 'grove', pose: 'sit', icon: 'log', warmth: 0, hour: 9.0, hint: 'tug', onDone: 'celebrate' },
+    { id: 'repair', kind: 'build', parts: ['roof', 'door'], resource: 'logs', gather: 'logs', zone: 'yard', zoneRadius: 6.5, anchor: 'yard', face: 'roof', icon: 'log', warmth: 0, hour: 10.6, hint: 'tug', onDone: 'celebrate' },
+    { id: 'pick', kind: 'pickup', targets: 'pick', item: 'pick', anchor: 'pickSpot', face: 'pick', icon: 'pick', warmth: 0, hour: 12.2, hint: 'tug', onDone: 'celebrate' },
+    { id: 'stones', kind: 'gather', targets: 'rock', resource: 'stones', for: ['chimney'], anchor: 'pickSpot', face: 'rocks', icon: 'stone', warmth: 0, hour: 13.4, hint: 'tug', onDone: 'celebrate' },
+    { id: 'chimney', kind: 'build', parts: ['chimney'], resource: 'stones', gather: 'stones', zone: 'chimneySpot', zoneRadius: 5.5, anchor: 'chimneySpot', face: 'chimney', icon: 'stone', warmth: 0, hour: 15.0, hint: 'tug', onDone: 'celebrate' },
+    { id: 'hearth', kind: 'light', targets: 'hearth', readyAt: 0, anchor: 'hearthSpot', face: 'hearth', pose: 'warm', icon: 'flame', warmth: 0, hour: 16.2, hint: 'tug', onDone: 'celebrate' },
     { id: 'home', kind: 'rest', doneAt: 0, anchor: 'hearthSeat', face: 'hearth', pose: 'sit', icon: null, warmth: 1, hint: 'none' },
   ],
 };

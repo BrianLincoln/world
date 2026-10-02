@@ -12,8 +12,8 @@ count.** Keep this file lean. Depth lives in:
   mount-gated puzzle dungeons. Decided, not built. Read its "Conflicts to
   settle" before touching the story, and don't resolve one unasked.
   What to build next is `docs/NEXT-dungeon1.md` (the owner's notes on
-  dungeon 1 and a sliced plan with the holes in it): the offering to the
-  giant, the rest of its slice B.
+  dungeon 1 and a sliced plan with the holes in it): its slice C (a spirit
+  flown home, the giant getting up). Slices A and B are built.
   No combat, no text. Spooky is fine where the story wants it (the
   giant's crows); nothing gory or cruel.
 - `docs/BRIEF.md`: the original request, verbatim, plus how to read `/inspo`.
@@ -70,7 +70,8 @@ npm run shots    # build + headless GPU screenshots -> shots/   (look at them!)
   (the hearth spirit: wants, gestures, acts), `build.ts` (sketch-and-slots
   building; `cabin.ts` and `stable.ts` are the buildables), `herd.ts`
   (creatures that live at the stable), `village.ts` (the other spirits'
-  houses down the lane; the lane and plots are `StorySite.village`),
+  houses down the lane; the lane and plots are `StorySite.village`; they
+  mill about until the giant comes: `mill`, check with `scripts/mill.mjs <dir>`),
   `pointer.ts`, `icons.ts`
   (pictograms), `overlay.ts`. `src/world/harvest.ts`: felling, smashing,
   regrowth. `src/world/colliders.ts`: prop collision.
@@ -79,7 +80,9 @@ npm run shots    # build + headless GPU screenshots -> shots/   (look at them!)
   the head view, the tower camera's aim and ember flight, save).
   `towerRock.ts`: tower rock as exact solid shapes (collision, camera,
   arms). `towerView.ts`: the tower camera's overlay (silhouettes, eyes).
-  `journey.ts`: phase 2 (bike gift, guided rides, the first two towers).
+  `journey.ts`: phase 2 (bike gift, guided rides, the first two towers),
+  and the send-off to the giant's trail once a creature is home
+  (`sendOff`; check with `scripts/sendoff.mjs <dir>`).
 - `src/giant/giant.ts`: the giant (skeleton, gait, IK, instanced boulders).
   Drawn by `GIANT_FRAG`; fogged as one card via `uGiant` in `post.ts`.
   Dev: `?giant=600,walk`. In the story, `visit.ts` drives it.
@@ -88,7 +91,19 @@ npm run shots    # build + headless GPU screenshots -> shots/   (look at them!)
   (its footfalls, the smashing, the taking, the camera, restore from save).
   `birds.ts`: its flock of black crows, which snatch the spirits and carry their lights.
   `ring.ts`: the dungeon ring once open (forcefield, dark spirit, the two
-  arms that pull you down and lift you back out).
+  arms that pull you down and lift you back out), and shutting for good
+  (`seal`).
+  `offering.ts`: what becomes of the dungeon's light above ground, a
+  cutscene with your hands off (the shrine the ring becomes, the crow that
+  takes the light and flies into the giant's open mouth: the whole
+  sequence and its camera are the table `T` and `cinematic()`; saved as
+  `fjellheim.offer1.<seed>`). No guide in it. The giant's side of it is
+  `awake` / `mouth` / `gulp` / `grin` / `look` in `giant.ts`; its open
+  mouth is a real hole into the hollow of its head (`throat`, `uHeadInv`).
+  Its breath and the steam off its prints show only while it walks.
+  Dev: `?fresh=1&cp=offer`, `__ow.winDungeon()`,
+  `__ow.offering().debug('held'|'placed'|'given')`; check a change with
+  `scripts/offering.mjs <dir> play,reload,views,mouth` and look at the frames.
 - `src/dungeon/`: dungeon 1 inside, its own scene, drawn instead of the
   world while `dungeon.inside` (main swaps the `WorldQuery` over to it).
   `layout.ts` (the cave's plan as functions of the seed, drawn at its top:
@@ -97,14 +112,17 @@ npm run shots    # build + headless GPU screenshots -> shots/   (look at them!)
   `dungeon.ts` (scene, collision, camera, light, being let down and lifted,
   and what you do there: the wrong-way ledge, the stones, the rockfall, the
   shut-in rockhopper, the warm light). Its creature is a `Mob` with `below`,
-  run through `Mobs.under`. Slice A of `docs/NEXT-dungeon1.md` is built, and
-  the first step of B (taking the light: a success beat, then out on the
-  surface on the rockhopper, the ring shut behind you: `leaveDungeon(true)`,
-  `dungeonWon`, `bringUp` in main); the offering and slice C aren't. Dev: `?dungeon=1`, `?fresh=1&cp=ring`; check a change with
+  run through `Mobs.under`. Slices A and B of `docs/NEXT-dungeon1.md` are
+  built (taking the light: a success beat, then out on the surface on the
+  rockhopper: `leaveDungeon(true)`, `dungeonWon`, `bringUp` in main; the
+  offering is `giant/offering.ts`); slice C isn't. Dev: `?dungeon=1`, `?fresh=1&cp=ring`; check a change with
   `scripts/dungeon-plan.mjs` (the plan from above, what can reach what) and
-  `scripts/dungeon.mjs <dir> quest` (plays it through by the keys).
+  `scripts/dungeon.mjs <dir> quest` (plays it through by the keys, the
+  offering included).
   `WorldGen.dungeon`: the first dungeon's ring and the way there (slow to
   find: cached per seed and handed to workers, see `primeDungeon` in main).
+  `src/world/hands.ts`: stone hands standing about the world on islands
+  and summits (seeded, one at most per 1.1 km cell; inert so far).
   `src/world/prints.ts`: the prints themselves, as a texture the terrain and
   prop shaders read (`PRINT_GLSL`), plus the same maths in TS for walking.
 - `src/audio/ambience.ts`: the ambient soundtrack (sampled loops: one tonal

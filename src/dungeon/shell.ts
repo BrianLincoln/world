@@ -168,6 +168,36 @@ function tint(g: THREE.BufferGeometry, hex: string) {
 const m4 = new THREE.Matrix4(), v3 = new THREE.Vector3(), s3 = new THREE.Vector3(), q4 = new THREE.Quaternion(), UP = new THREE.Vector3(0, 1, 0);
 const lathe = (pts: [number, number][], segs = 18) => new THREE.LatheGeometry(pts.map(([r, y]) => new THREE.Vector2(Math.max(r, 1e-3), y)), segs);
 
+/**
+ * A giant's hand of stone, about 10 m tall, standing up out of the ground at
+ * the origin, its palm facing +z: a slab of a palm, four fingers and a
+ * thumb, a little curled. In pieces (lathes; position and normal). It stands
+ * in the cave, and about the world (world/hands.ts).
+ */
+export function handBits(): THREE.BufferGeometry[] {
+  const bits: THREE.BufferGeometry[] = [];
+  const bone = (r: number, l: number) => lathe([[0, -r * 0.35], [r * 0.8, -r * 0.1], [r, l * 0.25], [r * 0.96, l * 0.7], [r * 0.7, l * 0.94], [0, l + r * 0.2]], 14);
+  /** A finger: bones end to end from (x, y, z), each leaning `curl` more toward the palm's front, the whole splayed `splay` sideways. */
+  const finger = (x: number, y: number, z: number, r: number, lens: number[], curl: number, splay: number) => {
+    let a = 0.08, py = y, pz = z;
+    const part: THREE.BufferGeometry[] = [];
+    lens.forEach((l, i) => {
+      part.push(bone(r * (1 - i * 0.12), l).rotateX(a).translate(0, py, pz));
+      py += Math.cos(a) * l; pz += Math.sin(a) * l;
+      a += curl;
+    });
+    for (const g of part) bits.push(g.translate(0, -y, 0).rotateZ(splay).translate(x, y, 0));
+  };
+  // The palm, and the heel of the hand going down into the floor.
+  bits.push(lathe([[1.5, -1.2], [1.9, 0.4], [2.5, 2.2], [2.75, 3.6], [2.6, 4.6], [1.9, 5.1], [0, 5.2]], 20).scale(1, 1, 0.42));
+  finger(-1.95, 4.5, 0, 0.56, [1.5, 1.2, 0.95], 0.34, 0.2);
+  finger(-0.68, 4.9, 0, 0.6, [1.9, 1.45, 1.1], 0.3, 0.06);
+  finger(0.62, 4.9, 0, 0.6, [2.0, 1.5, 1.15], 0.28, -0.05);
+  finger(1.85, 4.6, 0, 0.56, [1.8, 1.35, 1.05], 0.32, -0.18);
+  finger(-2.3, 2.3, 0.2, 0.66, [1.5, 1.25], 0.3, 0.95);
+  return bits;
+}
+
 const boulders = new Map<number, THREE.BufferGeometry>();
 /** One boulder, where the plan puts it (or, `centred`, about its own middle, to be placed by its mesh). */
 export function buildStone(s: Stone, hex: string, centred = false): THREE.BufferGeometry {
@@ -189,30 +219,10 @@ export function buildRock(L: Layout): THREE.BufferGeometry {
     parts.push(tint(g.translate(o.x, well.floor, o.z), '#574d7c'));
   }
   for (const s of L.stones) parts.push(buildStone(s, s.hex ?? (s.sx > 1.3 ? '#8f86b4' : '#a096c2')));
-  // The giant's hand: a slab of a palm up out of the floor, four fingers and a thumb, a little curled.
+  // The giant's hand, reaching up out of the floor of its room.
   {
-    const H = L.hand, hex = '#8d9cc6', fy = L.floor(H.x, H.z);
-    const bits: THREE.BufferGeometry[] = [];
-    const bone = (r: number, l: number) => lathe([[0, -r * 0.35], [r * 0.8, -r * 0.1], [r, l * 0.25], [r * 0.96, l * 0.7], [r * 0.7, l * 0.94], [0, l + r * 0.2]], 14);
-    /** A finger: bones end to end from (x, y, z), each leaning `curl` more toward the palm's front, the whole splayed `splay` sideways. */
-    const finger = (x: number, y: number, z: number, r: number, lens: number[], curl: number, splay: number) => {
-      let a = 0.08, py = y, pz = z;
-      const part: THREE.BufferGeometry[] = [];
-      lens.forEach((l, i) => {
-        part.push(bone(r * (1 - i * 0.12), l).rotateX(a).translate(0, py, pz));
-        py += Math.cos(a) * l; pz += Math.sin(a) * l;
-        a += curl;
-      });
-      for (const g of part) bits.push(g.translate(0, -y, 0).rotateZ(splay).translate(x, y, 0));
-    };
-    // The palm, and the heel of the hand going down into the floor.
-    bits.push(lathe([[1.5, -1.2], [1.9, 0.4], [2.5, 2.2], [2.75, 3.6], [2.6, 4.6], [1.9, 5.1], [0, 5.2]], 20).scale(1, 1, 0.42));
-    finger(-1.95, 4.5, 0, 0.56, [1.5, 1.2, 0.95], 0.34, 0.2);
-    finger(-0.68, 4.9, 0, 0.6, [1.9, 1.45, 1.1], 0.3, 0.06);
-    finger(0.62, 4.9, 0, 0.6, [2.0, 1.5, 1.15], 0.28, -0.05);
-    finger(1.85, 4.6, 0, 0.56, [1.8, 1.35, 1.05], 0.32, -0.18);
-    finger(-2.3, 2.3, 0.2, 0.66, [1.5, 1.25], 0.3, 0.95);
-    for (const g of bits) parts.push(tint(g.rotateY(H.rot).translate(H.x, fy, H.z), hex));
+    const H = L.hand, fy = L.floor(H.x, H.z);
+    for (const g of handBits()) parts.push(tint(g.rotateY(H.rot).translate(H.x, fy, H.z), '#8d9cc6'));
   }
   // A pale kerb along every lip (the ledges', the pit's two), so an edge reads as an edge in the dark,
   // from above and from below.
