@@ -3012,3 +3012,343 @@ Now four (r 2.3), placed by `Layout` itself at +-60 and +-140 degrees about
 120 degree gap. They no longer line up with the stones above (nothing down
 there showed that they did). The let-down camera and your heading on being
 set down are taken from `door` too; the far pair leave the camera its gap.
+
+## Dungeon 1, slice A: bigger, darker, lanterns, a wrong way, stepping stones (2026-10-01)
+
+Slice A of `docs/NEXT-dungeon1.md`, and only that (B and C aren't started).
+Owner: "feels quite small... make me walk around a big dark dungeon and
+discover things... darker... spirit lanterns... the mount discovered farther
+in... an impassible ledge well before the ending... a mini platformer
+area... the camera gets real shakey and weird when I'm on the mount."
+
+### The plan (`layout.ts`; a diagram is at its top)
+Authored, a loop with one way round it. Eleven rooms, eleven passages,
+about 370 x 290 m. **20,700 m2 of floor against 3,800 before (5.4x).**
+
+    well -- fork --(the wrong way)-- LEDGE -- sanctum, the warm light
+             |  ^
+             |  +-- balcony (a one-way drop) -- link -- den, the rockhopper
+             v                                           | rockfall
+           cavern (pool; a side grotto) -- kink -- the hand -- PIT -- gallery (a nook)
+
+- **The wrong way** is the nearer and straighter of the fork's two ways
+  on, with the warm light in sight at its end (a small orange point over
+  the lip from halfway up the passage; I didn't check it from the fork
+  itself). The ledge is 4.6 m. Nothing stands within 15 m of
+  it, nothing hangs within 12.
+- **The long way** is the cavern (the pool, and a dead-end grotto of
+  glowcaps), a kink, the hand's room, the pit, the gallery (and a nook),
+  and a long passage to the rockfall.
+- **The pit** is 5.5 m deep with six flat-topped pillars across it, on a
+  curve that leaves one lip square and arrives square at the other. Miss
+  and you're on the pit's floor; a trail of glowcaps leads to a tunnel in
+  the wall between the two lips, which climbs back to the hand's room,
+  beside the passage you came by. No death, no reset.
+- **The den** is behind the rockfall as before (the pick, three blows, the
+  first gap frees it). Its other way out climbs a ramp to a **balcony**
+  5 m over the fork and stops: a one-way drop, so the ride to the ledge is
+  92 m and not the whole loop. From the fork it's a high dark mouth with
+  glowcaps on it, which is the "somewhere you'll get to later".
+- Three kinds of hard edge, because a stepped height field draws teeth and
+  a steep smooth one can be walked up: `Shelf` (a straight lip; it may fall
+  away behind as a ramp, which is the balcony), `Pit` (a disc, and a tunnel
+  whose floor climbs out), and flat `Solid`s (the pillars). The shell cuts
+  each in: the floor stops at the pit's edge, the pit's floor is a sheet
+  below, a ledge's top is a sheet above, and each has a plain face.
+- `layout.at` names the places (`lip`, `farLip`, `ledge`, `balcony`,
+  `rockfall`...); the scripts and `dungeon().goTo(name)` use them.
+
+### Defaults taken where the brief gave one (flagging each)
+- **Parachute in the platform room: designed for, not switched off.**
+  Measured on foot: a jump at a run clears about 3.5 m, at a sprint about
+  6, with the parachute opened at the top 10 or more. The gaps are 2.7,
+  3.0, 3.4, **9.5** (parachute only, on to a broad stone 1.2 m lower), 3.1,
+  **4.6** (wants the sprint), 2.9. So it asks for one glide and one sprint.
+- **Lanterns are unlit until you come near (12 m), then stay lit, saved.**
+- **The rockfall and the pick are kept.**
+- **Glows: the nearest 16 to the camera** (the cap went 12 -> 16), the
+  portal always; the farthest few shrink before they drop out so none pops.
+
+### Darker (`DUNGEON_LOOK`, `DUNGEON_FRAG`)
+The rock has its own three tones now (`cLit`/`cMid`/`cShade`) rather than
+borrowing the sun's: the shade tone is a deep blue-violet (#514d8c on the
+rock's own colour), fog is #231f47 from 7 m at 0.03 (it was pale lilac from
+9 m at 0.012), outlines kept. Never black: conflict 7's "the blue night
+palette". The explorer and the rockhopper are lit by whatever pool they
+stand in (`applyLight`) and are dim blue shapes between.
+
+### Spirit lanterns (`buildLanterns`, `LANTERN_FRAG`)
+54 to 60 of them by seed: a stone bowl on a stub out of the wall with a
+small spirit in it, the tower spirits' dome and tall eyes. Asleep it is a
+dull violet with its eyes shut; come within 12 m and it swells, turns pale
+and bright, opens its eyes (0.7 s, a coo) and throws a cool pool 12.5 m
+wide. All of them are one mesh and one draw call; waking rewrites a vertex
+attribute. None in the sanctum: the orb is the only warm light and the only
+light up there. Two flank the well's way out so the first thing you do is
+wake one.
+
+### Things to find (three, and stopped)
+- The lanterns themselves.
+- **The hand**: a giant's hand of the giant's own blue stone, 10 m tall,
+  reaching up out of the floor of the room before the pit, palm to the way
+  you come in, glowcaps at its wrist. It is framed in the passage from the
+  kink. (My first go, a hand of boulders lying palm up, read as a pile of
+  boulders. This one reads.)
+- **The rockhopper heard before it's seen** (a whimper every 6 to 9 s
+  while it's shut in and you're within 75 m), and the balcony seen from
+  below. No collectibles.
+
+### The mount's camera: reproduced, then fixed
+`scripts/dungeon-cam.mjs` rides legs of the plan and counts. Before, in the
+old cave, camera a quarter turn round from behind (as it is after any
+corner): its distance to you **reversed 25 to 47 times in a 3 s leg**,
+jumped up to 0.35 m in a frame (7.8 m when a wall came between), and it
+sat anywhere from 3.5 to 15 m off. Four causes, the brief's first suspect
+and three it didn't list:
+1. `mount()` pushed the zoom to 12 m and the ride added a quarter: 15 m
+   wanted in passages 9 m wide. Not done down there now (9 m, +8%).
+2. `clampCamera` came in a 0.35 m step at a time, at once, and eased
+   straight back out. It now bisects to where the rock begins, comes in
+   over a few frames (the walls are one-sided: a frame inside the rock
+   shows nothing), looks a quarter second ahead, and goes back out slowly,
+   the slower the faster you're going, so along a passage it holds.
+3. The camera's focus was the saddle, **which bounces with every stride**.
+   Smoothed out down there (it is still raw above ground, where the
+   camera is far enough off not to show it).
+4. The orbit camera lifted itself on to "the floor" at its unclamped
+   position, which out in the rock is no floor at all. Down there the
+   dungeon's own clamp does that job.
+After, same test in the new cave: 1 to 8 reversals a leg, typical frame to
+frame change in distance 0.01 m, height jitter on the flat 0.003 m (it was
+0.05 to 0.1). The explorer's hide/show at 1.3 m has a margin now. The
+brief's second suspect (stepping on to boulder tops) didn't show on the
+legs I rode, but a boulder's top is now a dome rather than a step anyway.
+**Not felt by hand.** The numbers are much better; whether it feels right
+is the owner's call.
+
+### Two bugs the playthrough found
+- **You could walk up the ledge.** Its lip was a 12 cm ramp and "a rise
+  over 0.9 m is a wall" let you up it a step at a time. The old ledge had
+  the same hole; it was only ever tested mounted. It's a true step now.
+- **Leaving the rockhopper behind.** Walk off the balcony without it and
+  it was the whole loop again to fetch it. Freed, and more than 38 m from
+  you on foot for 2.5 s, it now lands a few steps behind you with a puff
+  and a chirp. A cheat, said plainly: it doesn't path there.
+
+### Checked
+- `scripts/dungeon-plan.mjs` on `hilda`, `frost`, `42`, `bergen` (both
+  sides): on foot from the well you reach the fork, the ledge's foot, the
+  cavern, the hand, the lip, the pit and its tunnel, and not the sanctum,
+  the far lip, the gallery or the den; with the rockfall open, the den,
+  the balcony and the fork but not the ledge's top; mounted, the sanctum.
+  No ledge edge or pit rim in open floor except across the two lips.
+- `scripts/dungeon.mjs <dir> quest` on the same four seeds, every step ok:
+  played by the keys from the well, including failing the ledge on foot
+  three ways (run, jump, jump and parachute), falling into the pit and
+  coming back up the tunnel, all seven hops, the smash, E to mount, the
+  ride off the balcony, a ridden run at the ledge (stopped), the bound, the
+  light. **154 to 165 s of game time** for a sprinting bot that knows the
+  way. The brief asked for 4 to 6 minutes on a first visit; I think a
+  first visit is in that range but nobody has made one.
+- Take and leave still pass. Lanterns and `freed` survive a reload.
+- **Build hitch on first entry: 0.39 s** (plan 24 ms, meshes 365 ms), under
+  the veil. Under the brief's half second, so nothing is cached.
+- **Frame cost inside, uncapped, 1600x900, this machine: 1.4 to 2.0 ms**
+  (p99 3.2), 58 to 71 draw calls, 394k triangles (it was about 100k), the
+  same with every lantern lit as with none. Not measured on integrated
+  graphics.
+- Stills of every room on `hilda` and `frost`, looked at beside inspo/4
+  (the blue night): the values are close; it is more violet than that
+  navy, which is the dark spirit's colour and was already.
+
+### Rough / open
+- Not played by hand. The bot can't tell me whether the stones are fun,
+  whether the 9.5 m gap reads as "use the parachute" (nothing says so), or
+  whether the dark is the right dark.
+- Unlit, a big room crossed down its middle is very plain: floor and wall
+  are nearly one tone and no lantern is in reach. That is the "dark" asked
+  for, but it may be too empty.
+- The balcony's floor has a toothed edge where it meets the wall on one
+  side. A pillar between you and the camera pulls the camera right in.
+  Straight after the drop off the balcony the camera is close behind your
+  head for a second.
+- The pool hardly shows in the dark. The hand has no collision but a
+  round post.
+- The rockhopper still only ambles out when freed; you walk to it.
+- Only `side` and scatter vary by seed; the plan itself is one plan.
+- Nothing happens when you take the light (slice B).
+
+### Slice A, after the owner's first play (2026-10-01)
+Owner: "the floor matches the walls too much... there's an invisible wall
+that way [the rockhopper], same with the orb thing. I can see it but can't
+go down that hallway... I don't see any platform / parachute stuff."
+
+- **The invisible walls were the two ledges, and they were my bug.** Their
+  faces were wound to face the high side, so from below they were culled:
+  you saw the floor carry on under the ledge and walked into nothing. (The
+  pit's face had the same fault and I fixed that one from a screenshot; I
+  never looked at the ledges from their foot closely enough. The bot can't
+  see.) Now wound to face the low side.
+- Every lip (both ledges, both sides of the pit) has a **pale kerb**, a
+  lantern hangs either side of each ledge's foot, and the wrong-way ledge
+  is **3.4 m, not 4.6** (on foot you get up 2.5 m), so the light shows
+  over it from down the passage. It is a small orange point; from right
+  under the ledge the ledge hides it.
+- **Floor**: pale blue slate (`cFloor` #b4c0ea) against darker violet walls
+  (#685e90 and its two strata). In a lit pool they are clearly two
+  materials; out in the dark they are still close.
+- The stepping stones are past the hand: the passage on from its room, now
+  marked with glowcaps (the room has three ways out). The owner hadn't got
+  there.
+- Rechecked: plan and quest on `hilda` and `frost` after these.
+
+**Owner's answers** (the brief's questions 1 and 2): the rockhopper comes
+up with you, and you are **on it for the whole offering sequence and when
+you get control back**; the dungeon **shuts once the orb is taken and
+becomes a shrine / stone**. Both are slice B's to build. 3 to 6: TBD.
+
+### The stepping stones, redone as a jump down (2026-10-01)
+Owner: "I think the platform is impossible. the parachute would need a
+height difference", then, having made it: "feels like if we're making it a
+parachute thing it should be a jumping down from above sorta deal", and
+"if someone fails 3 times, we should show like a thought bubble of a
+parachute".
+
+- The first version had level stones and a 9.5 m gap: it only went with
+  the parachute opened at the very top of a sprinting jump. A bot does
+  that every time; a person doesn't. My mistake to pass it on the bot.
+- Now: **three easy hops that climb** (gaps about 2.5 m, each stone 0.8 m
+  higher) to a high stone; **a 15 m gap down to a broad stone 3.8 m
+  lower**; three easy hops back up to the far lip. A sprinting jump off
+  the high stone with no parachute comes down at about 12 m (measured:
+  with the gap at 12 it missed by 0.3 m, so it's 15). With the parachute,
+  opened any time on the way down, there are metres to spare. No gap
+  wants a sprint any more.
+- **The hint** (`Dungeon`, `HINT_AFTER`): fall from the high stone three
+  times and, standing on it again, the explorer has a thought bubble with
+  a parachute in it (a new `parachute` icon in `icons.ts`, the spirit's
+  bubble; a `Billboard` in the dungeon's own overlay scene, which main
+  now hands to the post pipeline while you're down there). It goes for
+  good once you've crossed (saved as `crossed`). It is her own thought:
+  the guide isn't down there. Falls from the other stones don't count.
+- Checked: quest on `hilda`, `frost`, `42` with the new stones; three
+  scripted falls bring the bubble up (looked at), crossing clears it.
+  This answers the brief's question 4: the parachute is part of it.
+
+### Stone tops marked, and the ridden rockhopper calmed (2026-10-01)
+Owner: "the top of the platforms need some definition... hard to tell
+where you need to reach", and "the rock hopper animation looks off. the
+char bounces like crazy."
+
+- **Stone tops** (`buildRock`): a pale kerb round each rim (the lips'
+  kerb), a pale flat top, and a darker ring let into it. They read as
+  targets from the lip and from each other, lit or not (looked at).
+- **The bounce** was the rockhopper's pronk, not the camera: past a trot
+  its body springs 0.28 m a stride, and its strides come 8 to 13 a second
+  at riding speeds, so the saddle (and the rider on it) moved up to
+  **0.36 m in a single frame**. Fine for a wild one seen across a crag;
+  a blur with someone on it. `Rockhopper.pose` now carries a rider nearly
+  level (`calm`: spring, bounce and rock at 15% while ridden; the legs
+  still pronk). Measured, saddle against feet: biggest move in a frame
+  0.27 / 0.36 m (canter / gallop) before, 0.04 / 0.05 m after. This is in
+  `src/mobs/`, so it applies above ground too. Wild and unridden it is
+  as it was. Not looked at in motion, only measured.
+
+### Taking the light: a success beat, and out to the surface (2026-10-01)
+Owner: "I reach the ball then nothing really happens... maybe the mount
+takes over and does a little victory hop around, maybe we borrow the heart
+thought bubble... I thought we would get teleported to surface." This is
+the first step of slice B, built because it was asked for; the rest of B
+(the orb carried above ground, the guide, the shrine, the crow, the giant)
+is not.
+
+- **The beat** (`Dungeon`, `WIN` = 5.4 s, hands off): the light flares
+  and its pool swells, every lantern you've woken brightens, whoever is
+  carrying you (the rockhopper; your own feet if you walked in) hops
+  three times turning a full circle, a heart bubble over its head (the
+  spirit's, in the dungeon's overlay), three chirps. Then the violet
+  veil.
+- **Out**: `onWon` -> `leaveDungeon(true)`. The ring's arms lift you out
+  as on any exit; the rockhopper is brought up (`below` cleared) and
+  stands beside the ring's middle, and the moment the arms let go you are
+  on it (owner's answer 1: "on it when I regain control").
+- **The dungeon is shut after** (answer 2): the ring won't take you again
+  (`dungeonWon`, read from the dungeon's save). It does **not** yet turn
+  into a shrine: it looks exactly as it did, field and dark spirit and
+  all, and just doesn't work. On a reload the rockhopper is stood by the
+  ring (adopted fresh; it isn't in the herd's save).
+- The light itself doesn't come up: it lives in the dungeon's scene.
+  Above ground there is nothing to show you have it and nothing to do
+  with it. That is where slice B picks up.
+- Checked (`quest`, `hilda`): the beat's frames looked at; out on the
+  surface, mounted, at the ring; walking back on to the field does
+  nothing.
+- **Stone tops, again** (owner: "with the top and edge all white it is
+  hard to see where one starts and the other ends"): the top stays pale,
+  with a dark border round its edge and a dark band down the rim.
+
+### The parachute section, third go: climb, then one long fall (2026-10-01)
+Owner: "the platforms are just too hard still. the parachute one. I'd like
+to see it go up even more... be pragmatic but make the parachute section
+more fall-y."
+
+- **Why it was hard, found by trying the gap eight ways in a probe rather
+  than with the bot's perfect timing:** you take a long gap at a sprint,
+  and **Shift held on in the air is the parachute's dive** (15 m/s but
+  sinking 7: about two across for one down, against four floating). The
+  dive fell 5 m short of a landing stone sized for floating. The bot let
+  go of Shift.
+- **Now** (`layout.ts`, the stones' comment has the numbers): the gallery
+  and everything after the pit lie 6 m lower; the pit is 11 m deep. Five
+  short hops (2 m gaps, 0.8 m up each) climb to a high stone 4 m above
+  the lip you left and 10 m above the far one. From it, **one fall, 21 m
+  across, on to the far lip and the passage behind it**: no stone to hit,
+  the whole far side is the target. I didn't ramp the passage up to the
+  first stone (the owner's first suggestion; "other ways are fine"): the
+  floor is a blend of rooms and passages, and a ramp there tilts the
+  pit's floor and every stone on it. The stones do the climbing.
+- Tried from the high stone, landing place: sprint and no parachute, the
+  pit (14.8 m out); run and open at once, sprint and open at the top,
+  sprint and open 0.8 s late, walk off the edge and open, 8 degrees off
+  either way: all the far side. Opened 1.1 s late: the pit.
+- A pillar's top is now a height of the plan (`Solid.y`), not a height
+  over the floor under your feet: over the pit's sloping floor near the
+  far lip the old way gave a stone a sloping, unlandable top.
+- The hint counts falls from the high stone (now the fifth) and clears
+  when you're down on the far side.
+- A fall from any stone is the whole climb again by the tunnel (now an
+  11 m climb, about 35 m of ramp). Five easy hops, but it is more to
+  redo than before.
+- Checked: plan and quest on `hilda`, `frost`, `42`, `bergen`, all steps
+  ok; stills of the lip and stones looked at.
+
+### The rockhopper is glad to be out (2026-10-01)
+- When the rockfall breaks: `Sfx.fanfare` (four rising chimes and the chord
+  left ringing, in the thunk's voice) in place of the one chirp, and the
+  rockhopper hops three times on the spot, the last highest, a chirp as
+  each leaves the ground and dust where it lands (`GLAD_HOPS` in
+  `dungeon.ts`).
+- The hop is `Mob.hop`, a height the owner sets and `Beast.animate` adds to
+  the body (legs go to their airborne pose). `Beast.move` pins a ground
+  beast to the floor every frame, so `vel.y` can't do it (the stable's
+  welcome hop sets `vel.y` and only ever showed as the `joy` lift).
+- Checked: tsc, quest on the default seed all ok. In the quest's stills the
+  rockhopper is still back in its den, small and half behind the explorer:
+  the hops weren't judged by eye, and the fanfare hasn't been heard.
+
+### Handing over (2026-10-01, evening)
+- **State:** slice A and step 1 of slice B are in the working tree,
+  uncommitted, on top of `e215081`. `tsc` is clean; `scripts/dungeon.mjs
+  quest` passes on `hilda` on the tree as it stands.
+- **Two things in the tree I didn't write up above because I didn't write
+  them** (they arrived while this session was running; they read as
+  intended and the quest passes with them): when the rockfall breaks
+  there is a small fanfare (`Sfx.fanfare`) and the freed rockhopper hops
+  three times on the spot (`Mob.hop`, `GLAD_HOPS` in `dungeon.ts`, drawn
+  in `Beast`).
+- **Owner, on the brief's question 5:** yes, the guide can simply be at
+  the ring. Questions 3 and 6 are still open, with four of mine: see the
+  end of `docs/NEXT-dungeon1.md`, which is now the brief for the offering.
+- `DESIGN.md`'s "Decided 2026-10-01" now carries the offering as the
+  owner described it, the creature coming up with you, and the entrance
+  becoming a shrine.

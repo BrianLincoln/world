@@ -12,7 +12,8 @@ count.** Keep this file lean. Depth lives in:
   mount-gated puzzle dungeons. Decided, not built. Read its "Conflicts to
   settle" before touching the story, and don't resolve one unasked.
   What to build next is `docs/NEXT-dungeon1.md` (the owner's notes on
-  dungeon 1 and a sliced plan with the holes in it).
+  dungeon 1 and a sliced plan with the holes in it): the offering to the
+  giant, the rest of its slice B.
   No combat, no text. Spooky is fine where the story wants it (the
   giant's crows); nothing gory or cruel.
 - `docs/BRIEF.md`: the original request, verbatim, plus how to read `/inspo`.
@@ -90,12 +91,18 @@ npm run shots    # build + headless GPU screenshots -> shots/   (look at them!)
   arms that pull you down and lift you back out).
 - `src/dungeon/`: dungeon 1 inside, its own scene, drawn instead of the
   world while `dungeon.inside` (main swaps the `WorldQuery` over to it).
-  `layout.ts` (the cave's plan as functions of the seed: walls, floor,
-  ceiling, props, lights), `shell.ts` (meshes from the plan), `dungeon.ts`
-  (scene, collision, camera, being let down and lifted, and what you do
-  there: the rockfall, the shut-in rockhopper, the ledge, the light). Its
-  creature is a `Mob` with `below`, run through `Mobs.under`. A first shot:
-  theme and mechanic aren't decided. Dev: `?dungeon=1`, `?fresh=1&cp=ring`.
+  `layout.ts` (the cave's plan as functions of the seed, drawn at its top:
+  rooms, passages, ledges, the pit and its stepping stones, lanterns,
+  lights; `layout.at` names its places), `shell.ts` (meshes from the plan),
+  `dungeon.ts` (scene, collision, camera, light, being let down and lifted,
+  and what you do there: the wrong-way ledge, the stones, the rockfall, the
+  shut-in rockhopper, the warm light). Its creature is a `Mob` with `below`,
+  run through `Mobs.under`. Slice A of `docs/NEXT-dungeon1.md` is built, and
+  the first step of B (taking the light: a success beat, then out on the
+  surface on the rockhopper, the ring shut behind you: `leaveDungeon(true)`,
+  `dungeonWon`, `bringUp` in main); the offering and slice C aren't. Dev: `?dungeon=1`, `?fresh=1&cp=ring`; check a change with
+  `scripts/dungeon-plan.mjs` (the plan from above, what can reach what) and
+  `scripts/dungeon.mjs <dir> quest` (plays it through by the keys).
   `WorldGen.dungeon`: the first dungeon's ring and the way there (slow to
   find: cached per seed and handed to workers, see `primeDungeon` in main).
   `src/world/prints.ts`: the prints themselves, as a texture the terrain and

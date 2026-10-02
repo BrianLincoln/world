@@ -178,7 +178,8 @@ function mount(m: Mob) {
   if (m.data && 'gs' in m.data) (m.data as BeastData).gs = gs;
   player.set('ride', ctx);
   riding = m;
-  orbit.targetDistance = Math.max(orbit.targetDistance, 12);
+  // (Not down in the dungeon: its passages are narrower than that, and the camera would be forever on the walls.)
+  if (!dungeon?.inside) orbit.targetDistance = Math.max(orbit.targetDistance, 12);
 }
 
 function dismount() {
@@ -467,8 +468,14 @@ const dungeonVeil = document.createElement('div');
 dungeonVeil.style.cssText = 'position:fixed;inset:0;background:#2b2147;opacity:0;pointer-events:none;z-index:4';
 document.body.append(dungeonVeil);
 let dungeonVeilK = 0;
+/** The saddle's height over the mount's feet, smoothed (down in the dungeon), or -1. */
+let rideSeatY = -1;
 /** The orbit camera's zoom as it was above ground. */
 let zoomAbove = 10;
+/** The first dungeon is done (the light taken): the ring won't take you again. Saved with the dungeon's own state. */
+let dungeonWon = false;
+/** The rockhopper, brought up out of the dungeon with you: you're put on it once the ring has let go. */
+let bringUp: Mob | null = null;
 /** What the dungeon's creatures live by (see Mobs.under). */
 let dungeonCtx: MobCtx | null = null;
 
@@ -501,7 +508,8 @@ function enterDungeon(drop?: [number, number]) {
         return m;
       },
     });
-    dungeon.onLeft = leaveDungeon;
+    dungeon.onLeft = () => leaveDungeon();
+    dungeon.onWon = () => leaveDungeon(true);
     dungeonCtx = under;
   }
   mobs.under = dungeonCtx;
@@ -523,8 +531,23 @@ function enterDungeon(drop?: [number, number]) {
 }
 
 /** Back up: the world is the world again, and the ring's arms lift you out on to the field. */
-function leaveDungeon() {
+function leaveDungeon(won = false) {
   if (riding) dismount();
+  player.body.vel.set(0, 0, 0);
+  if (won) {
+    // The light is yours: the dungeon is done with, and its creature comes up with you.
+    dungeonWon = true;
+    const g = dungeon?.goat ?? null;
+    if (g) {
+      const d = gen.dungeon, x = d.x + 2.4, z = d.z + 1.2;
+      g.below = false;
+      g.pos.set(x, trail.height(x, z), z);
+      g.vel.set(0, 0, 0);
+      g.stay.copy(g.pos);
+      g.species.reset(g);
+      bringUp = g;
+    }
+  }
   world.waterLevel = SEA_LEVEL;
   mobs.under = null;
   scene.add(rig.root, puffs.group, mobs.group);
@@ -548,6 +571,13 @@ function makeVisit() {
     dungeonCtx = null;
   }
   ring = new Ring(gen.dungeon, (x, z) => gen.height(x, z), { body: player.body, sfx: storyHost!.sfx, setMode: (m) => player.set(m, ctx) });
+  // A save from after the light was taken: the dungeon stays shut, and its rockhopper is waiting by the ring.
+  bringUp = null;
+  try { dungeonWon = !!JSON.parse(localStorage.getItem(`fjellheim.dungeon1.${seedText}`) ?? '{}').taken; } catch { dungeonWon = false; }
+  if (dungeonWon) {
+    const d = gen.dungeon, x = d.x + d.r + 3, z = d.z;
+    mobs.adopt('rockhopper', 'cave:rockhopper', new THREE.Vector3(x, gen.height(x, z), z), new THREE.Color('#e2dbcf'), mobCtx);
+  }
   ring.onTaken = () => enterDungeon();
   scene.add(ring.group);
   storyHost?.overlay.add(ring.overlay);
@@ -938,7 +968,9 @@ function frame(ts?: number) {
   if (cycling && player.current.name !== 'bike') dismountBike(); // tumbled into deep water
   beacons.update(dt, camera, player.current.name, body.grounded, input.held('KeyE') || input.held('Mouse0'));
   // The ring takes you down (on your own feet only); the dungeon lets you down, and takes you back up.
-  ring?.update(dt, camera.position, player.current.name, body.grounded, !storyBusy && !beacons.busy && !journey?.busy && !riding && !cycling && !dungeon?.inside);
+  ring?.update(dt, camera.position, player.current.name, body.grounded, !storyBusy && !beacons.busy && !journey?.busy && !riding && !cycling && !dungeon?.inside && !dungeonWon);
+  // Out of the dungeon with its creature: up on to it as soon as the arms have let go.
+  if (bringUp && !dungeon?.inside && !ring?.busy) { const g = bringUp; bringUp = null; g.pos.copy(body.pos); mount(g); }
   if (dungeon?.inside) dungeon.update(dt, player.current.name, body.grounded, input.held('KeyE') || input.held('Mouse0'));
   const veilK = Math.max(ring?.veil ?? 0, dungeon?.veil ?? 0);
   if (veilK !== dungeonVeilK) dungeonVeil.style.opacity = String((dungeonVeilK = veilK));
@@ -1109,7 +1141,12 @@ function frame(ts?: number) {
   towerDebug.update(body.pos, body.heading, orbit.yaw);
   for (const ev of body.events) if (ev.type === 'land' && ev.impact > 6) orbit.bump(Math.min(2.2, (ev.impact - 6) * 0.14));
   const focus = body.pos.clone();
-  focus.y += mode === 'swim' ? 1.1 : mode === 'glide' ? 2.0 : mode === 'ride' && riding ? riding.species.seat(riding).pos.y - body.pos.y + 1.1 : mode === 'bike' ? 1.55 : 1.4;
+  // (Down in the dungeon the saddle's bounce is smoothed out of it: the camera is close there, and on
+  // a trotting mount it was bobbing with every stride.)
+  let seatY = mode === 'ride' && riding ? riding.species.seat(riding).pos.y - body.pos.y : 0;
+  if (mode === 'ride' && dungeon?.inside) seatY = rideSeatY = rideSeatY < 0 ? seatY : rideSeatY + (seatY - rideSeatY) * (1 - Math.exp(-1.5 * dt));
+  else rideSeatY = -1;
+  focus.y += mode === 'swim' ? 1.1 : mode === 'glide' ? 2.0 : mode === 'ride' && riding ? seatY + 1.1 : mode === 'bike' ? 1.55 : 1.4;
   focus.y += focusShift;
   if (focusOverride) focus.copy(focusOverride);
   // In the ring's arms the camera stays up where you stood.
@@ -1123,9 +1160,11 @@ function frame(ts?: number) {
   const rideK = mode === 'ride' ? THREE.MathUtils.clamp((body.vel.length() - 8) / 30, 0, 1) : 0;
   // Keeps building with speed: a mountain descent should feel like one.
   const bikeK = mode === 'bike' ? THREE.MathUtils.clamp((hs - 8) / 50, 0, 1.4) : 0;
-  orbit.update(focus, dt, (x, z) => (dungeon?.inside ? dungeon.floorAt(x, z) : Math.max(trail.height(x, z), SEA_LEVEL)), {
+  // (Down in the dungeon its own clamp keeps the camera over the floor: the plan's floor out in the rock,
+  // where an unclamped camera often is, is no floor at all, and lifting the camera to it made it jump.)
+  orbit.update(focus, dt, (x, z) => (dungeon?.inside ? -1e9 : Math.max(trail.height(x, z), SEA_LEVEL)), {
     fovKick: 3.5 * sprint + 7 * fall + (3 + THREE.MathUtils.clamp((hs - 9) / 6, 0, 1) * 4) * glide + 8 * flyK + 6 * rideK + 9 * bikeK,
-    distScale: 1 + 0.12 * sprint + 0.15 * fall + 0.4 * glide + (mode === 'ride' ? 0.25 + 0.2 * rideK : 0) + 0.3 * bikeK,
+    distScale: 1 + 0.12 * sprint + 0.15 * fall + 0.4 * glide + (mode === 'ride' ? (dungeon?.inside ? 0.08 : 0.25 + 0.2 * rideK) : 0) + 0.3 * bikeK,
     airborne: !body.grounded && mode !== 'ride',
     velX: body.vel.x,
     velZ: body.vel.z,
@@ -1143,7 +1182,7 @@ function frame(ts?: number) {
   }
   // In a tower's room, the camera stays inside it too.
   beacons.clampCamera(camera.position, focus, dt);
-  if (dungeon?.inside) dungeon.clampCamera(camera.position, focus, dt);
+  if (dungeon?.inside) dungeon.clampCamera(camera.position, focus, dt, body.vel);
   beacons.camNow.copy(camera.position);
   // You are the tower's head: the camera looks out through its eyes.
   // A tower's spirit being freed: the camera watches it, not you, easing
@@ -1187,7 +1226,8 @@ function frame(ts?: number) {
   }
   camPrevPos.copy(camera.position); camPrevQ.copy(camera.quaternion);
   // Backed against the rock down there, the camera is pushed in on top of you: you're not drawn, rather than seen from inside your hat.
-  if (dungeon?.inside) rig.root.visible = camera.position.distanceTo(focus) > 1.3;
+  // (With a margin either way, or at that distance you'd flicker.)
+  if (dungeon?.inside) rig.root.visible = camera.position.distanceTo(focus) > (rig.root.visible ? 1.2 : 1.7);
   U.uFocus.value.copy(focus);
   // Contact shadow sits on the ground under the explorer and shrinks with height.
   // Floor, not bare terrain: on a rock or roof the terrain-only shadow hides.
@@ -1200,7 +1240,7 @@ function frame(ts?: number) {
 
   env.update(dt);
   // Down there the light is the cave's own, whatever the hour is above.
-  if (dungeon?.inside) dungeon.applyLight();
+  if (dungeon?.inside) dungeon.applyLight(camera.position);
   ambience.update(dt, { night: env.sky.night, home: atHome(), hush: !!visit?.busy || !!dungeon?.inside });
   U.uTime.value = elapsed;
   sky.update(camera, elapsed);
@@ -1210,7 +1250,8 @@ function frame(ts?: number) {
   if (!skipRender && dungeon?.inside) {
     // Its own scene, its own air; nothing of the world's overlay (the field, the pointer) shows through.
     const k = DUNGEON_LOOK, ov = post.overlay;
-    post.overlay = null;
+    // (But its own: the explorer's thought bubble.)
+    post.overlay = ov && { ...ov, scene: dungeon.overlay };
     post.render(dungeon.scene, camera, k.fog, k.outline, k.tint, k.tintAmt, k.lift, k.air);
     post.overlay = ov;
   } else if (!skipRender) {
@@ -1588,6 +1629,9 @@ window.__ow = {
   },
   dismountBike,
   lockInput: (yaw: number | null) => { inputYaw = yaw; },
+  /** How you're getting about just now ('walk', 'glide', 'ride', ...), and what you're riding. */
+  mode: () => player.current.name,
+  riding: () => riding,
   /** Orbit the camera round a world point instead of the explorer (null = back to normal). */
   focusAt: (x: number | null, y = 0, z = 0) => { focusOverride = x === null ? null : new THREE.Vector3(x, y, z); orbit.snap(); },
   /** Frame the nearest bicycle from `dist` m, from `side` (rad around it, 0 = its left). */

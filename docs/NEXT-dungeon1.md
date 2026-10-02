@@ -1,10 +1,15 @@
-# Next: dungeon 1, second pass (brief for a fresh session)
+# Next: dungeon 1, the offering (brief for a fresh session)
 
-Written 2026-10-01 after the owner played the first slice. Nothing in here
-is built. Read `CLAUDE.md` first, then the last three sections of `NOTES.md`
-("Dungeon 1: ..."), then `src/dungeon/` and `src/giant/ring.ts`. Work on
-master, don't commit unless asked, verify with screenshots
-(`scripts/dungeon.mjs`, `docs/WORKFLOW.md`).
+First written 2026-10-01 after the owner played the first slice; brought up
+to date the same evening after slice A and the first step of slice B were
+built and played. **Next to build: the rest of slice B, then slice C.**
+Read `CLAUDE.md` first, then this, then in `NOTES.md` everything from
+"Dungeon 1, slice A" to the end, then `src/dungeon/`, `src/giant/ring.ts`,
+`src/giant/giant.ts` and `src/giant/visit.ts`. Work on master, don't commit
+unless asked, verify with screenshots (`docs/WORKFLOW.md`).
+
+**Nothing from this work is committed**: slice A and the start of B are all
+in the working tree on top of `e215081`. Ask the owner before committing.
 
 ## The owner's notes, verbatim
 
@@ -49,102 +54,68 @@ Added after: how the giant takes it.
 
 ## What exists now (so you don't re-derive it)
 
-- The ring takes you down with two arms and lifts you back out
-  (`ring.ts`, `Dungeon.enter` / `onLeft`, `Ring.emerge`).
-- The cave is a 2.5D plan (`layout.ts`): rooms and capsule passages as an
-  SDF, a floor height, a ceiling height, walls that lean into a vault.
-  Mesh, collision and camera all read the plan. About 135 x 60 m, five
-  rooms, four passages. Authored by hand, seeded only for side and scatter.
-- Light is up to **12** pools (`DUNGEON_GLOWS`, `DUNGEON_FRAG`), hard
-  rings, violet grade (`DUNGEON_LOOK`).
-- `Layout.shelf` is one ledge (a line across a passage; `Dungeon.collide`
-  treats a rise over 0.9 m as a wall from below). `Layout.plug` is the
-  rockfall. The rockhopper is a `Mob` with `below`, run by `Mobs.under`.
-- The warm light is taken by walking into it and then just follows you.
-- Above ground: the giant is asleep 48 m short of the ring as a solid
-  boulder hill with crows roosting on it (`Giant.dormant`, `settle()`);
-  there is **no way to wake it** in code. There is **one** dungeon site
-  (`WorldGen.dungeon`, slow to find, cached per seed, handed to workers).
-  After the visit the guide walks home and grieves in the village
-  (`journey.ts`: `trudge`, `grieve`); it is not at the ring.
+Below ground (`src/dungeon/`; the plan is drawn at the top of `layout.ts`):
+- A big dark cave, about 370 x 290 m, authored as a loop: well, fork, the
+  wrong way (a 3.4 m ledge with the warm light in sight beyond it), the
+  long way (cavern, the giant's stone hand, a pit crossed on climbing
+  stones and one long parachute fall, a gallery, a rockfall), the
+  rockhopper's den, and a one-way balcony back into the fork.
+- Spirit lanterns that wake as you come near and stay lit (saved). The
+  nearest 16 pools of light are drawn. A parachute thought bubble after
+  three falls from the high stone.
+- Taking the light: a 5.4 s success beat (hops, a heart bubble, lanterns
+  up), the violet veil, and `onWon` -> `leaveDungeon(true)` in `main.ts`.
+- `layout.at` names every place; `scripts/dungeon.mjs <dir> quest` plays
+  the whole thing by the keys and must keep passing;
+  `scripts/dungeon-plan.mjs` checks the plan.
+
+Above ground, after the light is taken:
+- The ring's arms lift you out (`Ring.emerge`); the rockhopper is brought
+  up (`below` cleared, `bringUp` in `main.ts`) and you are on it the
+  moment the arms let go.
+- `dungeonWon` (read from `fjellheim.dungeon1.<seed>`, `taken`) stops the
+  ring taking you again. **It still looks like the open ring**: field,
+  dark spirit and all.
+- On a reload after winning, a rockhopper is adopted standing by the ring
+  (it is not in any save of its own).
+- **The light does not come up.** It is a mesh in the dungeon's scene.
+- The giant is asleep 48 m short of the ring as a solid boulder hill with
+  crows roosting on it (`Giant.dormant`, `settle()`); there is **no way
+  to wake it** in code. There is **one** dungeon site (`WorldGen.dungeon`,
+  slow to find, cached per seed, handed to workers). The guide walks home
+  and grieves in the village (`journey.ts`: `trudge`, `grieve`); it is not
+  at the ring.
 
 ## Do it in three slices, in this order
 
 Each is shippable alone. Stop after each and show the owner.
 
-### Slice A: a bigger, darker dungeon (all inside `src/dungeon/`)
+### Slice A: a bigger, darker dungeon: BUILT
 
-1. **Bigger.** Aim for roughly 5 to 8 times the walkable area and 4 to 6
-   minutes on foot from the well to the light on a first visit. Keep the
-   plan authored (a graph of rooms you design), not random: it needs a
-   wrong turn, a platform room and a mount room in a deliberate order.
-   Suggested route:
-   - well → a fork.
-   - **Short branch:** a passage to the ledge, with the light's glow
-     visible beyond it. Impassable. This is the "wrong way" (item 4).
-   - **Long branch:** winds through two or three big rooms, the platform
-     room (item 5), to the rockhopper's den behind its rockfall (item 3).
-   - From the den a short link comes back out near the fork, so the ride
-     to the ledge is not the whole walk again.
-2. **Darker, with spirit lanterns.**
-   - Darker means a deeper shade tone, shorter fog, and fog toward a dark
-     violet instead of the pale lilac now. Keep outlines and keep it blue
-     or violet, never black: DESIGN.md conflict 7 (agreed) says "dark is
-     the blue night palette with the outlines kept".
-   - Lanterns on the walls as the pools of light. Recommended: they are
-     **unlit until you come near**, then stay lit (saved). That gives the
-     owner's "discover things", marks where you've been in a big dark
-     place without a map, and makes the wrong turn readable on the way
-     back. Give them a small dark-spirit face or the tower spirits' tall
-     eyes so they belong to this world; cool light, so the orb stays the
-     only warm thing.
-   - **The 12-glow cap will not survive this.** Pick the nearest N glows
-     to the camera each frame, or raise the cap and measure. Don't loop
-     over 60 lights per pixel on integrated graphics.
-3. **The mount is found far in**, at the end of the long branch. Keep the
-   rockfall and the pick unless the owner says otherwise (they haven't
-   answered whether freeing should be gentler).
-4. **The wrong-way ledge.** Reuse `Layout.shelf` (it needs to become a
-   list). Rules: you must be able to reach it before the mount; you can
-   see the goal past it; nothing nearby to climb; the parachute can't
-   beat it (it can't gain height, but check for higher ground to launch
-   from).
-5. **Platform room.** Jump between stone tops over a drop; miss and you
-   land on a lower floor with an obvious way back to the start. No death,
-   no reset. Put it **before** the mount, on foot, or the bound trivialises
-   it.
-
-Holes and decisions for slice A:
-
-- **Space in mid-air opens the parachute** (glides about 4 m forward per
-  1 m down). It will carry players across any gap that isn't sized for
-  it. Either size the gaps for jump-plus-glide and call that the
-  mechanic, or switch the parachute off in the platform room. Default:
-  design for it, since the owner listed "jump, parachute" together.
-- **The plan is a height field.** Pillars, pits, ledges and ramps are
-  easy; overhangs and floors above floors are not possible without a
-  rewrite. Don't design the platform room to need them.
-- **Build time.** The shell is a 1 m grid over the bounding box and every
-  node calls the SDF, which loops every room. At this size expect a
-  hitch on first entry. It happens under the violet veil; measure it, and
-  if it's over about half a second cache the SDF grid or coarsen the
-  floor away from walls.
-- **"Discover things" needs things.** Beyond lanterns, pick two or three
-  cheap ones and stop: a view down into a room you reach later, the
-  rockhopper heard or glimpsed before you can get to it, giant-sized
-  shapes in the rock (DESIGN.md foreshadowing). Ask the owner before
-  inventing collectibles.
-- **The mount's camera** (the owner's "shakey and weird"). Not diagnosed.
-  Reproduce first: `scripts/dungeon.mjs <dir> quest` rides it. Suspects,
-  most likely first: `mount()` in `main.ts` sets the zoom to 12 m, more
-  than most passages allow, so `Dungeon.clampCamera` is pulling in and
-  easing out every frame; `Dungeon.floorAt` lets a body step up on to any
-  boulder top within a step, so a trotting mount's height jumps; the ride
-  mode's speed-based pull-back and FOV kick fighting the clamp; the
-  explorer being hidden and shown as the camera crosses 1.3 m.
-- Other seeds have never been looked at.
+Built and played by the owner ("feeling mostly really good", "ok looking
+good"). What it is, what was checked and what is rough: `NOTES.md`,
+"Dungeon 1, slice A" and the sections after it. Things the owner changed
+by playing it, so you don't undo them: the floor is pale blue slate against
+violet walls; every drop edge has a pale kerb; stone tops are pale with a
+dark border and a ring; the parachute section is a climb and one long fall
+on to the far lip (three versions: read why in NOTES before touching it);
+the ridden rockhopper carries its rider level.
 
 ### Slice B: the ending, up to the giant taking the orb
+
+**Step 1 is built** (the success beat, the veil, out on the surface mounted,
+the ring refusing you afterwards). Steps 2 to 5 are not. The owner's answers
+since (see the questions at the end) change three of the defaults below;
+where they do, the answer wins:
+- **You are on the rockhopper for the whole offering sequence**, and on it
+  when you get control back. So the "ten-second walk" is a ride, and the
+  crow comes to a mounted explorer.
+- **The dungeon's entrance itself becomes the shrine** ("it turns to a
+  shrine / stone thing"). Not a separate stone between ring and giant.
+  What the dark spirit and the field do when that happens isn't said: the
+  simplest reading is that the field closes over into stone and the
+  shrine stands in the middle of the ring. Flag what you choose.
+- **The guide is simply at the ring when you come out.** No explanation.
 
 1. **Success and back outside.** Taking the orb: a short beat (the orb
    flares, the lanterns you've lit all brighten, the mount is glad), the
@@ -164,12 +135,14 @@ Holes and decisions for slice A:
 
 Holes and decisions for slice B:
 
-- **How is the guide there?** It's 1.5 to 1.9 km away grieving in the
+- **How is the guide there?** *(Owner: yes, it is simply there.)* It's 1.5 to 1.9 km away grieving in the
   village, and the rucksack idea (DESIGN.md conflict 4) isn't built.
   Pragmatic default: it is simply standing by the ring when you come out,
   no explanation, and say so in NOTES.md. Don't build the rucksack for
   this.
-- **Shrine placement.** "The entrance becomes a shrine" would close the
+- **Shrine placement.** *(Overruled by the owner: the entrance itself
+  becomes the shrine, and the dungeon is shut. The rest of this bullet is
+  the old default.)* "The entrance becomes a shrine" would close the
   only way back in. Default: the ring stays a ring, and the shrine is a
   low stone between the ring and the sleeping giant (they are 48 m
   apart). Ask the owner whether the dungeon should shut once it's done.
@@ -187,7 +160,8 @@ Holes and decisions for slice B:
   hand-over only reads from a long shot or with the orb glowing hard.
   Plan the camera (`visit.ts` has the cinematic machinery) and look at
   frames before polishing anything else.
-- **The rockhopper stays underground** (it can't come up). So "unlock a
+- *(Settled and built: it comes up with you and you ride it through the
+  sequence. The old note follows.)* **The rockhopper stays underground** (it can't come up). So "unlock a
   mount" gives you nothing above ground, and with the lasso moved to the
   end game the overworld has only the bike. The owner hasn't decided
   whether the creature comes up with you. Ask; it changes what the next
@@ -238,11 +212,25 @@ Holes and decisions for slice C:
 - Don't resolve an open DESIGN.md conflict without the owner's yes. Where
   this brief says "default", build the default and flag it.
 
-## Questions to put to the owner (none of them block slice A)
+## Questions to the owner
 
-1. Should the rockhopper come up out of the dungeon with you?
-2. Does the dungeon shut once the orb is taken?
+Answered (2026-10-01):
+1. Should the rockhopper come up out of the dungeon with you? **Yes. You're
+   riding it for the whole offering sequence, and on it when you regain
+   control.**
+2. Does the dungeon shut once the orb is taken? **Yes, it turns into a
+   shrine / stone thing.**
+4. Parachute in the platform room: part of the challenge, or off? **Part of
+   it, as a jump down from above. Built.**
+5. Is it all right for the guide to simply be at the ring? **Yes.**
+
+Still open ("TBD"):
 3. Is breaking the rockfall with the pick the right way to free it?
-4. Parachute in the platform room: part of the challenge, or off?
-5. Is it all right for the guide to simply be at the ring?
 6. Rebuilding the returned spirit's house: is that the next task?
+7. Is the freed rockhopper appearing behind you when you leave it
+   acceptable, or should it properly follow?
+8. Is the dark too empty in the big rooms before any lantern is lit?
+9. The saddle's bounce is smoothed out of the camera only underground. The
+   same above ground?
+10. Is the upright stone hand the right foreshadowing, or too much too
+    early?

@@ -52,16 +52,31 @@ change goes through this loop:
   `trail` fast-forwards the walk to the ring and shoots it.
   `__ow.visit().start()` runs it from anywhere in the story;
   `__ow.visit().restore()` jumps to after it (prints, wreckage, giant asleep, ring open).
-- `scripts/dungeon.mjs <dir> [seed=..] [inside,take,leave,quest]`: dungeon 1.
-  `inside` is stills round the cave; `take` walks on to the opened ring and
-  steps through the pull and the arrival; `leave` the lift and the emerge;
-  `quest` breaks the rockfall, rides the rockhopper at the ledge with and
-  without its bound, and takes the light (it prints the state as it goes).
-  `dungeon().debugFree()` frees the creature at once.
-  Needs `npx vite build` first. `__ow.enterDungeon()` is the ring taking
-  you, `enterDungeon(x, z)` stands you at a point of the cave's plan,
-  `leaveDungeon()` brings you up, `dungeon()` is it, `goToRing()` stands you
-  by the ring.
+- `scripts/dungeon.mjs <dir> [seed=..] [inside,take,leave,quest,perf]`: dungeon 1.
+  `inside` is stills round the cave as you'd find it (and four with every
+  lantern awake); `take` walks on to the opened ring and steps through the
+  pull and the arrival; `leave` the lift and the emerge; `quest` **plays the
+  whole thing by the keys** from the well (the wrong way and failing the
+  ledge on foot, the long way, a fall into the pit and back up the tunnel,
+  the stepping stones, the rockfall, the ride off the balcony, the bound,
+  the light), prints ok/FAIL per step and the game time it took, and exits
+  1 on a failure; `perf` (add `uncapped`) is frame cost in six places, dark
+  and with every lantern lit, and the build hitch. Needs `npx vite build`
+  first. It injects `window.__bot` (walk to a place, hop a stone, stand
+  somewhere): places are `layout.at`'s names.
+- `scripts/dungeon-plan.mjs <out.png> [seed=..]`: the plan from above (floor
+  height, lanterns, stones, named places) and a flood fill of what you can
+  reach on foot, past the stones, with the rockfall open, and mounted; the
+  walkable area; the stepping stones' gaps; hard edges in the wrong place.
+  Run it after any change to `layout.ts`, on a few seeds.
+- `scripts/dungeon-cam.mjs [seed=..] [sprint] [yaw=0.9] [from:to ...]`: rides
+  the rockhopper along legs of the plan and prints how steady the camera
+  was (jumps in its distance, reversals, height jitter).
+  `__ow.enterDungeon()` is the ring taking you, `enterDungeon(x, z)` stands
+  you at a point of the cave's plan, `leaveDungeon()` brings you up,
+  `dungeon()` is it (`.goTo('lip')`, `.debugFree()`, `.debugLight()`,
+  `.buildMs`, `.layout.at`), `goToRing()` stands you by the ring,
+  `mode()` / `riding()` say how you're getting about.
 - `scripts/trudge.mjs <dir> [seed=..]`: the guide after the giant: its walk
   home from the tower (close up), keeping to itself in the village, and the
   stable beginning only once the minutes have passed and you're there. It

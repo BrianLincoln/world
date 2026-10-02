@@ -3,7 +3,7 @@ import { PRINT_U } from '../world/prints';
 import * as THREE from 'three';
 import { BIOME } from './palette';
 import {
-  CASTER_FRAG, CASTER_VERT, CLOUD_FRAG, CLOUD_VERT, CREATURE_FRAG, CREATURE_VERT, DUNGEON_FRAG, DUNGEON_GLOWS, DUNGEON_VERT, FACE_FRAG, FACE_PARAMS, FACE_VERT, FS_VERT, GIANT_FRAG, GIANT_VERT, POOL_FRAG, PORTAL_FRAG, PROP_FRAG, PROP_VERT, SKY_FRAG, SOLID_FRAG, SOLID_VERT,
+  CASTER_FRAG, CASTER_VERT, CLOUD_FRAG, CLOUD_VERT, CREATURE_FRAG, CREATURE_VERT, DUNGEON_FRAG, DUNGEON_GLOWS, DUNGEON_VERT, LANTERN_FRAG, LANTERN_VERT, FACE_FRAG, FACE_PARAMS, FACE_VERT, FS_VERT, GIANT_FRAG, GIANT_VERT, POOL_FRAG, PORTAL_FRAG, PROP_FRAG, PROP_VERT, SKY_FRAG, SOLID_FRAG, SOLID_VERT,
   TERRAIN_FRAG, TERRAIN_VERT, WATER_FRAG, WATER_VERT,
 } from './shaders';
 
@@ -319,20 +319,30 @@ export const DUNGEON_U = {
   uFeet: { value: new THREE.Vector3(0, -1e4, 0) },
   uMark: { value: 2.4 },
   uMarkOn: { value: 0 },
-  cFloor: { value: col('#9b91bd') },
-  cFloor2: { value: col('#a79dc7') },
-  cWallA: { value: col('#7b719f') },
-  cWallB: { value: col('#6e6493') },
-  cWallC: { value: col('#8a80ad') },
-  cCeil: { value: col('#5f5685') },
+  // (The floor is a pale blue slate, the walls a darker violet: in the dark they were one tone, and
+  // a ledge's face, which is wall, was the floor going on.)
+  cFloor: { value: col('#b4c0ea') },
+  cFloor2: { value: col('#c6d0f2') },
+  cWallA: { value: col('#685e90') },
+  cWallB: { value: col('#5b5183') },
+  cWallC: { value: col('#766c9e') },
+  cCeil: { value: col('#4f4674') },
   cMark: { value: col('#d9d2f2') },
   cMarkDark: { value: col('#2a2140') },
   cWarm: { value: col('#ffd9a8') },
+  cLit: { value: col('#ffffff') },
+  cMid: { value: col('#ffffff') },
+  cShade: { value: col('#ffffff') },
 };
 
 /** The cave itself (`shell`), or the rock standing in it (vertex colours in aCol). */
 export function makeDungeonMaterial(shell: boolean) {
   return mat(DUNGEON_VERT, DUNGEON_FRAG, { ...U, ...DUNGEON_U, uIsProp: { value: shell ? 0 : 1 }, uShell: { value: shell ? 1 : 0 }, uGlint: { value: 0 } });
+}
+
+/** The spirit lanterns (one mesh; see LANTERN_FRAG). */
+export function makeLanternMaterial() {
+  return mat(LANTERN_VERT, LANTERN_FRAG, { ...U, uIsProp: { value: 1 }, cDark: { value: col('#4d4884') }, cGlow: { value: col('#d6efff') }, cInk: { value: col('#1c1630') }, cLid: { value: col('#b3abe0') } });
 }
 
 export function makePortalMaterial(r: number) {

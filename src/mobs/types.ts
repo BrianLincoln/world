@@ -37,6 +37,8 @@ export interface Mob {
   happy: number;
   /** Per-species brain + animation scratch. */
   data: any;
+  /** Hopping on the spot for gladness: how far off the ground it is right now (m). Whoever is glad for it sets this. */
+  hop?: number;
   /** Lives down in a dungeon: it only thinks and is drawn while you're down there too (see Mobs.under). */
   below?: boolean;
 }

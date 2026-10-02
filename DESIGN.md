@@ -156,14 +156,28 @@ to stay inside the art direction (`docs/BRIEF.md`) and "nothing scary".
   inside** (owner, 2026-10-01). Leaning, not final: this replaces the lasso
   as how you get mounts, and the lasso becomes an end-game prize. Phase 3
   (stable, lasso lesson) is built the old way and untouched.
-- **The warm light at a dungeon's end:** maybe a gift for the giant, one
-  gift for one crow flying a spirit home. Owner: "just ok", undecided.
-- **Dungeon 1's interior is a first shot, awaiting the owner:** a violet
-  cave under the ring (the stones go on down as columns round a well; a
-  winding passage, a glowcap grotto, a cavern with a still pool, one warm
-  light at the far end). First mechanic, built: a rockhopper shut in by a
-  rockfall, freed with the pick, whose bound is the only way up the ledge
-  to the light. Theme and mechanic are proposals: see NOTES.md.
+  **The creature comes up out of the dungeon with you** (owner, later the
+  same day): you ride it out, and through what follows. *(Built.)*
+- **The warm light at a dungeon's end is an offering to the giant** (owner,
+  2026-10-01, in outline): taking it ends the dungeon with a small
+  celebration and puts you back on the surface; the guide is waiting
+  there; **the dungeon's entrance has become a shrine**, and the dungeon
+  is shut; you bring the light to it; a crow flies down, walks up, takes
+  it and carries it to the giant, who opens its eyes, grins a little,
+  holds out a hand palm up, closes its fist on the light and glows orange
+  there (warmed); a crow flies one spirit home to the village; the giant
+  gets up and walks on to the next dungeon's site. *(Built: the
+  celebration, the trip to the surface on the mount, the ring refusing you
+  after. Not built: everything from the guide on. `docs/NEXT-dungeon1.md`.)*
+- **Dungeon 1's interior** *(built; played by the owner)*: a big dark
+  violet cave under the ring, a loop. Spirit lanterns on the walls wake as
+  you pass and stay lit. From a fork the nearer way leads to a ledge with
+  the warm light in sight beyond it, too high on foot. The long way goes
+  by a still pool, a giant's stone hand reaching out of the floor, and a
+  pit crossed by climbing stepping stones and then one long parachute
+  fall, to a rockhopper shut in by a rockfall. Freed with the pick, it
+  carries you off a one-way balcony back to the fork, and its bound gets
+  you up the ledge. Whether the pick is the right way to free it is open.
 
 ### The trail and the core loop (decided, not built)
 - **Loop:** follow the trail → catch the right creature → solve the

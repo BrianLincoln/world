@@ -6,7 +6,7 @@ import * as THREE from 'three';
 // in-world billboards (as textures), so an icon always looks the same
 // wherever it appears.
 
-export type IconName = 'axe' | 'log' | 'stone' | 'flame' | 'heart' | 'home' | 'check' | 'hand' | 'hammer' | 'pick' | 'smash' | 'antlers' | 'up' | 'down' | 'ember' | 'bike' | 'finger' | 'mouse' | 'mouseDown' | 'fingerDown' | 'pat' | 'lasso' | 'stable' | 'creature';
+export type IconName = 'axe' | 'log' | 'stone' | 'flame' | 'heart' | 'home' | 'check' | 'hand' | 'hammer' | 'pick' | 'smash' | 'antlers' | 'up' | 'down' | 'ember' | 'bike' | 'finger' | 'mouse' | 'mouseDown' | 'fingerDown' | 'pat' | 'lasso' | 'stable' | 'creature' | 'parachute';
 
 const INK = '#4a2e36';
 const SIZE = 128;
@@ -635,7 +635,46 @@ function drawCreature(g: CanvasRenderingContext2D) {
   }
 }
 
+/** The parachute: a striped canopy, its lines, a small figure under it. */
+function drawParachute(g: CanvasRenderingContext2D) {
+  // Lines from the canopy's hem down to the figure.
+  g.beginPath();
+  for (const x of [20, 44, 84, 108]) { g.moveTo(x, 56); g.lineTo(64, 98); }
+  ink(g, 4);
+  // The canopy: a dome with a scalloped hem, in the explorer's hat red with a pale gore.
+  const dome = () => {
+    g.beginPath();
+    g.moveTo(14, 58);
+    g.bezierCurveTo(14, 4, 114, 4, 114, 58);
+    g.quadraticCurveTo(101, 48, 89, 58);
+    g.quadraticCurveTo(76, 48, 64, 58);
+    g.quadraticCurveTo(52, 48, 39, 58);
+    g.quadraticCurveTo(27, 48, 14, 58);
+    g.closePath();
+  };
+  dome();
+  g.fillStyle = '#c8544a';
+  g.fill();
+  g.save();
+  dome();
+  g.clip();
+  g.fillStyle = '#fbf3e4';
+  g.beginPath();
+  g.moveTo(39, 60); g.quadraticCurveTo(44, 20, 64, 14); g.quadraticCurveTo(84, 20, 89, 60);
+  g.closePath();
+  g.fill();
+  g.restore();
+  dome();
+  ink(g, 6);
+  // The figure.
+  g.beginPath();
+  g.arc(64, 106, 9, 0, Math.PI * 2);
+  g.fillStyle = INK;
+  g.fill();
+}
+
 const DRAW: Record<IconName, (g: CanvasRenderingContext2D) => void> = {
+  parachute: drawParachute,
   up: drawUp, down: drawDown, ember: drawEmber, bike: drawBike,
   antlers: drawAntlers, pat: drawPat, lasso: drawLasso, stable: drawStable, creature: drawCreature,
   axe: drawAxe, log: drawLog, stone: drawStone, flame: drawFlame, heart: drawHeart, home: drawHome, check: drawCheck, hand: drawHand, hammer: drawHammer, pick: drawPick, smash: drawSmash,

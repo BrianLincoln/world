@@ -1634,7 +1634,8 @@ void main() {
 }
 `;
 
-export const DUNGEON_GLOWS = 12;
+/** How many pools of light are drawn at once: the nearest to the camera (`Dungeon.applyLight` picks them). */
+export const DUNGEON_GLOWS = 16;
 
 export const DUNGEON_FRAG = /* glsl */ `
 ${COMMON}
@@ -1656,6 +1657,10 @@ uniform vec3 cWallC;
 uniform vec3 cCeil;
 uniform vec3 cMark;
 uniform vec3 cWarm;
+// The rock's three tones (its own, not the sun's: what's lit by the day above is the explorer).
+uniform vec3 cLit;
+uniform vec3 cMid;
+uniform vec3 cShade;
 uniform vec3 uFeet;
 uniform float uMark;
 uniform float uMarkOn;
@@ -1704,10 +1709,10 @@ void main() {
   }
   // A boulder's top catches what light there is.
   if (uShell < 0.5 && n.y > 0.62) level = max(level, 1);
-  vec3 col = base * (level == 2 ? uLightCol : level == 1 ? uMidCol : uShadeCol);
+  vec3 col = base * (level == 2 ? cLit : level == 1 ? cMid : cShade);
   float em = 0.0;
   if (warm > 0.5) {
-    col = base * (warm > 1.5 ? cWarm : mix(cWarm, uMidCol, 0.45));
+    col = base * (warm > 1.5 ? cWarm : mix(cWarm, cMid, 0.5));
     em = -0.8;
   }
   if (mark == 1) col = base;
@@ -1721,8 +1726,53 @@ void main() {
   // Your shadow, a soft blob at your feet.
   if (ground) {
     vec2 f = (vWorld.xz - uFeet.xz) / max(0.2, 0.46 - 0.06 * (uFeet.y - vWorld.y));
-    if (dot(f, f) < 1.0 && abs(vWorld.y - uFeet.y) < 2.5) col *= vec3(0.8, 0.78, 0.88);
+    if (dot(f, f) < 1.0 && abs(vWorld.y - uFeet.y) < 2.5) col *= vec3(0.72, 0.7, 0.82);
   }
+  writeG(col, em, n, vView);
+}
+`;
+
+/**
+ * The spirit lanterns, all of them as one mesh. Each sleeps dark in its
+ * sconce, eyes shut, until you come near; then it wakes pale and bright and
+ * stays so. aLit is 0..1 per lantern (rewritten when one wakes); aPart is
+ * 0 = body, 1 = an open eye, 2 = a shut one; aPivot is what a part grows from.
+ */
+export const LANTERN_VERT = /* glsl */ `
+in float aLit;
+in float aPart;
+in vec3 aPivot;
+out vec3 vN;
+out vec3 vView;
+out float vLit;
+out float vPart;
+void main() {
+  float k = aPart < 0.5 ? 1.0 + 0.22 * sin(clamp(aLit, 0.0, 1.0) * 3.14159) : aPart < 1.5 ? smoothstep(0.45, 0.9, aLit) : 1.0 - smoothstep(0.1, 0.45, aLit);
+  vec4 w = modelMatrix * vec4(aPivot + (position - aPivot) * k, 1.0);
+  vN = normalize(mat3(modelMatrix) * normal);
+  vLit = aLit;
+  vPart = aPart;
+  vec4 vp = viewMatrix * w;
+  vView = vp.xyz;
+  gl_Position = projectionMatrix * vp;
+}
+`;
+
+export const LANTERN_FRAG = /* glsl */ `
+${COMMON}
+${GBUF_OUT}
+in vec3 vN;
+in vec3 vView;
+in float vLit;
+in float vPart;
+uniform vec3 cDark;
+uniform vec3 cGlow;
+uniform vec3 cInk;
+uniform vec3 cLid;
+void main() {
+  vec3 n = normalize(vN);
+  vec3 col = vPart > 1.5 ? cLid : vPart > 0.5 ? cInk : mix(cDark, cGlow, smoothstep(0.0, 0.6, vLit));
+  float em = vPart < 0.5 && vLit > 0.05 ? 0.9 * vLit : -1.0;
   writeG(col, em, n, vView);
 }
 `;

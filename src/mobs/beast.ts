@@ -713,7 +713,8 @@ export abstract class Beast implements Species {
     a.gs = m.ridden ? d.gs : null;
     const wetNow = !this.cfg.flier && ctx.gen.height(m.pos.x, m.pos.z) < ctx.surface(m.pos.x, m.pos.z) - 1.25 ? 1 : 0;
     a.wet += (wetNow - a.wet) * e(4);
-    const airborne = !m.grounded && (m.ridden || !!this.cfg.flier);
+    const hop = m.ridden ? 0 : m.hop ?? 0;
+    const airborne = (!m.grounded && (m.ridden || !!this.cfg.flier)) || hop > 0.05;
     a.air += ((airborne ? 1 : 0) - a.air) * e(airborne ? 12 : 8);
     // A leaping ground mount stops striding: no running on nothing (fliers keep theirs).
     const ground = this.cfg.flier ? 1 : 1 - a.air;
@@ -748,6 +749,7 @@ export abstract class Beast implements Species {
     d.body.rotation.set(0, 0, 0);
     d.hidden = false;
     this.pose(m, d, a, ctx);
+    d.body.position.y += hop;
 
     // Eyes.
     if (a.t > d.blinkAt + 0.13) d.blinkAt = a.t + 2 + m.rnd() * 5;

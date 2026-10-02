@@ -251,6 +251,24 @@ export class Sfx {
     }
   }
 
+  /**
+   * Something put right (the rockfall down, the rockhopper out): four quick
+   * rising notes and the chord they make, left ringing. Chimes like the
+   * thunk's, so it sits with the rest.
+   */
+  fanfare(delay = 0) {
+    if (!this.ok) return;
+    const t = this.ctx!.currentTime + 0.01 + delay;
+    for (const [f, dt] of [[523, 0], [659, 0.11], [784, 0.22], [1046, 0.36]] as const) {
+      this.tone('sine', f, f, t + dt, { a: 0.008, d: 0.32, peak: 0.2 }, { echo: true });
+      this.tone('triangle', f * 2, f * 2, t + dt, { a: 0.005, d: 0.14, peak: 0.03 });
+    }
+    for (const [f, peak] of [[523, 0.07], [659, 0.07], [784, 0.08], [1046, 0.13], [1318, 0.06]] as const) {
+      this.tone('sine', f, f, t + 0.52, { a: 0.02, d: 1.7, peak }, { vib: 3, vibHz: 5, echo: true });
+    }
+    this.tone('triangle', 262, 262, t + 0.52, { a: 0.02, d: 1.1, peak: 0.1 });
+  }
+
   /** The hearth catching: a rising whoosh that settles into crackle. */
   whoosh() {
     if (!this.ok) return;

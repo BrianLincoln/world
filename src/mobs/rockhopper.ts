@@ -116,9 +116,12 @@ export class Rockhopper extends Beast {
     const g = this.gaitMix(d, a, 2.5, 7, GAIT.pronk);
     const pronk = g.wG;
     const offs = mixGait(g.offs, GAIT.pronk, pronk);
-    const spring = pronk * Math.max(0, Math.sin(a.cyc * Math.PI * 2)) * 0.28 * a.moving;
-    const pitch = d.pitch.step(-a.slope * 0.8 + g.rock * 0.5 - a.joy * 0.35 + (a.caught ? Math.sin(m.stateT * 6) * 0.25 : 0), 60, 12, a.dt) + (a.air > 0.5 ? clamp(-a.vy * 0.03, -0.4, 0.4) : 0);
-    d.body.position.y += g.bounce + spring + a.air * 0.04 + a.joy * 0.25;
+    // With someone on its back it carries them level: at a canter it takes eight strides a second, and a
+    // rider thrown 0.4 m up and down by each was a blur (the owner: "the char bounces like crazy").
+    const calm = a.gs ? 0.15 : 1;
+    const spring = pronk * Math.max(0, Math.sin(a.cyc * Math.PI * 2)) * 0.28 * a.moving * calm;
+    const pitch = d.pitch.step(-a.slope * 0.8 + g.rock * 0.5 * calm - a.joy * 0.35 + (a.caught ? Math.sin(m.stateT * 6) * 0.25 : 0), 60, 12, a.dt) + (a.air > 0.5 ? clamp(-a.vy * 0.03, -0.4, 0.4) : 0);
+    d.body.position.y += g.bounce * calm + spring + a.air * 0.04 + a.joy * 0.25;
     d.body.rotation.set(pitch, 0, a.bank);
     this.poseLegs(d.s.legs, a, offs, lerp(g.duty, 0.45, pronk), g.sweep * (1 - 0.4 * pronk), g.flex, pitch);
     const neck = d.n.neck;
