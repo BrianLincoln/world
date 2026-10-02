@@ -10,7 +10,7 @@
 //           reloads at each step). Prints what happened and how long it took;
 //           exits 1 if a step failed.
 //   perf:   frame cost standing in four places with every lantern awake (add `uncapped`)
-// Uses the build in dist/ (run `npx vite build` first). See also dungeon-plan.mjs, dungeon-cam.mjs.
+// Uses the build in dist/, or in $DIST (run `npx vite build` first). See also dungeon-plan.mjs, dungeon-cam.mjs.
 import { chromium } from 'playwright';
 import http from 'node:http';
 import fs from 'node:fs';
@@ -24,7 +24,7 @@ const uncapped = args.includes('uncapped');
 fs.mkdirSync(dir, { recursive: true });
 const server = http.createServer((req, res) => {
   const p = decodeURIComponent(new URL(req.url, 'http://x').pathname);
-  const f = path.join(root, 'dist', p === '/' ? 'index.html' : p);
+  const f = path.join(root, process.env.DIST ?? 'dist', p === '/' ? 'index.html' : p);
   if (!fs.existsSync(f)) { res.writeHead(404); res.end(); return; }
   res.writeHead(200, { 'content-type': f.endsWith('.js') ? 'text/javascript' : f.endsWith('.html') ? 'text/html' : f.endsWith('.css') ? 'text/css' : 'application/octet-stream' });
   fs.createReadStream(f).pipe(res);

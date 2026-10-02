@@ -4473,3 +4473,143 @@ slid round the explorer as a 2D glyph and never pointed *into* the picture.
 - Still wholly hidden behind the explorer when the task is dead ahead of
   a camera behind them (about 10 degrees either side). Open with the owner:
   a faint show-through (`uThrough`) would fix it, against their ask.
+
+## Perf audit after "Less water" (2026-10-02)
+
+Measured only; **no game code changed**. Scripts added: `scripts/perf-audit.mjs`,
+`scripts/perf-profile.mjs`; `scripts/shots.mjs` gained `--dist <dir>`.
+
+### The headline
+On a quiet machine the default perf run (`shots.mjs --perf --uncapped`, M1
+Pro, 1600x900) is **5.53 ms average, p99 8.8 to 9.0** (two runs: 5.53, 5.52;
+411 nodes, 145 k instances). That is under the 5.84 of before the water
+change. The 7.1 ms recorded in "Less water" was very likely taken while
+something else had the GPU: on the day, the same still frame read 6.2 ms
+quiet and 20 to 60 ms with a game tab and other sessions' headless browsers
+running. Whether the old 5.84 was itself quiet is unknown, so "20% slower"
+may be partly or wholly an artefact.
+
+### Measuring: what went wrong, so it isn't repeated
+- **Timings need the GPU to themselves.** A game tab open in a browser, or
+  another session running any headless-browser script, doubles to tenfolds
+  them. Ask the owner for a quiet window. Counts (calls, triangles) are
+  fine at any time: `perf-audit.mjs --counts`.
+- **Uncapped rAF intervals standing still are not reliable**: the same view
+  read 4.7 or 13 ms depending on whether the canvas had just been resized
+  (a `renderScale` toggle there and back). The moving `--perf` run was
+  steady (5.53 / 5.52).
+- **`gl.finish()` does not wait in Chrome.** The audit's toggles step
+  frames by hand and wait with a one-pixel `readPixels`. That serialises CPU
+  and GPU, so its absolute times are high (11 ms where the pipelined frame
+  is about 6): read its differences, not its totals.
+- Build into a folder of your own (`vite build --outDir dist-x`,
+  `--dist dist-x`): another session's `npm run shots` replaces `dist/`.
+- Don't kill browser processes by name: other sessions have their own.
+
+### Where the frame goes
+One thing off at a time, GPU waited for; two places only (the window ran
+out), share of that place's frame:
+
+| what | start, hilda | thickest forest, hilda |
+|---|---|---|
+| trees | 36% | 54% |
+| ground and water | 12% | 5% |
+| half the pixels | 10% | 10% |
+| ground shadow pass | 6% | 7% |
+| bushes, rocks, tufts, flowers, cabins together | 10% | 12% |
+| FXAA, layer fog, outlines | 1 to 2% each | under 2% each |
+
+**It is triangles, not draw calls** (against the guess in "Less water"):
+trees are 1.9 to 3.7 M of the 4.2 to 9.0 M triangles drawn, about 185 a
+tree for 10 to 14 thousand far trees (an average over the two far shapes,
+from the counts). Fill rate is minor on this machine; unknown on
+integrated graphics. Main thread: 2.9 to 4.7 ms a frame, of which the game
+itself about 0.5; the rest is issuing draws.
+
+Counts at nine places (start on hilda, 42, fjord; forest on hilda, 42;
+vista; high on hilda, fjord; night): 640 to 890 calls, 4.2 to 9.0 M
+triangles. Per frame, typically: ground 71 to 99 calls, water 49 to 83,
+far trees 70 to 107, cabins 51 to 79 (for about 140 cabins), far rocks 42
+to 54, flowers 27 to 76, tufts 14 to 30, bushes 11 to 30; the shadow pass
+85 to 151 (every kind in every chunk near you is its own draw); the
+explorer 44; beacon towers 50 to 100 (culling off). Files:
+`shots/perf/counts-before.txt`, `audit-before.txt`, `base-perf.txt`.
+
+### Not built (candidates, gains guessed, none measured)
+- A. Shadow casters as three batches, not 100 to 150 draws: 2 to 4%, no
+  look change.
+- B. Merge cabins, rocks, bushes across far chunks (about 130 calls): 2 to
+  4%, no look change; loses per-chunk culling for them.
+- C. Tighter culling spheres on prop batches (now `size * 0.75 + 30`):
+  1 to 3%; wrong bounds make things vanish.
+- D. A fourth, simpler conifer for distant trees: 15 to 25%, **changes the
+  look**. The owner handed this to a new session the same day.
+- E. Shadow mask every other frame: about 3%, sway at half rate.
+- The shadow pass also runs at night; not looked into.
+
+### Open
+1. Is 5.5 ms enough, or is headroom for integrated graphics wanted (then A
+   and C, and D if it looks right)?
+2. Nobody has measured on real integrated hardware; every share above is
+   an M1 Pro's.
+3. The toggle audit covers two places, not nine.
+
+## A far shape for distant trees: lod 3 (2026-10-02)
+
+Candidate D of the audit above. Kept; the owner has not yet looked at the
+sheets.
+
+**What survives of a tree far off.** At 500 m a tree is about 35 px tall,
+at 1.2 km about 15. What reads is the stepped outline of the tiers and the
+light top / dark rim band on each (which comes from the softened normals,
+not from the tier's underside). The underside is hidden behind the skirt
+from level or above; the caps of trunk and crown never show. Lod 2 also
+carried 20 zero-area triangles (the ring at each tier's tip is five
+vertices in one place), and was unindexed: 148 triangles on 444 vertices.
+
+**The shape.** Lod 3 is lod 2 vertex for vertex (the same draws from `rnd`,
+normals made with the underside still there) with those parts left out,
+and indexed: 74 triangles on 82 vertices. `buildConifer(seed, 3)`.
+
+**Where it starts.** In 256 m nodes and up (about 490 m off), which is
+everywhere lod 2 was drawn; lod 2 is now only what the shadow casters
+flatten (`caster.lod` still 2, `geos` is four per variant). Because the
+picture is the same there is no new switch to hide: the only pop is the
+one that was there, lod 1 to lod 2 when a 256 m node splits. No shader
+change, no per-frame cost. `?lod3=512` starts it a node later, `?lod3=0`
+turns it off.
+
+**Tried and dropped.** The tiers' middle ring left out as well (34
+triangles): every tree gets thinner, 1 to 9% of the frame's pixels change;
+it would need its own hidden switch a long way out for 40 triangles a
+tree. A distance switch in the node, dither and scale fades: not needed.
+
+**Measured.** Same frozen frame, far trees as lod 3 and as lod 2
+(`scripts/treelod.mjs`, `scripts/imgdiff.mjs`): of ten stills at most 0.19%
+of pixels differ (edge at 1.2 km), nearly all by under 16/255; the same
+through 71 frames of walking, sprinting and flying at a forest edge and
+away (three frames differ more: a chunk streamed in between the two
+shots). Triangles a frame at the audit's nine places, before / from 256 m
+nodes / from 512 m nodes, in M: start hilda 4.23 / 3.55 / 3.71, start 42
+4.57 / 4.07 / 4.27, start fjord 6.60 / 5.61 / 5.86, forest hilda 8.99 /
+8.18 / 8.42, forest 42 7.35 / 6.43 / 6.47, vista 5.83 / 5.04 / 5.22, high
+hilda 5.92 / 5.02 / 4.97, high fjord 4.44 / 3.61 / 3.71, night 5.17 / 4.31
+/ 4.38 (`shots/perf/counts-after.txt`). The default perf run, twice each,
+M1 Pro: 5.76 and 5.60 ms average (p99 9.2, 9.0) before, 4.20 and 4.25 (p99
+7.8, 7.8) after (`shots/perf/lod3-perf.txt`). The frame time fell by more
+than the triangles did (25% against 10 to 19%): vertices fell by 5.4x a
+far tree, so the cost looks to be vertices (the prop vertex shader reads
+two textures) more than triangles. The nine places were not timed (the
+owner skipped it). `dungeon.mjs quest` and `offering.mjs play,reload,home`
+pass on hilda and 42 (they take `$DIST` now).
+
+### Left
+- Lod 1 (472 to 496 triangles, unindexed, about 77 of them zero-area) is
+  now most of what far trees cost: 128 m nodes, 243 to 490 m off, and the
+  mid trees of 64 m nodes. Indexing it and lods 0 and 2 and dropping the
+  zero-area triangles changes no pixel; whether lod 1's undersides can go
+  needs looking at (its tongues droop, so they may show). Not done: not
+  asked.
+- Felled trees and the giant's trodden trees are per instance in the
+  vertex shader, so they hold on lod 3 by construction; not shot.
+- Still not measured on integrated graphics.

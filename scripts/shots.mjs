@@ -21,7 +21,7 @@ if (!flag('--no-build')) execSync('npx vite build --logLevel warn', { cwd: root,
 const types = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.png': 'image/png' };
 const server = http.createServer((req, res) => {
   const p = decodeURIComponent(new URL(req.url, 'http://x').pathname);
-  let f = path.join(root, 'dist', p === '/' ? 'index.html' : p);
+  let f = path.join(root, opt('--dist', 'dist'), p === '/' ? 'index.html' : p);
   if (!fs.existsSync(f)) { res.writeHead(404); res.end(); return; }
   res.writeHead(200, { 'content-type': types[path.extname(f)] ?? 'application/octet-stream' });
   fs.createReadStream(f).pipe(res);

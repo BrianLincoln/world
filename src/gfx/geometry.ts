@@ -31,8 +31,10 @@ function stripToCore(g: THREE.BufferGeometry): THREE.BufferGeometry {
 function coniferTier(opts: {
   y: number; R: number; th: number; lobes: number; segPerLobe: number; rings: number;
   ox: number; oz: number; phase: number; droop: number; rnd: () => number;
+  /** Far shape: the skirt alone (see buildConifer, lod 3). */
+  open?: boolean;
 }): THREE.BufferGeometry {
-  const { y, R, th, lobes, segPerLobe, rings, ox, oz, phase, droop, rnd } = opts;
+  const { y, R, th, lobes, segPerLobe, rings, ox, oz, phase, droop, rnd, open } = opts;
   const radial = lobes * segPerLobe;
   const pos: number[] = [];
   const idx: number[] = [];
@@ -94,20 +96,63 @@ function coniferTier(opts: {
     nn.lerp(v, 0.55).normalize();
     n.setXYZ(i, nn.x, nn.y, nn.z);
   }
+  if (open) {
+    // Shaded exactly as the whole tier (the normals above were made with the
+    // underside there), then only what shows from far off is kept: the skirt
+    // without its underside, and without the zero-area triangles at its tip.
+    const keep: number[] = [];
+    for (let r = 0; r < rings; r++) for (let k = 0; k < radial; k++) {
+      const a = ring(r, k), b = ring(r, k + 1), c = ring(r + 1, k), d = ring(r + 1, k + 1);
+      if (r > 0) keep.push(a, b, c);
+      keep.push(b, d, c);
+    }
+    g.setIndex(keep);
+  }
   return withKind(g, 0);
 }
 
-export function buildConifer(seed: number, lod: 0 | 1 | 2): THREE.BufferGeometry {
+/** As stripToCore, but still indexed, and without the vertices nothing uses. */
+function coreIndexed(g: THREE.BufferGeometry): THREE.BufferGeometry {
+  const idx = g.index!.array, map = new Map<number, number>(), out: number[] = [];
+  const names = ['position', 'normal', 'aKind'], src = names.map((k) => g.attributes[k] as THREE.BufferAttribute);
+  const data: number[][] = names.map(() => []);
+  for (let i = 0; i < idx.length; i++) {
+    let v = map.get(idx[i]);
+    if (v === undefined) {
+      v = map.size;
+      map.set(idx[i], v);
+      src.forEach((a, k) => { for (let c = 0; c < a.itemSize; c++) data[k].push(a.array[idx[i] * a.itemSize + c]); });
+    }
+    out.push(v);
+  }
+  const o = new THREE.BufferGeometry();
+  names.forEach((k, i) => o.setAttribute(k, new THREE.Float32BufferAttribute(data[i], src[i].itemSize)));
+  o.setIndex(out);
+  return o;
+}
+
+/**
+ * Lod 0 to 2 are the tree from near to. Lod 3 is for trees far enough off
+ * that a tier is a few pixels: lod 2's own tiers, trunk and crown, vertex for
+ * vertex (the same draws from `rnd`, so the outline and the bands of light
+ * are the same), without what can't be seen from there (the tiers'
+ * undersides, the caps of trunk and crown), and indexed: 74 triangles on 82
+ * vertices for lod 2's 148 on 444. Dropping the tiers' middle ring as well
+ * (34 triangles) was tried and shows: every tree gets thinner.
+ */
+export function buildConifer(seed: number, lod: 0 | 1 | 2 | 3): THREE.BufferGeometry {
   const rnd = mulberry32(seed);
   const H = TREE_HEIGHT;
   const parts: THREE.BufferGeometry[] = [];
-  const tiers = lod === 2 ? 4 : 5 + Math.floor(rnd() * 2);
+  const open = lod === 3;
+  const core = open ? coreIndexed : stripToCore;
+  const tiers = lod >= 2 ? 4 : 5 + Math.floor(rnd() * 2);
   const segPerLobe = lod === 0 ? 4 : lod === 1 ? 2 : 1;
   const rings = lod === 0 ? 3 : 2;
   // Trunk with a gentle S-curve baked in (instances add their own lean).
-  const trunk = new THREE.CylinderGeometry(0.09, 0.3, H * 0.97, lod === 0 ? 7 : 5, lod === 0 ? 4 : 1);
+  const trunk = new THREE.CylinderGeometry(0.09, 0.3, H * 0.97, lod === 0 ? 7 : 5, lod === 0 ? 4 : 1, open);
   trunk.translate(0, H * 0.485, 0);
-  parts.push(stripToCore(withKind(trunk, 1)));
+  parts.push(core(withKind(trunk, 1)));
   let ox = 0;
   let oz = 0;
   for (let i = 0; i < tiers; i++) {
@@ -115,16 +160,16 @@ export function buildConifer(seed: number, lod: 0 | 1 | 2): THREE.BufferGeometry
     const y = H * (0.25 + 0.64 * Math.pow(t, 0.9));
     const R = H * 0.19 * (1 - 0.72 * t) * (0.85 + 0.3 * rnd()) + 0.3;
     const th = H * (0.075 + 0.04 * t) * (0.9 + 0.2 * rnd());
-    const lobes = lod === 2 ? 5 : 6 + Math.floor(rnd() * 3);
+    const lobes = lod >= 2 ? 5 : 6 + Math.floor(rnd() * 3);
     ox += (rnd() - 0.5) * 0.35;
     oz += (rnd() - 0.5) * 0.35;
-    const g = coniferTier({ y, R, th: i === tiers - 1 ? th * 1.6 : th, lobes, segPerLobe, rings, ox, oz, phase: rnd() * lobes, droop: R * 0.62, rnd });
-    parts.push(stripToCore(g));
+    const g = coniferTier({ y, R, th: i === tiers - 1 ? th * 1.6 : th, lobes, segPerLobe, rings, ox, oz, phase: rnd() * lobes, droop: R * 0.62, rnd, open });
+    parts.push(core(g));
   }
   // Pointed crown.
-  const tip = new THREE.ConeGeometry(0.28, H * 0.12, lod === 0 ? 6 : 4, 1);
+  const tip = new THREE.ConeGeometry(0.28, H * 0.12, lod === 0 ? 6 : 4, 1, open);
   tip.translate(ox, H * 0.99, oz);
-  parts.push(stripToCore(withKind(tip, 0)));
+  parts.push(core(withKind(tip, 0)));
   const merged = mergeGeometries(parts)!;
   merged.computeBoundingSphere();
   return merged;

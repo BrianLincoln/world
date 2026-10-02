@@ -130,14 +130,19 @@ export class Terrain {
     }
     this.root.name = 'terrain';
 
-    const treeLods = [0, 1, 2].map((l) => buildConifer(7, l as 0 | 1 | 2));
-    const treeLods2 = [0, 1, 2].map((l) => buildConifer(31, l as 0 | 1 | 2));
+    // Trees in nodes this size and up (from about 490 m off) are the far
+    // shape, lod 3; `?lod3=512` starts it a node size later, `?lod3=0` never
+    // (then they are lod 2, as before it), to compare. Lod 2 is still what
+    // the shadow casters flatten.
+    const farSize = Number(new URLSearchParams(location.search).get('lod3') ?? 256) || Infinity;
+    const treeLods = [0, 1, 2, 3].map((l) => buildConifer(7, l as 0 | 1 | 2 | 3));
+    const treeLods2 = [0, 1, 2, 3].map((l) => buildConifer(31, l as 0 | 1 | 2 | 3));
     this.kinds = {
       trees: {
         name: 'trees',
         geos: [...treeLods, ...treeLods2],
         material: makePropMaterial({ prints: true, bend: 0.24, wind: 0.012, heightRef: TREE_HEIGHT, toneVar: 0.22, doubleSide: true, cutaway: 'occluders', harvest: { grid: TREE_CELL, chan: 0 } }),
-        lodFor: (s) => (s <= 64 ? 0 : s <= 128 ? 1 : 2),
+        lodFor: (s) => (s <= 64 ? 0 : s <= 128 ? 1 : s < farSize ? 2 : 3),
         caster: { material: makeCasterMaterial({ prints: true, bend: 0.24, wind: 0.012, heightRef: TREE_HEIGHT, harvest: { grid: TREE_CELL, chan: 0 } }), lod: 2 },
       },
       bushes: {

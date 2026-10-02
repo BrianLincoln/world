@@ -53,7 +53,7 @@ npm run shots    # build + headless GPU screenshots -> shots/   (look at them!)
   `startWoods`: forest grown round the start clearing and the way in, so the cabin is hidden round the bend; the story never plants trees;
   how much is water: `scripts/water.mjs`, about 20% since 2026-10-02),
   `chunkBuilder.ts` (worker: grid, normals, scatter), `terrain.ts`
-  (quadtree streaming, LOD, instancing), `towers.ts` (the beacon-tower
+  (quadtree streaming, LOD, instancing; trees past about 490 m are lod 3, lod 2's picture at half the triangles: check with `scripts/treelod.mjs`), `towers.ts` (the beacon-tower
   network, grown from the home tower so it always connects), `storySite.ts`
   (the guaranteed start area).
 - `src/gfx/`: `shaders.ts` (all scene GLSL), `materials.ts` (shared

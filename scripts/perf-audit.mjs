@@ -22,7 +22,7 @@ const opt = (f, d) => (args.includes(f) ? args[args.indexOf(f) + 1] : d);
 const types = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.png': 'image/png' };
 const server = http.createServer((req, res) => {
   const p = decodeURIComponent(new URL(req.url, 'http://x').pathname);
-  const f = path.join(root, 'dist', p === '/' ? 'index.html' : p);
+  const f = path.join(root, opt('--dist', 'dist'), p === '/' ? 'index.html' : p);
   if (!fs.existsSync(f)) { res.writeHead(404); res.end(); return; }
   res.writeHead(200, { 'content-type': types[path.extname(f)] ?? 'application/octet-stream' });
   fs.createReadStream(f).pipe(res);
@@ -69,21 +69,36 @@ async function waitReady(timeout = 90000) {
   return false;
 }
 
-/** Median and mean rAF interval over `ms`. */
-const frameTime = (ms = 2500) => page.evaluate((ms) => new Promise((resolve) => {
+/**
+ * Frame cost with the GPU's work waited for: frames stepped by hand, each
+ * followed by a one-pixel readPixels (gl.finish() doesn't wait in Chrome). (rAF intervals uncapped turned out to measure the
+ * compositor as much as the game: the same view read 4.7 or 13 ms depending
+ * on whether the canvas had just been resized.) `raf` is that interval, for
+ * comparison with shots.mjs --perf.
+ */
+const frameTime = (ms = 600, raf = false) => page.evaluate(([ms, raf]) => raf ? new Promise((resolve) => {
   const t = [];
   let last = performance.now();
   const t0 = last;
-  let warm = 8;
   const tick = () => {
     const now = performance.now();
-    if (warm > 0) warm--; else t.push(now - last);
+    t.push(now - last);
     last = now;
     if (now - t0 < ms) requestAnimationFrame(tick);
-    else { t.sort((a, b) => a - b); resolve({ med: t[t.length >> 1], lo: t[Math.floor(t.length * 0.1)], avg: t.reduce((a, b) => a + b, 0) / t.length, p95: t[Math.floor(t.length * 0.95)], n: t.length }); }
+    else { t.sort((a, b) => a - b); resolve({ med: t[t.length >> 1], lo: t[Math.floor(t.length * 0.1)] }); }
   };
   requestAnimationFrame(tick);
-}), ms);
+}) : (() => {
+  const ow = window.__ow, gl = ow._r.getContext(), t = [], px = new Uint8Array(4);
+  const wait = () => { gl.bindFramebuffer(gl.FRAMEBUFFER, null); gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px); };
+  ow.manual(true);
+  for (let i = 0; i < 6; i++) { ow.advance(1, 1 / 60); wait(); }
+  const t0 = performance.now();
+  while (performance.now() - t0 < ms) { const a = performance.now(); ow.advance(1, 1 / 60); wait(); t.push(performance.now() - a); }
+  ow.manual(false);
+  t.sort((a, b) => a - b);
+  return { med: t[t.length >> 1], lo: t[Math.floor(t.length * 0.1)] };
+})(), [ms, raf]);
 
 /** One frame's draws, by pass and kind. */
 const census = () => page.evaluate(() => new Promise((resolve) => {
@@ -163,18 +178,18 @@ for (const s of PLACES) {
   // Other apps share this GPU (a game tab open in a browser doubles every
   // number), so each toggle is three rounds of on / off, and the best of
   // each is kept. `lo` is the 10th percentile of the rAF intervals.
-  const ROUNDS = 3;
+  const ROUNDS = 2;
   let floor = Infinity;
   const tog = [];
   for (const g of flag('--counts') ? [] : TOGGLES) {
     let on = Infinity, off = Infinity;
     for (let k = 0; k < ROUNDS; k++) {
-      const a = await frameTime(700);
-      if (a.lo > 0) on = Math.min(on, a.lo);
+      const a = await frameTime(550);
+      if (a.med > 0) on = Math.min(on, a.med);
       await page.evaluate(g.off);
       await page.waitForTimeout(100);
-      const f = await frameTime(700);
-      if (f.lo > 0) off = Math.min(off, f.lo);
+      const f = await frameTime(550);
+      if (f.med > 0) off = Math.min(off, f.med);
       await page.evaluate(g.on);
       await page.waitForTimeout(100);
     }
@@ -182,10 +197,11 @@ for (const s of PLACES) {
     tog.push({ name: g.name, lo: off, d: off - on, on });
   }
   const b = floor;
+  const rafT = flag('--counts') ? { med: 0 } : await frameTime(1500, true);
   const t = flag('--counts') ? { full: 0, noDraw: 0 } : await cpu();
 
   console.log(`\n== ${s.name}${Array.isArray(where) ? ` at ${where.slice(0, 2).map((v) => v.toFixed(0))}` : ''}`);
-  console.log(`frame ${b.toFixed(2)} ms (best p10) | main thread ${t.full.toFixed(2)} ms, of which not drawing ${t.noDraw.toFixed(2)} | ${c.info.calls} calls, ${(c.info.tris / 1e6).toFixed(2)} M tris, ${c.nodes} nodes`);
+  console.log(`frame ${b.toFixed(2)} ms waited for (rAF interval ${rafT.med.toFixed(2)}) | main thread ${t.full.toFixed(2)} ms, of which not drawing ${t.noDraw.toFixed(2)} | ${c.info.calls} calls, ${(c.info.tris / 1e6).toFixed(2)} M tris, ${c.nodes} nodes`);
   const rows = Object.entries(c.draws).sort((a, b2) => b2[1].calls - a[1].calls);
   const passes = {};
   for (const [k, v] of rows) { const p = (passes[k.split(' ')[0]] ??= { calls: 0, tris: 0 }); p.calls += v.calls; p.tris += v.tris; }

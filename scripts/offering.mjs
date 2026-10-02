@@ -13,7 +13,7 @@
 //           lying down there, and a reload at each step (before the spirit is home, once it is, the giant
 //           walking, the giant settled). `walk=0` skips the long walk (it is put at the end of it).
 //   `sandbox`: with the story off (as scripts/dungeon.mjs quest runs): a giant is stood by the ring.
-// Uses the build in dist/ (run `npx vite build` first).
+// Uses the build in dist/, or in $DIST (run `npx vite build` first).
 import { chromium } from 'playwright';
 import http from 'node:http';
 import fs from 'node:fs';
@@ -28,7 +28,7 @@ const kinds = (args.find((a) => /^(play|reload|views|mouth|home)/.test(a)) ?? 'p
 fs.mkdirSync(dir, { recursive: true });
 const server = http.createServer((req, res) => {
   const p = decodeURIComponent(new URL(req.url, 'http://x').pathname);
-  const f = path.join(root, 'dist', p === '/' ? 'index.html' : p);
+  const f = path.join(root, process.env.DIST ?? 'dist', p === '/' ? 'index.html' : p);
   if (!fs.existsSync(f)) { res.writeHead(404); res.end(); return; }
   res.writeHead(200, { 'content-type': f.endsWith('.js') ? 'text/javascript' : f.endsWith('.html') ? 'text/html' : f.endsWith('.css') ? 'text/css' : 'application/octet-stream' });
   fs.createReadStream(f).pipe(res);

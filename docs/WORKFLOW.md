@@ -128,6 +128,27 @@ change goes through this loop:
   home from the tower (close up), keeping to itself in the village, and the
   stable beginning only once the minutes have passed and you're there. It
   prints the stage as it goes. `?cp=trudge` / `?cp=grieve` start there.
+- `scripts/perf-audit.mjs [--counts] [--only a,b] [--quick] [--dist dir] [--json f]`:
+  where the frame goes, standing still at nine places: draws and triangles
+  by pass and kind, then the frame with one thing off at a time. `--counts`
+  skips the timings (which need a quiet GPU). Its timed frames are stepped
+  by hand and waited for, so read differences, not totals.
+- `scripts/perf-profile.mjs <dir> "<query>" [secs]`: main-thread self time
+  by function; wants an unminified build (`vite build --minify false --outDir <dir>`).
+- `shots.mjs --dist <dir>` serves a build other than `dist/`.
+- `scripts/treelod.mjs <outDir> [--dist dist] [stills,edge,motion] [edge=<edge.json>] [q=&lod3=0]`:
+  distant trees. `stills` and `edge` (a forest edge from 300 m, 600 m,
+  1.2 km) shoot each view twice from one frozen frame, as built and with the
+  far trees (lod 3) drawn as lod 2 (`<name>-lod2.png`); `motion` walks,
+  sprints and flies at the edge and away, stepped by hand, and prints which
+  tree LODs are drawn at each frame. Two page loads of one view differ by
+  more than a LOD change does (clouds, wind, creatures), so compare the pair
+  from one frame: `scripts/imgdiff.mjs a.png b.png [out.png] [x,y,w,h]`
+  counts the pixels that changed and writes a / b / difference x8.
+  `?lod3=0` turns the far shape off, `?lod3=512` starts it a node size later.
+- `scripts/dungeon.mjs` and `scripts/offering.mjs` serve `$DIST` if set
+  (`DIST=dist-lod node scripts/dungeon.mjs ...`), so a session can test its
+  own build folder.
 - Perf with extra URL params: `Q='&mobs=0' node scripts/shots.mjs --no-build --only none --perf --uncapped`.
 
 ### Page hooks (`window.__ow`)
@@ -218,12 +239,20 @@ When a frame looks wrong, bisect in the page rather than guessing:
   edits and prefer targeted edits.
 
 ## Performance budget (measured on an M1 Pro, 1600×900)
-- Uncapped: ~4 ms average, p99 ~7 ms.
-- Visible load: 2.5–6 M tris and 380–580 draw calls.
+- Uncapped default run (2026-10-02, about 20% water, with the far tree
+  shape): 4.2 ms average, p99 7.8 (5.6 and 9 before that shape), **on a
+  quiet machine**. Anything else using the GPU (a game tab, another
+  session's headless browser) doubles it or worse: ask for a quiet window
+  before timing, and check a still frame at the hilda start reads about
+  6 ms (before the far shape; not re-read since).
+- Visible load: 3.5–8.2 M tris and 640–890 draw calls at the audit's nine
+  places (`shots/perf/counts-after.txt`).
 - Target mid-range iGPUs are ~3–4× slower. Adaptive quality in `main.ts`
   sheds resolution first, then terrain and prop detail.
-- Biggest costs: conifer triangles (see the `--kinds` output) and draw calls
-  (per node × prop type).
+- Biggest costs: conifer vertices (lod 1, in 128 m nodes and the mid trees
+  of 64 m nodes, is now the bulk; past about 490 m trees are lod 3, 74
+  triangles). Draw calls and the post passes are small beside them. See
+  "Perf audit" and "A far shape for distant trees" in `NOTES.md`.
 - Not yet verified on real Intel/AMD integrated hardware.
 
 ## Where to pick up
