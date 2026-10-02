@@ -177,8 +177,8 @@ export class Terrain {
     };
   }
 
-  /** Handed to the workers with every request (see WorldGen.dungeon: found once, on the main thread). */
-  dungeon: DungeonSite | null = null;
+  /** Handed to the workers with every request (see WorldGen.dungeons: found once, on the main thread). */
+  dungeons: DungeonSite[] | null = null;
 
   setSeed(seed: number) {
     if (seed === this.seed) return;
@@ -335,7 +335,7 @@ export class Terrain {
       const req = this.queue.shift()!;
       const w = this.idle.pop()!;
       (w as Worker & { gen?: number }).gen = this.generation;
-      w.postMessage(this.dungeon ? { ...req, dungeon: this.dungeon } : req);
+      w.postMessage(this.dungeons ? { ...req, dungeons: this.dungeons } : req);
     }
   }
 

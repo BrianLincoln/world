@@ -67,6 +67,14 @@ export class Trail {
     return true;
   }
 
+  /** The print at (x, z), if there is one, is filled in: level ground again. */
+  fill(x: number, z: number) {
+    const p = this.prints.at(x, z);
+    if (!p) return;
+    this.prints.erase(p);
+    for (let dz = -24; dz <= 24; dz += 12) for (let dx = -24; dx <= 24; dx += 12) this.d.colliders.invalidate(p.x + dx, p.z + dz);
+  }
+
   /** `walking`: the giant is on the move. (Stood or sat on its last prints, their steam was a cloud round it for good.) */
   update(dt: number, near: THREE.Vector3, walking: boolean) {
     // Steam off the warm ones near you: soft puffs that rise and thin.

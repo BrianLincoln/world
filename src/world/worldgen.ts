@@ -38,8 +38,10 @@ export interface PathSeg { ax: number; az: number; bx: number; bz: number; /** E
 
 /** Phase 2's guided routes: polylines (x, z) and the tower they lead to second. */
 export interface Journey { toHome: [number, number][]; toNext: [number, number][]; next: number }
-/** The first dungeon's place: a ring of tall stones where the giant's trail ends. `r` is the ring's radius. */
-export interface DungeonSite { x: number; z: number; y: number; r: number; /** The tower the way there passes (-1: none). */ tower: number; /** The way there from the yard: dry, never steep, a bike can take it. It stops short of the ring. */ way: [number, number][] }
+/** A dungeon's place: a ring of tall stones where a leg of the giant's trail ends. `r` is the ring's radius. */
+export interface DungeonSite { x: number; z: number; y: number; r: number; /** The tower the way there passes (-1: none). */ tower: number; /** The way there (the first: from the yard; each after: from where the giant lay by the one before): dry, never steep, a bike can take it. It stops short of the ring. */ way: [number, number][] }
+/** The stones of a dungeon's ring stand this far out from its middle (m). */
+const RING_R = 13;
 
 interface Peak { x: number; z: number; h: number; r: number }
 
@@ -68,9 +70,13 @@ export class WorldGen {
   private pathCache = new Map<number, PathSeg[]>();
   private _story: StorySite | null = null;
   private _journey: Journey | null = null;
-  private _dungeon: DungeonSite | null = null;
+  private _dungeons: DungeonSite[] | null = null;
+  /** The search for the sites is running: `sites` is those found so far (routing reads the POIs, which ask for them). */
   private dungeonBusy = false;
-  private wayClear: { line: [number, number][]; box: [number, number, number, number] } | null = null;
+  private sites: DungeonSite[] = [];
+  /** Dev: how long the search for each site took, if it ran here (ms). */
+  searchMs: number[] = [];
+  private wayClear: { line: [number, number][]; box: [number, number, number, number] }[] = [];
   private journeyBox: [number, number, number, number] | null = null;
   private _towers: TowerNet | null = null;
   private towerCells: Map<number, number[]> | null = null;
@@ -118,17 +124,26 @@ export class WorldGen {
   }
 
   /**
-   * Use a dungeon site found earlier (the search runs a path-finder over a
-   * dozen or more candidates and takes seconds: the main thread does it once
-   * per seed and hands the answer to the chunk workers and to later loads).
+   * Use dungeon sites found earlier (the search runs a path-finder over a
+   * dozen or more candidates for each and takes seconds: the main thread does
+   * it once per seed and hands the answer to the chunk workers and to later
+   * loads).
    */
-  presetDungeon(d: DungeonSite) {
-    this._dungeon = d;
-    // For keeping the wild biomes off the way: a coarser line and its box.
-    const w = d.way.filter((_, i) => i % 4 === 0 || i === d.way.length - 1);
-    let x0 = Infinity, z0 = Infinity, x1 = -Infinity, z1 = -Infinity;
-    for (const p of w) { x0 = Math.min(x0, p[0]); z0 = Math.min(z0, p[1]); x1 = Math.max(x1, p[0]); z1 = Math.max(z1, p[1]); }
-    this.wayClear = { line: w, box: [x0 - 80, z0 - 80, x1 + 80, z1 + 80] };
+  presetDungeons(list: DungeonSite[]) {
+    this._dungeons = list;
+    this.know(list);
+  }
+
+  /** These are the sites there are (so far): their rings stand, and their ways are kept clear. */
+  private know(list: DungeonSite[]) {
+    this.sites = list;
+    // For keeping the wild biomes off each way: a coarser line and its box.
+    this.wayClear = list.map((d) => {
+      const w = d.way.filter((_, i) => i % 4 === 0 || i === d.way.length - 1);
+      let x0 = Infinity, z0 = Infinity, x1 = -Infinity, z1 = -Infinity;
+      for (const p of w) { x0 = Math.min(x0, p[0]); z0 = Math.min(z0, p[1]); x1 = Math.max(x1, p[0]); z1 = Math.max(z1, p[1]); }
+      return { line: w, box: [x0 - 80, z0 - 80, x1 + 80, z1 + 80] as [number, number, number, number] };
+    });
     this.poiCache.clear();
     this.pathCache.clear();
   }
@@ -149,11 +164,101 @@ export class WorldGen {
    * and of the start. A pure function of the seed, like the start site:
    * chunk workers stand the stones.
    */
-  get dungeon(): DungeonSite {
-    if (!this._dungeon) {
+  get dungeon(): DungeonSite { return this.dungeons[0]; }
+
+  /**
+   * Every dungeon's site, in the order the giant comes to them: the first
+   * (above), and the one it walks on to when the first is done (`nextSite`).
+   * Found one after another, each with the ones before it already standing,
+   * so the first is exactly what it was when it was the only one.
+   */
+  get dungeons(): DungeonSite[] {
+    if (!this._dungeons) {
+      // Routing reads the POIs, which ask for the sites: only those found so far are there.
+      this.dungeonBusy = true;
+      this.know([]);
+      const t0 = Date.now();
+      const first = this.firstSite();
+      // (Cells looked at meanwhile were made without the ring: `know` throws them away.)
+      this.know([first]);
+      const t1 = Date.now();
+      const second = this.nextSite(first);
+      this.searchMs = [t1 - t0, Date.now() - t1];
+      this.dungeonBusy = false;
+      this.presetDungeons([first, second]);
+    }
+    return this._dungeons!;
+  }
+
+  /** Can a ring stand at (x, z)? Level (`lax`: how much less so will do), dry, not high, with dry ground about it and no tower near. */
+  private ringFits(x: number, z: number, lax: number): DungeonSite | null {
+    const R = RING_R, h = this.baseHeight(x, z);
+    if (h < 6 || h > 140) return null;
+    let rough = 0, low = Infinity;
+    for (let k = 0; k < 8; k++) {
+      const b = (k / 8) * Math.PI * 2;
+      rough = Math.max(rough, Math.abs(this.baseHeight(x + Math.cos(b) * (R + 4), z + Math.sin(b) * (R + 4)) - h));
+      low = Math.min(low, this.baseHeight(x + Math.cos(b) * 45, z + Math.sin(b) * 45));
+    }
+    if (rough > 2.6 * lax || low < 2.5) return null;
+    if (this.towers.towers.some((t) => Math.hypot(t.x - x, t.z - z) < 160)) return null;
+    return { x, z, y: h, r: R, tower: -1, way: [] };
+  }
+
+  /**
+   * Where the giant goes when the dungeon at `prev` is done: another ring,
+   * 0.9-1.5 km on, by a dry way a bike can take from where it lay (the end of
+   * the way to `prev`), round `prev`'s ring and not through it. On, not back:
+   * the further side of `prev` from the village is preferred, and nowhere
+   * within 900 m of the yard will do.
+   */
+  private nextSite(prev: DungeonSite): DungeonSite {
+    const st = this.story;
+    const yard = st.village?.lane[0] ?? { x: st.x, z: st.z };
+    const from = prev.way[prev.way.length - 1] ?? [prev.x, prev.z];
+    const ol = Math.hypot(prev.x - yard.x, prev.z - yard.z) || 1, ox = (prev.x - yard.x) / ol, oz = (prev.z - yard.z) / ol;
+    const off = [prev.x, prev.z, prev.r + 30];
+    // (Nor by a tower's feet: the giant treads 14 m either side of the line. Seen on `hildaz2` once the land moved.)
+    for (const t of this.towers.towers) if (Math.hypot(t.x - prev.x, t.z - prev.z) < 2400) off.push(t.x, t.z, 75);
+    const short = (c: DungeonSite): [number, number] => { const l = Math.hypot(c.x - from[0], c.z - from[1]) || 1; return [c.x - ((c.x - from[0]) / l) * 48, c.z - ((c.z - from[1]) / l) * 48]; };
+    const sweep = (lax: number) => {
+      const cands: { c: DungeonSite; score: number }[] = [];
+      for (const r of [1200, 1050, 1350, 900, 1500]) for (let ai = 0; ai < 48; ai++) {
+        const a = (ai / 48) * Math.PI * 2 + hash01(Math.round(r), 1, this.seed, 954);
+        const x = prev.x + Math.cos(a) * r, z = prev.z + Math.sin(a) * r;
+        if (Math.hypot(x - yard.x, z - yard.z) < 900) continue;
+        const c = this.ringFits(x, z, lax);
+        if (!c) continue;
+        const on = (Math.cos(a) * ox + Math.sin(a) * oz);
+        cands.push({ c, score: on * 8 - this.forestBase(x, z, c.y) * 6 - Math.abs(r - 1200) * 0.004 - c.y * 0.02 });
+      }
+      return cands.sort((p, q) => q.score - p.score);
+    };
+    // (Fewer goes at it than the first gets: every way that fails is a path-finder run to exhaustion.)
+    for (const [lax, steep] of [[1, 0.34], [1.8, 0.5], [2.6, Infinity]]) {
+      for (const k of sweep(lax).slice(0, 4)) {
+        const end = short(k.c);
+        const way = this.route(from[0], from[1], end[0], end[1], steep, off);
+        if (way.length > 2) return { ...k.c, way };
+      }
+    }
+    // No way reaches anywhere: the best place a ring can stand, and a straight line to short of it (as for the first).
+    const pick = sweep(1)[0]?.c ?? sweep(2.6)[0]?.c;
+    if (pick) {
+      const end = short(pick), l = Math.hypot(end[0] - from[0], end[1] - from[1]), n = Math.max(1, Math.ceil(l / 40));
+      for (let i = 0; i <= n; i++) pick.way.push([from[0] + (end[0] - from[0]) * (i / n), from[1] + (end[1] - from[1]) * (i / n)]);
+      return pick;
+    }
+    // Last resort: 1.2 km straight on, wherever that is.
+    const x = prev.x + ox * 1200, z = prev.z + oz * 1200;
+    return { x, z, y: Math.max(this.baseHeight(x, z), 3), r: RING_R, tower: -1, way: [[from[0], from[1]], [x - ox * 48, z - oz * 48]] };
+  }
+
+  private firstSite(): DungeonSite {
+    {
       const st = this.story, net = this.towers;
       const yard = st.village?.lane[0] ?? { x: st.x, z: st.z };
-      const R = 13;
+      const R = RING_R;
       // The tower nearest the straight way there, between a quarter and 85% of the way along.
       const towerBy = (x: number, z: number) => {
         const dx = x - yard.x, dz = z - yard.z, l2 = dx * dx + dz * dz;
@@ -190,24 +295,10 @@ export class WorldGen {
         c.way = way;
         return true;
       };
-      // Routing reads the POIs, which ask for the dungeon: it isn't there yet.
-      this.dungeonBusy = true;
       // First, outward from a tower, so the way is sure to go by one: to a
       // point 130 m to one side of it (its hill is steep), then on 350-650 m
       // past it to the ring.
-      const fit = (x: number, z: number, lax: number): DungeonSite | null => {
-        const h = this.baseHeight(x, z);
-        if (h < 6 || h > 140) return null;
-        let rough = 0, low = Infinity;
-        for (let k = 0; k < 8; k++) {
-          const b = (k / 8) * Math.PI * 2;
-          rough = Math.max(rough, Math.abs(this.baseHeight(x + Math.cos(b) * (R + 4), z + Math.sin(b) * (R + 4)) - h));
-          low = Math.min(low, this.baseHeight(x + Math.cos(b) * 45, z + Math.sin(b) * 45));
-        }
-        if (rough > 2.6 * lax || low < 2.5) return null;
-        if (net.towers.some((t) => Math.hypot(t.x - x, t.z - z) < 160)) return null;
-        return { x, z, y: h, r: R, tower: -1, way: [] };
-      };
+      const fit = (x: number, z: number, lax: number) => this.ringFits(x, z, lax);
       const near = net.towers.map((t) => ({ t, d: Math.hypot(t.x - yard.x, t.z - yard.z) })).filter((k) => !k.t.home && k.d > 300 && k.d < 1200).sort((p, q) => Math.abs(p.d - 700) - Math.abs(q.d - 700)).slice(0, 5);
       // (Clear of the home tower by less, or not at all, only if there's no way otherwise.)
       for (const hc of [HOME_CLEAR, 60, 0]) {
@@ -272,10 +363,6 @@ export class WorldGen {
         }
         if (best) break;
       }
-      this.dungeonBusy = false;
-      // Cells looked at meanwhile were made without the ring.
-      this.poiCache.clear();
-      this.pathCache.clear();
       if (!best) {
         // No way reaches anywhere. Then at least somewhere a ring can stand: the most level, open, dry spot
         // of the same sweep, and a straight line to 48 m short of it for a way (the giant doesn't mind what it
@@ -301,9 +388,8 @@ export class WorldGen {
         const x = yard.x + ((nx.x - yard.x) / dl) * 1200, z = yard.z + ((nx.z - yard.z) / dl) * 1200;
         best = { x, z, y: Math.max(this.baseHeight(x, z), 3), r: R, tower: -1, way: [[yard.x, yard.z], [x, z]] };
       }
-      this.presetDungeon(best);
+      return best;
     }
-    return this._dungeon!;
   }
 
   /**
@@ -504,7 +590,8 @@ export class WorldGen {
   /** Land factor 0 (open sea) .. 1 (inland). */
   landAt(x: number, z: number): number {
     const c = this.nCont.fbm(x / 5600 + 3.1, z / 5600 - 1.7, 4);
-    return smoothstep(-0.2, 0.1, c + 0.08);
+    // (Less water, 2026-10-02: the bias was 0.08, which left about 45% of the map under the sea.)
+    return smoothstep(-0.2, 0.1, c + 0.26);
   }
 
   /** Height without POI flattening. */
@@ -514,11 +601,14 @@ export class WorldGen {
     const wz = z + 220 * nw.fbm(x / 1500 + 41.3, z / 1500 - 17.9, 3);
 
     const land = this.landAt(wx, wz);
-    let h = lerp(-34, 5, land);
+    // (Inland ground used to sit at 5 m, and every hollow in the hills was a pond.)
+    let h = lerp(-34, 13, land);
 
     // Gently rolling hills everywhere on land, softer at sea.
     const hills = this.nHills.fbm(wx / 560, wz / 560, 4);
-    h += hills * 30 * (0.3 + 0.7 * land);
+    // Hollows are shallower than the hills are high: on full land they stay above the sea, so
+    // lakes are made by the land mask and the valleys, not scattered by this.
+    h += (hills < 0 ? hills * 0.4 : hills) * 30 * (0.3 + 0.7 * land);
 
     // Highland massifs: rounded mounds, squared for soft bases.
     const hlRaw = this.nHigh.fbm(wx / 3200 + 11, wz / 3200 - 7, 3);
@@ -537,12 +627,16 @@ export class WorldGen {
     const vz = wz + 300 * nw.noise(wx / 2600 + 9, wz / 2600 + 3);
     const v = Math.abs(this.nValley.fbm(vx / 2600, vz / 2600, 3));
     const mask = smoothstep(-0.12, 0.2, this.nMask.fbm(x / 5200 - 7, z / 5200 + 2, 2));
-    const width = 0.035 + 0.035 * mask;
+    const width = (0.035 + 0.035 * mask) * 0.85;
     // U profile: k = (1 - t^2)^2 -> flat floor, smooth rim, steepest mid-wall.
     const t = Math.min(1, v / (width * 3));
     const k = (1 - t * t) * (1 - t * t) * mask;
     if (k > 0) {
-      const floor = -8 - 22 * hl;
+      // Sills: along about a third of a lowland valley's length its floor comes up out of the
+      // water (to 6 m), so a valley is a chain of lakes with dry ground between and not one
+      // ribbon that cuts the map in two. Highland fjords keep their water.
+      const sill = smoothstep(0.05, 0.3, this.nMask.noise(x / 1500 + 31.7, z / 1500 - 13.3)) * (1 - hl);
+      const floor = -8 - 22 * hl + sill * 14;
       h = lerp(h, Math.min(h, floor), k);
     }
     return h;
@@ -679,14 +773,15 @@ export class WorldGen {
       const t = ((x - y.x) * dx + (z - y.z) * dz) / dl;
       if (t > -2 && t < HOME_VIEW && Math.abs((x - y.x) * dz - (z - y.z) * dx) / dl < 4 + r + t * 0.05) return true;
     }
-    // The giant's way to the first dungeon is open ground, village to ring:
+    // The giant's way to each dungeon is open ground, village to ring and ring to ring:
     // a clear swath wide enough for both its feet (and a bike).
-    if (kind !== 'tuft' && !this.dungeonBusy) {
-      void this.dungeon;
-      const wc = this.wayClear!;
-      if (x > wc.box[0] && x < wc.box[2] && z > wc.box[1] && z < wc.box[3]) {
-        const w = (kind === 'rock' ? 17 : 23) + r;
-        for (let i = 0; i + 1 < wc.line.length; i++) if (segDist(x, z, { ax: wc.line[i][0], az: wc.line[i][1], bx: wc.line[i + 1][0], bz: wc.line[i + 1][1] }) < w) return true;
+    if (kind !== 'tuft') {
+      if (!this.dungeonBusy) void this.dungeons;
+      for (const wc of this.wayClear) {
+        if (x > wc.box[0] && x < wc.box[2] && z > wc.box[1] && z < wc.box[3]) {
+          const w = (kind === 'rock' ? 17 : 23) + r;
+          for (let i = 0; i + 1 < wc.line.length; i++) if (segDist(x, z, { ax: wc.line[i][0], az: wc.line[i][1], bx: wc.line[i + 1][0], bz: wc.line[i + 1][1] }) < w) return true;
+        }
       }
     }
     if (x < st.box[0] || x > st.box[2] || z < st.box[1] || z > st.box[3]) return false;
@@ -747,7 +842,9 @@ export class WorldGen {
   /** The forest field before the wild biomes (what the story, towers and POIs were placed on). */
   private forestBase(x: number, z: number, h: number): number {
     const f = this.nForest.fbm(x / 460, z / 460, 4) + 0.25 * this.nForest2.noise(x / 90, z / 90);
-    let d = smoothstep(0.0, 0.16, f + 0.02);
+    // (Was `f + 0.02`. With less water there is half as much land again, and so half as many trees
+    // again in view: thinned to about 29% of the land from 36% to pay some of that back.)
+    let d = smoothstep(0.0, 0.16, f - 0.06);
     d *= 1 - smoothstep(TREE_LINE - 45, TREE_LINE, h);
     d *= smoothstep(1.8, 4.5, h);
     return d;
@@ -795,14 +892,15 @@ export class WorldGen {
         k *= smoothstep(25, 70, d);
       }
     }
-    // Nor the giant's way to the first dungeon: you follow its prints on foot or by bike.
-    if (k > 0 && !this.dungeonBusy) {
-      void this.dungeon;
-      const wc = this.wayClear!;
-      if (x > wc.box[0] && x < wc.box[2] && z > wc.box[1] && z < wc.box[3]) {
-        let d = Infinity;
-        for (let i = 0; i + 1 < wc.line.length; i++) d = Math.min(d, segDist(x, z, { ax: wc.line[i][0], az: wc.line[i][1], bx: wc.line[i + 1][0], bz: wc.line[i + 1][1] }));
-        k *= smoothstep(30, 75, d);
+    // Nor the giant's ways to the dungeons: you follow its prints on foot or by bike.
+    if (k > 0) {
+      if (!this.dungeonBusy) void this.dungeons;
+      for (const wc of this.wayClear) {
+        if (x > wc.box[0] && x < wc.box[2] && z > wc.box[1] && z < wc.box[3]) {
+          let d = Infinity;
+          for (let i = 0; i + 1 < wc.line.length; i++) d = Math.min(d, segDist(x, z, { ax: wc.line[i][0], az: wc.line[i][1], bx: wc.line[i + 1][0], bz: wc.line[i + 1][1] }));
+          k *= smoothstep(30, 75, d);
+        }
       }
     }
     return k;
@@ -961,8 +1059,8 @@ export class WorldGen {
 
     // The story set: nothing natural too close to it, plus its own POIs.
     const st = this.story;
-    const dg = this.dungeonBusy ? { x: 1e9, z: 1e9, y: 0, r: 0, tower: -1, way: [] } : this.dungeon;
-    const keep = out.filter((p) => Math.hypot(p.x - st.x, p.z - st.z) > 110 && Math.hypot(p.x - st.far.x, p.z - st.far.z) > 45 && Math.hypot(p.x - dg.x, p.z - dg.z) > 70 &&
+    const dgs = this.dungeonBusy ? this.sites : this.dungeons;
+    const keep = out.filter((p) => Math.hypot(p.x - st.x, p.z - st.z) > 110 && Math.hypot(p.x - st.far.x, p.z - st.far.z) > 45 && dgs.every((dg) => Math.hypot(p.x - dg.x, p.z - dg.z) > 70) &&
       !(p.x > st.box[0] - 20 && p.x < st.box[2] + 20 && p.z > st.box[1] - 20 && p.z < st.box[3] + 20));
     out.length = 0;
     // Nothing else crowds a beacon tower's hilltop.
@@ -973,14 +1071,15 @@ export class WorldGen {
       out.push({ kind: 'tower', tower: id, x: t.x, z: t.z, y: t.y, rot: t.yaw, clear: t.foot * 1.5 + 16, boulders: [...t.boulders, t.head] });
     }
     const inThis = (x: number, z: number) => Math.floor(x / POI_CELL) === cx && Math.floor(z / POI_CELL) === cz;
-    // The first dungeon's ring: nine tall dark stones, none fallen.
-    if (inThis(dg.x, dg.z)) {
+    // A dungeon's ring: nine tall dark stones, none fallen.
+    for (const [n, dg] of dgs.entries()) {
+      if (!inThis(dg.x, dg.z)) continue;
       const boulders: Boulder[] = [];
       for (let k = 0; k < 9; k++) {
         const a = (k / 9) * Math.PI * 2 + 0.2;
         const bx = dg.x + Math.cos(a) * dg.r, bz = dg.z + Math.sin(a) * dg.r;
-        const sy = 3.6 + hash01(k, 1, this.seed, 951) * 1.6;
-        boulders.push({ x: bx, y: this.baseHeight(bx, bz) + sy * 0.6, z: bz, sx: 1.25 + hash01(k, 2, this.seed, 952) * 0.4, sy, rot: a });
+        const sy = 3.6 + hash01(k + n * 16, 1, this.seed, 951) * 1.6;
+        boulders.push({ x: bx, y: this.baseHeight(bx, bz) + sy * 0.6, z: bz, sx: 1.25 + hash01(k + n * 16, 2, this.seed, 952) * 0.4, sy, rot: a });
       }
       out.push({ kind: 'circle', x: dg.x, z: dg.z, y: dg.y, rot: 0, clear: dg.r + 8, boulders });
     }

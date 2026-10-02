@@ -45,6 +45,9 @@ change goes through this loop:
 - `scripts/mill.mjs <dir>`: the village milling about (one in at its door and
   out again, two talking in the lane, then the lane left to itself with what
   each is doing printed). It drives `Village`'s private `go` / `meet`.
+- `scripts/rebuild.mjs <dir> [seed=..] [t=..]`: a house being built again,
+  steps 0 to 5 of each of the three huts, from the lane and from above, and
+  `sheet.png` with all of them; prints what's underfoot at each step.
 - `scripts/village.mjs <dir> [seed=..] [survey]`: the village lane from above,
   from the yard and from its far end (day, dusk, night), each kind of house
   at eye level, and a footprint on a house for scale. `survey` lists which
@@ -68,6 +71,31 @@ change goes through this loop:
   and with every lantern lit, and the build hitch. Needs `npx vite build`
   first. It injects `window.__bot` (walk to a place, hop a stone, stand
   somewhere): places are `layout.at`'s names.
+- `scripts/water.mjs [km=12] [step=40] [png=out.png] [seed ...]`: how much
+  of each seed's world is water (a square round the start site: water, shore
+  flats, how much of the land near the start you can reach dry, lakes, forest),
+  and with `png=` a map of each. Runs `worldgen.ts` in node, no build, about
+  3 s a seed. Run it before and after anything that touches `baseHeight`.
+- `scripts/sites.mjs [map.png] <seed> ...`: the dungeon sites per seed
+  (where, how far, the way's length, how long each search took), a
+  fingerprint of the first site and of the visit's footfalls (neither may
+  change when a later site is added: compare before and after), and the
+  walk on to the second ring (a footfall on a ring or a tower fails it;
+  `wades` counts those in water, which only a fallback site should have;
+  each site says `fallback: true` if no route reached it and its way is the
+  straight line, and `wetPts`, its way's points in water).
+  With a `.png` it draws each seed from above: ways, footfalls, rings.
+- `scripts/rise.mjs <dir> [seed=..] [dist=210] [face=1.2]`: the giant getting
+  up and lying down again, close to, from the air (the explorer hidden).
+- `scripts/offering.mjs <dir> home [seed=..] [sandbox] [walk=0]`: slice C,
+  from the smile on: a shot a second through the crow leaving, the
+  village and the giant getting up, then from the saddle, then a reload at
+  every step. **Under the veil the land is built by workers, which need
+  real time:** the script's `step` gives it to them while
+  `__ow.homecoming().waiting`; a bare `advance(n)` across the cut times
+  out the veil (20 s of game time) and shows unbuilt land. `sandbox` walks
+  the giant all the way to the second ring (about two minutes of game
+  time).
 - `scripts/offering.mjs <dir> [seed=..] [t=22.5] [every=1] [sandbox] [play,reload,views]`:
   the offering (dungeon 1, slice B), in the story from `?cp=ring` as if the
   light had just been taken. It is a cutscene, so `play` only holds W from
@@ -138,7 +166,7 @@ deterministic).
 Story and life: `story=0|1` (it's off by default when `t`, `x` or
 `mode=fly` is set), `fresh=1` (forget saves), `journey=<stage>`,
 `stable=<step>`, `cp=<id>` (with `fresh=1`: any checkpoint in `ui/checkpoints.ts`; the \` key shows a strip to step through them), `debug=1` (keep the panel during the story), `mobs=<density>`,
-`bikes=0`, `drak=0` (the temporary drakitten landing), `eyes=round`,
+`bikes=0`, `eyes=round`,
 `giant=<metres>[,walk]` (stand the giant in view, or walk it across),
 `dungeon=1` or `dungeon=<x>,<z>` (start inside dungeon 1, at a point of its plan).
 
@@ -176,6 +204,15 @@ When a frame looks wrong, bisect in the page rather than guessing:
   makes sawtooth shores.
 - **Framing shots:** random spawns land in forests. Use `lookAtPoi` and
   `facePeak`, and prefer open ground when choosing positions.
+- **A camera that goes somewhere you aren't** (the homecoming's cut to the
+  village): the terrain streams by the camera, so it loads; but anything
+  the story keeps by *your* position doesn't, and the ground the story
+  knows (`gen.height`) is not the ground you see where the giant has trodden
+  (`trail.height`). The first village camera sat in a footprint looking at
+  its wall. Check the sightline against the ground.
+- **Two sets of the giant's prints along one line eat each other**
+  (`world/prints.ts` keeps one print per 12 m cell). Where its way on runs
+  back along its way in, it treads in its own prints (`onwardRoute`).
 - **Scripted edits:** a Python `s[s.index(a):s.index(b)]` slice came back
   empty once, and `replace('', x)` destroyed `main.ts`. Commit before bulk
   edits and prefer targeted edits.

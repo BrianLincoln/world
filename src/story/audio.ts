@@ -163,6 +163,15 @@ export class Sfx {
     this.tone('sine', 1200, 1500, t, { a: 0.005, d: 0.06, peak: 0.16 });
   }
 
+  /** A big bird's foot put down: a soft pat and a scuff of grit. */
+  step() {
+    if (!this.ok) return;
+    const t = this.ctx!.currentTime + 0.005;
+    const k = 0.9 + Math.random() * 0.2;
+    this.tone('sine', 210 * k, 110, t, { a: 0.003, d: 0.07, peak: 0.16 });
+    this.noise(t, { a: 0.002, d: 0.06, peak: 0.12 }, 'bandpass', 1500 * k, 700, 1.2);
+  }
+
   /** Axe into wood: a woody knock, a bright bite and a crunch of chips. */
   chop() {
     if (!this.ok) return;

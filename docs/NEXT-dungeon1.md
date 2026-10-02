@@ -2,16 +2,19 @@
 
 First written 2026-10-01 after the owner played the first slice; brought up
 to date after slice A, and again after slice B (the offering) was built.
-**Slices A and B are built. Slice B has not been played by the owner yet.
-Next to build: slice C, once the owner has played B.**
+**All three slices are built (slice C on 2026-10-02: `NOTES.md`, "Dungeon
+1, slice C: the homecoming"). Slice C has not been played by the owner.
+What comes next, and the questions slice C raised, are in
+`docs/NEXT-dungeon2.md`. This file is kept for the owner's notes and the
+reasoning.**
 Read `CLAUDE.md` first, then this, then in `NOTES.md` everything from
 "Dungeon 1, slice A" to the end, then `src/dungeon/`, `src/giant/`
 (`offering.ts`, `ring.ts`, `giant.ts`, `visit.ts`, `birds.ts`). Work on
 master, don't commit unless asked, verify with screenshots
 (`docs/WORKFLOW.md`).
 
-**Slice B is uncommitted**, in the working tree on top of `7901917`. Ask
-the owner before committing.
+**Slice C is uncommitted**, in the working tree. Ask the owner before
+committing.
 
 ## The owner's notes, verbatim
 
@@ -85,7 +88,8 @@ Above ground, after the light is taken (`src/giant/offering.ts`; NOTES.md,
   light and is gone; the mouth shuts and it smiles. No guide: it stays at
   home. (A hand held out and a fist closing were built twice and thrown
   away: its hands are boulders.)
-- **Where it ends:** you have your hands back, on the rockhopper. The
+- **Where the offering ends** (the homecoming, slice C, now carries
+  straight on from here): on the rockhopper. The
   giant is still lying where it settled, arms down at its sides, awake
   (`awake`), eyes half open, a small smile, looking at the shrine. The
   crow that went in is gone. The other crows still roost in its trees
@@ -183,7 +187,10 @@ Holes and decisions for slice B:
 - What happens to the dark spirit over the ring once the dungeon is done:
   not decided. Leave it watching.
 
-### Slice C: the spirit goes home and the giant moves on
+### Slice C: the spirit goes home and the giant moves on: BUILT
+
+Built as below, with the defaults taken; what each default was is listed in
+`docs/NEXT-dungeon2.md`. The rest of this section is the brief as it stood.
 
 1. Cut to a crow carrying a spirit's light to the village, the spirit
    back on its doorstep.
@@ -269,4 +276,4 @@ Still open:
   its mouth, arms down) look right? Not yet played.
 - What the stone hands out in the world do (they're placed, and inert).
 - How the village's mending is shown (a step per dungeon finished, to
-  start with).
+  start with). A first step is built; see `docs/NEXT-dungeon2.md`.

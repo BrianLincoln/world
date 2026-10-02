@@ -8,7 +8,7 @@ self.onmessage = (e: MessageEvent<ChunkRequest>) => {
   const req = e.data;
   if (!gen || gen.seed !== req.seed) {
     gen = new WorldGen(req.seed);
-    if (req.dungeon) gen.presetDungeon(req.dungeon);
+    if (req.dungeons) gen.presetDungeons(req.dungeons);
   }
   const r = buildChunk(gen, req);
   const transfer = [r.positions, r.normals, r.biome, r.trees, r.bushes, r.rocks, r.tufts, r.flowers, r.cabins].map((a) => a.buffer);

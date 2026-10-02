@@ -1846,9 +1846,10 @@ and sat down. Now:
   then flip butt-down (`upr`) and descend no faster than a 5 m/s² burn can
   stop, landing on pads 2.4 m apart. A herd moving on (`walk`) hops the
   same way. Flock mode `arrive` until all are down.
-- **TEMP**: `main.ts` lands a crew in the cabin's front yard 2.5 s after
-  load (`?drak=0` off; skipped with `capture`). `__ow.drakArrive()`.
-  Remove before shipping.
+- **Dev**: `__ow.drakArrive()` lands a crew in front of you (in the
+  cabin's front yard if you're home). The landing 2.5 s after every load
+  was a test and is gone (2026-10-02); `drak=0` in the scripts' URLs now
+  does nothing.
 - **Script**: `scripts/drakitten.mjs <dir> [land|look|ride]`.
 - **Next**: rocket sound; a heat gauge; a perf pass with several crews in view.
 - **Wurm: snake steering and wall climbing (`movement.ts`).** New trait
@@ -1898,9 +1899,6 @@ what's missing, and the first slice. Nothing below is built.
 - `mobs/types.ts`'s header comment says a mob can be ridden only once
   stabled. `Mobs.mountable` takes any tamed mob (bareback riding). The
   comment is stale; the code and DESIGN.md agree.
-- **The drakitten TEMP demo is still live** (`drakDemoT` in `main.ts`): a
-  crew lands in the yard 2.5 s after every load unless `?drak=0` or
-  `capture`. It would ship with a deploy.
 - A lot of this is uncommitted in the working tree (drakitten, the lasso
   lesson, the pointer, the wurm's snake steering, the usher).
 
@@ -3783,3 +3781,541 @@ frames (and back up as fast), the camera with it.
   (`uHeadInv`: within 0.86 of the head's unit space, or anything within its bounds seen through the hole).
 - Check with `scripts/offering.mjs <dir> mouth`: the open mouth from three sides, then a frame every 0.2 s
   of the crow going in.
+
+## Music: one exploration loop (2026-10-01)
+
+- **What:** the bed / air / night layer / pluck mix of "Ambient soundtrack"
+  above is gone. `src/audio/ambience.ts` now loops one file,
+  `warm_field_v3_exploration_loop` (76 s), everywhere outdoors, at any
+  hour, home or away. It never restarts while it sounds.
+- **Why:** the owner wants to play with this one piece and decide whether
+  it's the right musical language before any variations (home, night,
+  highland, bog, flying, giant) or adaptive switching are made. Don't add
+  musical layers or noise under it until asked.
+- **Volume:** `Ambience.gains.music` (0.35; 1 is the file as made), also
+  "Music > volume" in the panel. Separate from the effects' gain in
+  `story/audio.ts`.
+- **Fades:** `FADE` = 8 s in and out, squared so it's even to the ear. It
+  fades in on the first gesture, and out for `hush` (the giant's visit, the
+  offering, inside the dungeon), then back in.
+- **Kept from before:** the padded-MP3 seamless loop (`PAD`, `LEN`), the
+  `Sfx` context and own path past the compressor, silence while muted or
+  hidden, dropping the decoded samples 45 s after falling silent.
+  `atHome()` in main.ts went with the home bed; it's in git if a home
+  variation wants it.
+
+## Flying on foot is a dev setting (2026-10-01)
+- **F no longer flies by default.** It only does while "Player > F flies
+  (dev)" is ticked in the panel (H), or after `?fly=1` (`?fly=0` clears it).
+  Kept per browser in `ow.devFly`. Unticking while flying drops you to walk.
+- **Touch:** the Fly button shows only while that setting is on, so players
+  on phones never see it; `?fly=1` is the way to get it there (no panel on
+  touch).
+- **Unchanged:** `?mode=fly`, `__ow.setMode('fly')`, the panel's mode list
+  and the debug jumps still put you in fly mode regardless; the setting only
+  gates the F key and the touch button. "F fly" is gone from the help line.
+
+## The offering's crow walks (2026-10-01)
+- **It walks to the bowl and back instead of hopping.** The giant's crows
+  (`giant/birds.ts`) now have legs (the world crow's, from `crowParts`) and
+  the world crow's walk: a `stand` bird walks whenever its owner moves it,
+  paced by the distance covered (stride, waddle, head-bob), and its feet
+  come together when it stops. `offering.ts` only slides it between its
+  marks (`T.walk` in, `T.back` out); a soft `Sfx.step` at each footfall.
+- **Legs elsewhere:** tucked back in the air (down for the last of a dive
+  that ends standing), not drawn on a perch. Standing height is `STAND`
+  (feet on the ground), so the stretch for the bowl is a small tiptoe
+  (`Bird.reach` lengthens the legs to match).
+- **No pause on landing:** it comes down and walks straight on (the look
+  at you, `T.look`, is gone). The walk in starts at a trot and slows to a
+  stop (`carry`), and `Birds` now shuts the wings and sits the body up over
+  a moment (`Bird.shut`) instead of snapping, for every crow.
+- **The sequence is 0.35 s shorter up to the take** (2.8 s walking in, where
+  the look and five hops took 3.15 s).
+- **Checked** with `scripts/offering.mjs <dir> every=0.5 play`: passes;
+  frames show feet on the paving, mid-stride legs, and the beak at the bowl.
+
+## The send-off starts where you are (2026-10-01)
+- **Bug:** the send-off only ran while you stood "in the village" (32 m of
+  the cabin or lane), but the pasture is ~53 m out. Ride or lead a creature
+  in and stay by the stable, and the spirit cheered, went to the fence, then
+  pottered: it never pointed you at the trail unless you happened to walk
+  into the yard. (`scripts/sendoff.mjs` teleports to the yard, so it passed.)
+- **Now** "at home" for the send-off is the village *or* within `PASTURE_R`
+  of the pasture fence (`atHome`). It also comes over to you first
+  (`send: 'come'`) rather than beckoning from across the yard, and if you
+  leave it pointing at the trail's edge and go back home, after `SEND_LEFT`
+  seconds it comes and starts over.
+
+### The crow takes the light in its claws (2026-10-01)
+- Owner's change: no more beak. The crow lands and walks up as before, then
+  sinks on its legs, hops up over the bowl with its wings out and closes its
+  claws on the light (`CROUCH_T`, `SNATCH` in `offering.ts`). It doesn't land
+  again: it backs off and up (`hang`), beating on the spot (`hover`), turns to
+  the giant, and flies into the mouth from there. The walk back out (`turn`,
+  `back`, `wayOut`) is gone.
+- `Bird.grab` (birds.ts): in the air, legs held straight down under it
+  whatever the body's pitch, instead of tucked back. The light rides between
+  its feet (`grip` + a little forward), and eases to the usual hang under it
+  as it grows on the way up.
+
+## Dungeon 1, slice C: the homecoming (2026-10-02)
+
+Slice C of `docs/NEXT-dungeon1.md`: from the giant's smile to a spirit home
+in the village, and the giant up and gone to a second ring. Dungeon 2 is
+not started. `src/giant/homecoming.ts` is the sequence; the rest is
+`WorldGen.dungeons` (worldgen.ts), `Giant.rise` (giant.ts), `onwardRoute`
+(visit.ts), `Village.comeHome` / `mend` (village.ts), two-layer prints
+(world/prints.ts) and the wiring in main.ts. The owner approved the plan
+for the second site before it was built; everything else below is the
+builder's choice. **Not played by hand.** Not committed.
+
+### What happens
+It carries straight on from the offering's last frame (`Offering.play` at
+`T.end`), hands off, about 38 s more (75 s in all from coming up):
+1. **A crow leaves** (4.6 s). Crow 0 lifts out of the giant's trees with
+   its light and flies out past the camera; the giant's head turns after
+   it. The veil comes up as it fills the frame.
+2. **The village** (about 15 s). Only the camera goes; you stay at the
+   ring on the rockhopper. The veil holds until `terrain.busy` clears
+   round the camera (at least 0.45 s, at most 20 s). The crow comes down
+   out of the sky beyond the wrecked house, lands beside its doorstep, the
+   light swings forward out of its feet on to the step and is the spirit
+   that lived there. The crow looks at it and flies off. The guide runs in
+   from down the lane; they jump for joy; they turn to the wreck; its
+   footing comes up out of the ground and its boards and stones hop, one
+   after another, into a stack and round the footing; they jump again.
+   Veil.
+3. **The giant gets up** (about 14 s). Same wait for the land. From far
+   off and side on: it comes up out of the ground over 8 s (`Giant.rise`),
+   sets off after 5.2 s still coming up, and when it has taken 3.6 steps
+   the camera cuts back to you. You've been turned to watch it go.
+4. It walks on by itself, about two minutes, to the second ring and lies
+   down 58 m or more short of it: dormant, eyes shut, no smile, solid once
+   it has sunk. No dark spirit is let go.
+
+### The second site (the plan the owner approved, as built)
+- `WorldGen.dungeons`: a list, two long. `dungeon` is `dungeons[0]`.
+  Found in stages in the getter: the first exactly as before (same code,
+  with no other site standing), then `nextSite(first)` with the first
+  already standing so routes go round its ring. `scripts/sites.mjs`
+  prints a fingerprint of the first site and of the visit's footfalls:
+  **unchanged on `hilda`, `42`, `frost`, `bergen`, `hildaz2`** against the
+  build before.
+- `nextSite`: candidates on rings of 900 to 1500 m round the first ring,
+  nowhere within 900 m of the yard, scored for lying on beyond the first
+  ring as seen from the village, open, low. Three passes of four
+  candidates each (level and gentle; rougher and steeper; anything), each
+  a `route()` from where the giant lay to 48 m short of the candidate,
+  keeping 43 m off the first ring. Then the same fallback as the first
+  site has (best place a ring can stand, a straight line to it).
+- The world changes with it: nine bare stones at the second ring, and the
+  way to it kept clear of trees and wild biomes like the first way. Stone
+  hands keep off both rings.
+- Workers never search: they're handed the list. Cache key
+  `fjellheim.dungeon.v7.<seed>`, an array.
+- **Cost of the second search:** 0.3 to 1.9 s on the seeds tried (`hilda`
+  0.28, `frost` 0.47, `bergen` 0.44, `42` 0.62, `hildaz2` 1.87). The
+  first site's search is what it was: 0.8 s on `hilda`, 15 s on `42`
+  (which fails every route before it falls back; that was so before).
+- `42`: no way reaches the second site either, so its way is a straight
+  line across two lakes. 27 of its 57 footfalls are in water (the giant
+  wades; a print in water isn't left). You swim or go round.
+
+### Rising (`giant.ts`)
+`rise()`: no longer dormant; `sink` runs back down over `RISE_TIME` (8 s);
+`shell()` is null the moment it isn't dormant, so it isn't solid from the
+first frame. Its feet are put together under it while they're still 43 m
+down (`place` at its pelvis), and its old route is dropped, so `walkRoute`
+starts clean. `Visit` used to free the dark spirit whenever the giant had
+"arrived"; that is once only now (`settled`), or getting up and arriving
+again would have dropped one into the sealed ring.
+
+### Where the way on runs back along the way in
+On `hilda` the first ring is on a headland and the only dry way on goes
+back up the way the giant came for a few hundred metres. Two things:
+- **It treads in its own prints** (`onwardRoute`'s `back`): from the last
+  print that isn't under it, each old print in turn, turning round over
+  its first three steps, for as long as the new way lies within 12 m of
+  the old line. On `hilda` that is only about four steps; after that the
+  new way runs beside the old, 15 to 30 m off.
+- **Prints overlapping cut pieces out of each other**: the print texture
+  held one print per 12 m cell, and a new print took the cell from the old
+  one, which then stopped dead at the cell's edge. Seen from above on
+  `hilda` (half prints, U shapes). **`world/prints.ts` now holds two
+  prints per cell** (two layers in the one texture; `printAt` in the
+  shader and `Prints.at` take whichever sole is nearer the point). Now
+  overlapping prints run together into trampled ground. Three deep still
+  loses the oldest.
+
+### The village (`village.ts`)
+- `comeHome(k, at)`: not taken, itself, its own life again; `mill` runs
+  again for whoever is home (it was switched off for good by the first
+  footfall).
+- `mend(i)`: **what "one step" is, the builder's guess:** the returned
+  spirit's own house only. Its footing (the hut's own footing geometry)
+  comes up where it stood; its 26 boards are trimmed to much the same
+  length and stacked four across beside the plot; its 8 stones go to the
+  footing's corners and the middles of its sides. The spirit then spends
+  most of its time walking between stack and footing and hopping, nodding
+  or throwing its arms wide at them (`work`). The footing is a step you
+  and it can stand on. The other seven wrecks are untouched.
+- **The giant's print under that house is filled in** (`Trail.fill`,
+  `Prints.erase`), under the veil, before the camera arrives. The house
+  stood exactly where a foot fell, so the plot was the bottom of a 1.9 m
+  pit: the first version laid the footing at the old ground level, 2 m up
+  in the air over the pit, and the camera sat in the pit looking at its
+  wall. Prints were permanent until this.
+
+### Cameras (planned first; three goes at two of them)
+- **Crow leaving:** 52 m in front of the giant, 20 m to the clearer side,
+  a little under its treetops, fov 34, following the crow. Worked first
+  time.
+- **Village:** 9.5 to 13.5 m out from the door, low, a little round to
+  the stack's side, wherever is clear of trunks; then raised until the
+  doorstep and the plot are in plain sight over the ground between (a
+  neighbour's print has a rim). It looks up at the crow coming in and
+  settles on the doorstep.
+- **The giant getting up:** side on to the way it's about to go, 190 to
+  245 m off, fov 38, looking at where its chest will be. First go: in the
+  woods, treetops filling the bottom half. Second: open ground, but fov 33
+  cut its head off as it stood, and on `42` it was perched on a hillside
+  looking down a slope. Now scored for open ground, level ground under the
+  camera, and how much the land between hides. **You and the ring are not
+  in this shot** on most seeds (on `bergen` the ring's stones are at its
+  feet).
+- **Handing back** is a cut, not an ease (easing 200 m back went through
+  trees). The orbit camera is put behind you, or as near behind as has a
+  clear look at you past the ring's stones and the shrine (`backYaw`): the
+  first version put it squarely behind a standing stone on `hilda`.
+
+### Saves
+`fjellheim.home1.<seed>` = `1`, set the moment the spirit is on its
+doorstep (outside the story: when the giant starts to rise).
+- Before that (the offering `given`, this not saved): a reload puts you by
+  the shrine on the rockhopper and the homecoming plays from its start,
+  once the loading veil has gone. **A save from slice B at `given` gets
+  slice C this way on its next load.**
+- After it: nothing replays. Spirit home, house mended, its crow without a
+  light, every print of the walk laid, the giant asleep by the second
+  ring. So a reload while the giant is walking finds it already there.
+
+### Checked (the build as it stands unless said)
+- `scripts/sites.mjs` on `hilda`, `42`, `frost`, `bergen`, `hildaz2`,
+  `7`, `fjord`: sites, fingerprints, and the walk on (no footfall on a
+  ring or tower; it ends 50 to 76 m from the second ring).
+- `scripts/dungeon.mjs quest` on `hilda` and `42`: pass, now through the
+  giant getting up (W held; not moved; not solid; still mounted).
+- `scripts/offering.mjs play,reload` on `hilda`: pass.
+- `scripts/offering.mjs home` in the story on `hilda`, `42`, `frost`,
+  `bergen`, and `hilda` at 22:30: every part runs, W held throughout and
+  nothing moves, one spirit home and one house mended, the crow's light
+  gone, the giant up and not solid, you can ride after; then reloads
+  while it walks, once settled, before the spirit is home (mid-flight),
+  and just after the spirit is home. And `sandbox` on `hilda`, which
+  walks the giant the whole way: it lay down, sank, was solid again, eyes
+  shut, with prints all the way.
+- Frames looked at for all of those: the three shots, the hand-back from
+  the saddle, the mended house from the lane after a reload, the first
+  ring without the giant, the second ring with it; and the prints from
+  above on `hilda` at the turn, the fork and the end.
+- The night run and the sandbox's whole walk were on the build before the
+  last change (the hand-back camera's angle); the four story seeds, the
+  quest and the offering were run again after it.
+- **Frame cost** (`shots.mjs --perf --uncapped`, twice each): 5.58 and
+  5.57 ms average, p99 9.3, with two print layers; 5.48 and 5.55 with the
+  second layer's fetch taken out. No measurable cost. (The budget in
+  WORKFLOW says about 4 ms; today's build is 5.5 with or without this
+  slice's shader change, so that is something else, or the machine.)
+- Two script races, not game bugs, fixed in the script: a page load runs
+  real frames before the script takes over, so "reload mid-flight" could
+  find the scene already at the village.
+
+### Rough / open
+- **Not played by hand.** Timing, sound and whether the three shots read
+  as one story are unjudged. Sounds are existing ones reused (whoosh,
+  thud, chirp, stomp, slot per board, fanfare) and unheard.
+- **The second ring is a dead end and nothing says so.**
+- On `hilda` the first stretch of the walk on runs beside the walk in and
+  the two sets of prints run together into a trampled strip. It doesn't
+  look broken any more; it doesn't look like a clean trail either.
+- The giant turns right round on `hilda` in three steps. Seen only from
+  200 m.
+- `42`'s rise shot still has a hillside across the bottom of the frame.
+- From the saddle after the cut you are in plain view on all four seeds,
+  but the giant is often partly behind a ring stone or off the edge of the
+  frame (`bergen`: not in it at all until you turn).
+- The crow's light (1.1 m) is twice the size of the spirit it becomes.
+- The spirit looks pale for a second at night as it turns away from the
+  camera to the guide (its back isn't lit).
+- The "hop off / gallop / bound" hint bar shows through the whole
+  cutscene, as it did through the offering.
+- The guide's and the explorer's moods are unchanged by a spirit coming
+  home (`down`, `sad` in the village).
+- The stack of boards is chunky and the footing is a plain slab.
+- The veil is the dungeon's violet.
+- Beside `/inspo`: the rise shot is the nearest thing in the game to the
+  reference's layered landscape (banded hills, a flat sky, one big shape),
+  and holds. The village shot is plainer than the reference: open ground,
+  a slab and a stack, with little in the foreground.
+- **No look at the wrecked house** (owner, 2026-10-02: with the stable
+  built the grieving's over, it's back in action). `come` goes straight to
+  `lead`. And the lead is loud now (`want.rally` in `spirit.ts`): on the way
+  the `prints` bubble stays up (seen from 20 m) and every `RALLY_GO` seconds
+  it stops, turns and waves you on with a call; at the edge it hops and
+  points down the trail, then turns and waves you over, round and round.
+
+### The homecoming, after the owner's first look (2026-10-02)
+Owner: "the crow dropping the spirit looks off... make the crow drop it from
+above the ground a bit. It lands with a cloud of dust (somewhat obscuring
+the transformation from orb to spirit). Remove the cabin foundation
+sequence thing entirely, lets just have that be there already... have the
+crow drop the spirit near my cabin where my spirit is there and they go up
+to each other and celebrate. Don't show a shot of the new cabin foundation
+thing at all, that will just happen in the background." And: "When the
+giant gets up, we need some kind of standing up animation. it looks bad how
+he is just like elevating vertically."
+
+- **The village shot is at the guide's cabin now**, and about 9 s (was 15;
+  the homecoming is about 32 s, was 38). The guide is on its doorstep. The
+  crow comes in over the cabin's roof, 7 m up, lets the light go as it
+  passes over the yard and **doesn't stop**: it flies on up and away over
+  the lane and is out of sight before the veil, under which it is put back
+  in its tree. It is never seen to vanish. The light falls, lands in a
+  cloud of dust (three bursts), and the spirit comes up out of the dust.
+  A beat; the two run to each other and jump for joy.
+- **The mending isn't shown.** `Village.mend(i, true)` is done at once
+  under the veil, with the print under that house filled in. Afterwards the
+  spirit walks home down the lane by itself and potters at its own plot,
+  where the footing and the stack already are. `Village.mend`'s animated
+  tidying (boards hopping into a stack) is still in the code and no longer
+  used by anything.
+- **The giant stands up** (`UP` in `giant.ts`), and lies down the same way
+  backwards. In the first 45% it comes out of the ground folded into a
+  squat: hips 10 m up, knees up and forward, leaning well forward, hands
+  on the ground in front of it. Then it pushes up: legs straighten, a
+  further lean at the middle of the push, the hands stay on the ground
+  until the shoulders lift them off, and it straightens. 9.5 s (was 8), and
+  it sets off 8.2 s in. **This changes how it lies down at the first ring
+  too** (it squats and then sinks, where it sank standing).
+  `scripts/rise.mjs <dir>` shoots it close to, from the air.
+- **Neither the guide nor the explorer is downcast once a spirit is home**
+  (owner: "yes they should" stop): `Homecoming.home` switches off the
+  `down` / `sad` / `set` moods in main.
+- The owner's other answers are in `docs/NEXT-dungeon2.md`.
+
+## A house built again in five steps (2026-10-02)
+
+Answer 4 of `docs/NEXT-dungeon2.md`. The owner, on the plan
+(`docs/PLAN-rebuild.md`, kept as written; this section is what was built):
+"step zero is literally nothing, no footing nothing"; "no see-through
+stuff. it would make it seem like the user is meant to build it"; "I don't
+think we need to see them actually working. it just sorta invisibly happens
+when the user is away (really just at the completion of a dungeon)".
+
+- **`Village.setStep(i, n)`** replaces `mend`. `House.step`: 5 (`HOME`) is
+  whole, as is a house never trodden on; `smash` sets 0. From any step to
+  any step, at once, nothing animated. `buildStage(variant, step)` makes
+  steps 1 to 4 from the same `HUTS` numbers as the hut, so the three kinds
+  and their colours follow:
+  0. nothing: the wreck as it fell, in the giant's print;
+  1. the stone footing and doorstep; all 26 boards stacked beside the plot,
+     the 8 stones round the footing;
+  2. board walls to 45% of their height, a dark gap for the door, the
+     chimney begun, a dark lid for the hollow inside; 18 boards, 4 stones;
+  3. walls to the eaves, both gables, a ridge beam, the whole chimney, door
+     and windows as dark holes, open to the sky; 10 boards;
+  4. the roof boarded in fresh-cut wood (`K.cut`: `K.boards` was nearly the
+     finished roof's brown and step 4 looked like step 5), window bars, no
+     door, no light, no smoke; 4 boards;
+  5. the hut itself (its own meshes shown again): door, lit window, smoke.
+- **No frame step.** Every step is a solid built thing. A post-and-beam
+  step was in the plan and cut on the owner's word.
+- **Dungeon 1 leaves step 0.** `homecoming.ts` no longer fills the print or
+  lays anything (its `fill` dep is gone). A save from after the homecoming
+  loses the footing and stack it had.
+- **The print is the caller's to fill** before step 1 or more
+  (`trail.fill`; `__ow.house` does it). `Village` doesn't know the trail.
+- **Underfoot:** nothing at 0; the footing's top at 1 (you and the spirit);
+  the flat top of the walls at 2 and 3, and they push you out; the roof at
+  4 and 5. For its spirit, steps 2 to 4 have the door's way in like a whole
+  house. `scripts/rebuild.mjs` prints the heights.
+- **Work isn't shown.** `work` is what it was (to the stack or the plot, a
+  hop, a nod, arms wide), at steps 1 to 4 only. No tools, no carrying:
+  later if wanted.
+- The old animated tidying (boards hopping into the stack, the footing
+  rising) is deleted; nothing used it.
+- **Not wired:** steps 1 to 5 are reached only by `__ow.house(i, step)`,
+  which saves nothing. To come: which houses step on per dungeon, and a
+  saved step per house.
+- Checked: `scripts/rebuild.mjs shots/rebuild` on `hilda`, all 18 frames
+  and the sheet looked at. Beside `/inspo`: flat fills, warm outlines, the
+  huts' own colours; each step reads apart from its neighbours at lane
+  distance. Rough: the step 1 footing is a low grey slab that half sinks
+  on a slope and reads as a patch more than masonry; step 2 is a plain
+  box; in the dev shots step 0 has no print (no giant has walked), so the
+  real step 0 (wreck in a pit) was not photographed here.
+- **Checked** on this build: `offering.mjs home` in the story on `hilda`,
+  `42`, `frost`, `bergen`, and `hilda` at 22:30, and `sandbox` (the whole
+  walk, and lying down at the second ring by the new squat); `dungeon.mjs
+  quest` on `hilda` and `42`; `offering.mjs play,reload`; `visit.mjs`
+  (the giant's first lying down). All pass. Frames of the drop looked at
+  on all five story runs, and the stand-up on `hilda` from the game's
+  camera and from `rise.mjs`.
+- Two checks in `offering.mjs` were racy and are loosened: a reloaded page
+  runs real frames before the script takes it over, so how far the
+  homecoming had got varies. (The mending now happens under the first veil,
+  so "nothing mended yet" was no longer true mid-scene either.)
+- **Rough:** the falling light is big in frame for a moment (it lands 8 to
+  10 m from the lens); the crow is at the top edge of the frame as it lets
+  go; at night both spirits go pale for a moment after they jump (seen in
+  one frame, not run down); the stand-up is only seen from 200 m in the
+  game; not played by hand.
+
+## Less water (2026-10-02)
+
+Owner: too much of every seed is water; lakes and inlets cut the map up, on
+`42` no dry way reaches either dungeon site and the giant wades two lakes.
+Wanted: clearly less water on every seed, still Nordic (fjords and lakes,
+fewer and smaller). **This moves every seed's world.** Not committed, not
+played by hand.
+
+### What changed (`worldgen.ts`)
+- `landAt`: the bias on the continent noise 0.08 -> 0.26. Most of the old
+  water was this: about 45% of the map was under the land mask's sea.
+- `baseHeight`: inland ground sits at 13 m, not 5 (`lerp(-34, 13, land)`).
+- The hills term: hollows are 0.4 as deep as hills are high. At 5 m with
+  full hollows every dip in the hills was a pond; now, on full land, the
+  hills alone never reach the sea, so water is made by the land mask and
+  the valleys and not scattered about.
+- The valley network: 0.85 as wide, and **sills**: a 1.5 km noise (the
+  mask's noise, offset; no new noise field, so the seeding of the others is
+  untouched) lifts the floor from -8 to +6 m along about a third of a
+  lowland valley's length. A valley is a chain of lakes with dry ground
+  between, not one ribbon across the map. Highland fjords (`hl`) keep
+  their floor.
+- `forestBase`: threshold `f + 0.02` -> `f - 0.06` (forest is about 29% of
+  the land, was 36%). Not asked for: see perf below.
+- `nextSite`: the way on keeps 75 m off every tower. On `hildaz2` in the
+  new land the giant trod on a tower's feet (three footfalls);
+  `sites.mjs` caught it. The first way already did this for its own tower.
+- `primeDungeon`: cache key `fjellheim.dungeon.v8`.
+
+### Measured (`scripts/water.mjs`: a 12 km square round the start, every 40 m)
+`water` is the share under sea level; `reach` is how much of the land within
+3 km of the start you can walk to dry (above 2.2 m, as `route` has it).
+
+| seed | water before | after | reach before | after |
+|---|---|---|---|---|
+| hilda | 44.2% | 20.4% | 94% | 99% |
+| 42 | 43.8% | 20.5% | **2%** | 99% |
+| frost | 45.1% | 19.2% | 99% | 99% |
+| bergen | 40.2% | 17.0% | 100% | 100% |
+| hildaz2 | 50.3% | 22.1% | 91% | 99% |
+| 7 | 45.9% | 17.3% | 97% | 99% |
+| fjord | 46.2% | 19.9% | 99% | 99% |
+| 1 | 44.7% | 17.3% | 86% | 100% |
+| troll | 49.1% | 22.6% | 84% | 100% |
+| saga | 48.3% | 24.6% | 99% | 100% |
+| mean | 45.8% | 20.1% | 85% | 99% |
+
+Shore flats (land under 3 m) went from 6.5% of the land to 1.8%. Separate
+bodies of water in the square: about 250 before, about 180 after (most are
+a cell or two; the count is by a 40 m grid).
+
+`scripts/sites.mjs hilda 42 frost bergen hildaz2 7 fjord`:
+- Before: `42` both sites were the fallback (a straight line), 27 of 57
+  footfalls of the walk on in water, and 15 s to search. The other six: real
+  routes, wades 0.
+- After: **all seven, both sites from a real route, wades 0**, no way point
+  in water, nothing on a ring or a tower, the walk ends 46 to 73 m from the
+  second ring. Every first way goes by a tower now (before: not on `7` or
+  `42`). Search 2.8 to 4.7 s (`42`: 3.9 s, was 16).
+- `scripts/village.mjs survey`: all 40 seeds get a lane (2 the short one).
+- `scripts/dungeon.mjs quest` on `hilda` and `42`: pass.
+  `scripts/offering.mjs play,reload,home` on `hilda` and `42`: pass, frames
+  looked at.
+- Maps of before and after are in `shots/water/` (`before-*.png`,
+  `after-*.png` from `sites.mjs`; `map-*.png` from `water.mjs`), and the
+  shot list before and after in `shots/water/before|after/`.
+
+### Perf (`shots.mjs --perf --uncapped`, M1 Pro)
+More land is more trees and more chunks with props on them.
+- Before: 5.84 ms average, p99 10.8; 3.56 M tris, 587 calls, 98 k instances.
+- After, forest as it was: 7.96 ms, p99 13; 6.0 M tris, 759 calls, 162 k.
+- After, forest thinned (as left): **7.1 ms, p99 11.6**; 5.2 M tris, 760
+  calls, 145 k instances.
+- Thinning further (`f - 0.1`) didn't help (6.85): what's left is draw
+  calls, not triangles.
+Not like for like: the start site moved, so the run is somewhere else.
+But it is slower, about 20%, and the budget was already tight for
+integrated graphics. **Left as it is; the owner should decide** (below).
+
+### The look, beside `/inspo`
+- Holds: banded hills behind a lake, groves and open slopes, the dawn and
+  dusk frames. Nearer to inspo/1 (hills and forest to the horizon) than
+  before; further from the old `seed-fjord-aerial`, which was an
+  archipelago of islets and inlets and was the best water frame the game
+  had. That frame is now a hillside over one lake. Nothing like it has
+  been looked for in the new world.
+- From above, water is now a few big lakes (0.5 to 1.5 km), thin valley
+  lakes in chains, and bog meres. Coast is rare within 6 km of the start:
+  on most seeds there is no open sea in the square at all, only lakes. If
+  "fjords" means sea reaching inland, there are fewer than "fewer".
+- Sills are plain ground: a valley floor at 0 to 6 m between two lakes,
+  flat, no stream on it. Nobody has stood on one.
+- The thinner forest is visible: more open ground round the start on
+  `hilda` and `fjord`.
+
+### Saves an old save now has wrong
+Everything is the seed's, and the seed's land moved. Nothing is migrated
+and no save version was bumped except the site cache.
+- `fjellheim.dungeon.v7.<seed>`: the sites. **Bumped to v8**, so found
+  again. (The old key is left behind in storage, unused.)
+- `fjellheim.story.<seed>`: `world` (the harvest: felled trees and smashed
+  rocks by world cell: now holes in the forest where you never were, or
+  nothing), `felled` / `smashed` (indices into the start site's own trees
+  and stones: other trees now). Step, inventory and what is built are by
+  id and still mean what they did, at the new site.
+- `fjellheim.towers.<seed>`: lit tower ids. The network is regrown, so the
+  same ids are other towers, somewhere else.
+- `fjellheim.journey.<seed>` (and `.ring`): the stage names the second
+  tower and "found the ring": true of a tower and a ring that are now
+  elsewhere.
+- `fjellheim.offer1.<seed>`, `fjellheim.home1.<seed>`,
+  `fjellheim.dungeon1.<seed>`: flags only; the prints, the giant's place,
+  the shrine and the mended house are worked out from the seed again, so
+  they are consistent, in the new places. Not wrong, but not where you
+  left them.
+- `fjellheim.herd.<seed>`: no positions. Fine.
+- Bicycles, stone hands, creatures: seeded, not saved. They moved.
+Simplest for a player: an old save keeps its story step and plays on in a
+different land. Whether to wipe instead is an open question.
+
+### Left rough / open questions
+1. **Perf**: about 20% slower where measured. Take it, thin the forest
+   more (didn't help), or cut prop draw distance / merge prop batches
+   (not tried)?
+2. **How little water?** 20% is the builder's guess at "clearly lower".
+   The bias in `landAt` is the one knob to turn: 0.2 gives about 26%.
+3. **The sea**: is losing most of the coast near the start all right, or
+   should one arm of sea be guaranteed in sight of the village?
+4. **The forest was thinned** to pay for the land, unasked. Put it back
+   (`f + 0.02`) and take 8 ms?
+5. **Old saves**: wipe them (bump `SAVE_VERSION` and the other keys) or
+   let them play on in the new land with the harvest and lit towers wrong?
+6. The shot list's framings were made for the old land (`seed-fjord-aerial`
+   and `vista` most of all). They want choosing again.
+7. `scripts/water.mjs` measures the base height, without the bogs' meres
+   and the brook.
+
+### Less water: the owner's answers (2026-10-02)
+- 20% water: good. The coast and the thinner forest: fine so far.
+- **Old saves are wiped.** `WORLD_VERSION` in `main.ts` (`fjellheim.world`
+  in storage): when it differs, every `fjellheim.*` key of every seed is
+  removed before anything reads one. Bump it with any change that moves the
+  land (and the site cache key no longer needs its own bump for that, though
+  it does for a change to the search). Dev keys (`ow.*`) are kept.
+- Perf (about 20% slower) and the shot list's framings: each handed to a
+  new session (a perf audit; choosing the shots again).
+

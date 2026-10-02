@@ -62,8 +62,8 @@ export class Hands {
     let best: Hand | null = null, top = 0;
     const offer = (x: number, z: number, y: number, kind: Hand['kind'], score: number) => {
       if (score <= top) return;
-      const st = g.story, d = g.dungeon;
-      if (Math.hypot(x - st.x, z - st.z) < CLEAR_HOME || Math.hypot(x - d.x, z - d.z) < CLEAR_RING) return;
+      const st = g.story;
+      if (Math.hypot(x - st.x, z - st.z) < CLEAR_HOME || g.dungeons.some((d) => Math.hypot(x - d.x, z - d.z) < CLEAR_RING)) return;
       if (g.towers.towers.some((t) => Math.hypot(t.x - x, t.z - z) < CLEAR_TOWER)) return;
       top = score;
       best = { x, y, z, kind, rot: hash01(i, j, seed, 771) * Math.PI * 2, scale: 1.7 + hash01(i, j, seed, 772) * 1.1 };

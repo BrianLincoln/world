@@ -15,12 +15,14 @@ import { mirrorX, PartBatch } from '../mobs/parts';
 
 /** About 7 m from wingtip to wingtip: they have to read beside an 80 m giant. */
 const S = 1.9;
+/** A crow's middle over the ground it stands on (the crow's own `BODY_Y`, at this size). */
+export const STAND = 0.78 * S;
 /** What a crow carries hangs this far under it. */
 export const GRIP = 1.6;
 /** Soot: the crow's ink, nearly put out. */
 const SOOT = [0.3, 0.26, 0.34].map((k) => new THREE.Color(k, k, k * 1.12));
 
-/** (`stand`: on the ground, wings shut, put where its owner says; `hover`: beating on the spot, likewise.) */
+/** (`stand`: on the ground, wings shut, put where its owner says, and walking if that moves it; `hover`: beating on the spot, likewise.) */
 export type BirdState = 'roost' | 'wheel' | 'dive' | 'climb' | 'stand' | 'hover';
 
 export interface Bird {
@@ -47,13 +49,22 @@ export interface Bird {
   /** Where what it carries hangs: straight down under it. */
   grip: THREE.Vector3;
   flap: number;
+  /** Standing: its walk's phase (a foot comes down at each odd half turn), where it stood last frame, and how far it's up on its toes (m). */
+  stride: number;
+  last: THREE.Vector3 | null;
+  reach: number;
+  /** Its legs: down under it (1) or tucked back (0). And its wings: shut along its flanks (1) or out (0). */
+  down: number;
+  shut: number;
+  /** In the air, its legs held straight down under it, claws on what it has (0..1), not tucked back. */
+  grab: number;
   tint: THREE.Color;
 }
 
 const m4 = new THREE.Matrix4(), m5 = new THREE.Matrix4(), part = new THREE.Matrix4(), wingM = new THREE.Matrix4();
 const up = new THREE.Vector3(0, 1, 0), one = new THREE.Vector3(1, 1, 1);
 const bx = new THREE.Vector3(), by = new THREE.Vector3(), bz = new THREE.Vector3(), v = new THREE.Vector3();
-const qa = new THREE.Quaternion(), qb = new THREE.Quaternion(), qc = new THREE.Quaternion();
+const qa = new THREE.Quaternion(), qb = new THREE.Quaternion(), qc = new THREE.Quaternion(), qd = new THREE.Quaternion();
 const AX = new THREE.Vector3(1, 0, 0), AY = new THREE.Vector3(0, 1, 0), AZ = new THREE.Vector3(0, 0, 1);
 const EYE = new THREE.Vector4(0, 0, 1, 0);
 const ARC = 24;
@@ -65,6 +76,7 @@ export class Birds {
   private head: PartBatch;
   private wing: PartBatch[];
   private hand: PartBatch[];
+  private leg: PartBatch;
   private frame = crowParts(0.25);
   private glow = makeSolidMaterial('#ee6a20', 1.6, { keep: 1 });
   private glowGeo = new THREE.IcosahedronGeometry(1, 3);
@@ -75,16 +87,17 @@ export class Birds {
   constructor(n: number) {
     const g = this.frame;
     this.body = new PartBatch(g.body, { keep: 0.9 }, n);
-    // Blank yellow eyes, no pupil to speak of: they don't look at you, they look through you.
-    this.head = new PartBatch(g.head, { keep: 0.9, eyePos: [0.5, 0.2], eyeSize: [0.24, 0.2], pupil: [0.012, 0.016], lookRange: [0, 0], eyeTilt: -0.35 }, n);
+    // Blank yellow eyes, no pupil at all: they don't look at you, they look through you.
+    this.head = new PartBatch(g.head, { keep: 0.9, eyePos: [0.5, 0.2], eyeSize: [0.24, 0.2], pupil: [0, 0], lookRange: [0, 0], eyeTilt: -0.35 }, n);
     this.head.material.uniforms.uWhite.value = new THREE.Color('#ffd35e');
     this.wing = [new PartBatch(g.wing, { keep: 0.9 }, n), new PartBatch(mirrorX(g.wing), { keep: 0.9 }, n)];
     this.hand = [new PartBatch(g.hand, { keep: 0.9 }, n), new PartBatch(mirrorX(g.hand), { keep: 0.9 }, n)];
-    this.group.add(this.body.mesh, this.head.mesh, ...this.wing.map((b) => b.mesh), ...this.hand.map((b) => b.mesh));
+    this.leg = new PartBatch(g.leg, { keep: 0.9 }, n * 2);
+    this.group.add(this.body.mesh, this.head.mesh, ...this.wing.map((b) => b.mesh), ...this.hand.map((b) => b.mesh), this.leg.mesh);
     for (let i = 0; i < n; i++) {
       this.birds.push({
         pos: new THREE.Vector3(), dir: new THREE.Vector3(0, 0, 1), state: 'roost', phase: (i / n) * Math.PI * 2 + (i % 2) * 0.35, perch: i,
-        a: new THREE.Vector3(), b: new THREE.Vector3(), c: new THREE.Vector3(), t: 0, dur: 1, arc: new Float32Array(ARC + 1), then: 'wheel', ease: [0.1, 0.1], kept: 0, light: null, glow: 0, grip: new THREE.Vector3(), flap: i * 1.7, tint: SOOT[i % SOOT.length],
+        a: new THREE.Vector3(), b: new THREE.Vector3(), c: new THREE.Vector3(), t: 0, dur: 1, arc: new Float32Array(ARC + 1), then: 'wheel', ease: [0.1, 0.1], kept: 0, light: null, glow: 0, grip: new THREE.Vector3(), flap: i * 1.7, stride: 0, last: null, reach: 0, down: 0, shut: 1, grab: 0, tint: SOOT[i % SOOT.length],
       });
     }
   }
@@ -125,6 +138,14 @@ export class Birds {
     this.group.add(b.light);
   }
 
+  /** Bird `i` has set its light down: it carries nothing. */
+  shed(i: number) {
+    const b = this.birds[i];
+    if (b.light) this.group.remove(b.light);
+    b.light = null;
+    b.glow = 0;
+  }
+
   /**
    * Fly them. `perch(i)` is where bird i roosts, `hub` the middle of the
    * wheel (the giant's head), `facing` the way the giant faces.
@@ -132,7 +153,7 @@ export class Birds {
   update(dt: number, perch: (i: number, out: THREE.Vector3) => THREE.Vector3, hub: THREE.Vector3, facing: number) {
     this.time += dt;
     const t = this.time;
-    const all = [this.body, this.head, ...this.wing, ...this.hand];
+    const all = [this.body, this.head, ...this.wing, ...this.hand, this.leg];
     for (const b of all) b.begin();
     for (const [i, b] of this.birds.entries()) {
       let fold = 0, flapRate = 7, glide = 0;
@@ -189,6 +210,25 @@ export class Birds {
         if (b.t >= 1) b.state = b.then;
       }
       b.flap += dt * flapRate * (1 - glide * 0.8);
+      // On the ground it walks wherever it's moved to: the crow's own walk (mobs/crow.ts), legs by turns,
+      // a slight waddle and the head bobbing. Still, its feet come together.
+      let waddle = 0, bob = 0, lift = 0, swing = 0, amp2 = 0;
+      const standing = b.state === 'stand';
+      if (standing) {
+        const speed = b.last && dt > 0 ? Math.hypot(b.pos.x - b.last.x, b.pos.z - b.last.z) / dt : 0;
+        (b.last ??= new THREE.Vector3()).copy(b.pos);
+        b.stride += (speed * dt / ((0.75 + 0.12 * speed) * S)) * Math.PI * 2;
+        if (speed < 0.3) b.stride += (Math.round(b.stride / Math.PI) * Math.PI - b.stride) * (1 - Math.exp(-6 * dt));
+        const moving = THREE.MathUtils.clamp(speed / 1.5, 0, 1);
+        amp2 = moving * 0.42;
+        lift = Math.abs(Math.sin(b.stride)) * 0.03 * moving;
+        waddle = Math.sin(b.stride) * 0.08 * moving;
+        bob = Math.sin(b.stride * 2) * 0.035 * moving;
+        swing = b.stride;
+      } else b.last = null;
+      // (Its legs come down as it comes in to land, and go back as it leaves the ground.)
+      const landing = b.state === 'dive' && b.then === 'stand' && b.t > 0.8;
+      b.down += ((standing || landing ? 1 : 0) - b.down) * (1 - Math.exp(-(standing ? 30 : 9) * dt));
       // Body frame: +z along the way it flies. On a perch it sits up.
       bz.copy(b.dir);
       // (Beating on the spot, it hangs back on its tail.)
@@ -197,23 +237,26 @@ export class Birds {
       if (bx.lengthSq() < 1e-4) bx.set(1, 0, 0);
       bx.normalize();
       by.crossVectors(bz, bx);
-      m4.makeBasis(bx, by, bz).setPosition(b.pos).scale(v.set(S, S, S));
-      if (fold) m4.multiply(m5.makeRotationX(-0.38));
+      m4.makeBasis(bx, by, bz).setPosition(v.copy(b.pos).setY(b.pos.y + lift * S)).scale(v.set(S, S, S));
+      // (Its wings shut, and it sits up, over a moment: nothing snaps as it lands.)
+      const shut = (b.shut += (fold - b.shut) * (1 - Math.exp(-11 * dt)));
+      m4.multiply(m5.makeRotationX(-0.38 * shut)).multiply(m5.makeRotationZ(waddle));
       this.body.push(m4, b.tint);
       const f = this.frame;
-      this.head.push(part.multiplyMatrices(m4, m5.makeTranslation(0, f.neck.y, f.neck.z + (fold ? 0 : 0.08))).multiply(m5.makeRotationX(fold ? 0.38 : -0.2)), b.tint, EYE);
+      this.head.push(part.multiplyMatrices(m4, m5.makeTranslation(0, f.neck.y, f.neck.z + THREE.MathUtils.lerp(0.08, bob, shut))).multiply(m5.makeRotationX(THREE.MathUtils.lerp(-0.2, 0.38, shut))), b.tint, EYE);
       // Wings as the crow's: beating about the body's long axis with the
       // hand trailing the beat; held out on a glide; laid along the flanks
       // on a perch.
-      const open = 1 - fold, amp = 1 - 0.85 * glide;
+      const open = 1 - shut, amp = (1 - 0.85 * glide) * open;
       const beat = Math.sin(b.flap), lag = Math.sin(b.flap - 0.9);
       for (let k = 0; k < 2; k++) {
         const s = k ? -1 : 1;
         qa.setFromAxisAngle(AZ, s * (beat * amp * 0.95 + 0.14 * glide));
         qa.multiply(qb.setFromAxisAngle(AY, s * (0.15 + 0.1 * beat * amp)));
-        if (fold) {
-          qa.setFromAxisAngle(AX, 0.42);
-          qa.multiply(qc.setFromAxisAngle(AY, s * 1.66)).multiply(qc.setFromAxisAngle(AX, -1.35)).multiply(qc.setFromAxisAngle(AZ, s * -0.12));
+        if (shut > 1e-3) {
+          qd.setFromAxisAngle(AX, 0.42);
+          qd.multiply(qc.setFromAxisAngle(AY, s * 1.66)).multiply(qc.setFromAxisAngle(AX, -1.35)).multiply(qc.setFromAxisAngle(AZ, s * -0.12));
+          qa.slerp(qd, shut);
         }
         const flank = 0.4 + 0.14 * f.plump;
         v.set(s * THREE.MathUtils.lerp(flank, f.shoulder.x, open), THREE.MathUtils.lerp(0.16, f.shoulder.y, open), THREE.MathUtils.lerp(0.26, f.shoulder.z, open));
@@ -224,6 +267,15 @@ export class Birds {
         part.multiplyMatrices(wingM, m5.compose(v, qb, one.set(THREE.MathUtils.lerp(0.82, 1, open) / THREE.MathUtils.lerp(0.62, 1, open), 1, THREE.MathUtils.lerp(0.5, 1, open))));
         this.hand[k].push(part, b.tint);
       }
+      // Legs: straight down under it whatever the body's tilt, stepping; tucked back under the tail in the air.
+      // (None on a perch: it sits on them. With something in its claws they hang straight down to it.)
+      if (b.state !== 'roost') for (let k = 0; k < 2; k++) {
+        const ph = swing + k * Math.PI, raise = Math.max(0, -Math.cos(ph)) * amp2;
+        qa.setFromAxisAngle(AX, 0.38 * shut + THREE.MathUtils.lerp((1 - b.down) * 1.25, Math.asin(THREE.MathUtils.clamp(bz.y, -1, 1)), b.grab) + Math.sin(ph) * amp2).multiply(qb.setFromAxisAngle(AZ, -waddle * 0.8));
+        const len = (1 - raise * 0.35) * (1 + (b.reach * b.down) / (0.46 * S));
+        this.leg.push(part.multiplyMatrices(m4, m5.compose(v.set((k ? -1 : 1) * f.hip.x, f.hip.y, f.hip.z), qa, one.set(1, len, 1))), b.tint);
+      }
+      one.set(1, 1, 1);
       b.grip.copy(b.pos).setY(b.pos.y - GRIP);
       if (b.light) {
         b.glow = Math.min(1, b.glow + dt / 0.6);

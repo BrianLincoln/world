@@ -18,6 +18,8 @@ import { Billboard } from './overlay';
 const R = 0.34;
 /** One ushering sweep and its rest (s). */
 const USHER_CYCLE = 3.4;
+/** Rallying you along: a wave every this many seconds on the way, and the point-then-wave round at the spot (s). */
+const RALLY_GO = 5, RALLY_AT = 3.8;
 /** One round of the foreman's pantomime (fetch / present) and its rest (s). */
 const FOREMAN_CYCLE = 5.2;
 /** One round of the lasso lesson: twirl, throw, "your turn", rest (s). */
@@ -67,6 +69,10 @@ export interface Want {
   /** "Like this": it whirls a little loop of its own over its head and
    *  flings it out at this (a creature), then looks round at you. */
   lasso?: THREE.Vector3;
+  /** "Come on, this way!": on the way to `at` its bubble stays up and it
+   *  keeps turning to wave you on; there, it hops and points at `face`,
+   *  and waves you over, round and round. */
+  rally?: boolean;
   /** Nothing to ask for: it just enjoys being there (no pointing; watches
    *  `face`, looks round at you now and then when you're close). */
   settled?: boolean;
@@ -151,6 +157,7 @@ export class Spirit {
   private path: THREE.Vector3[] = [];
   private pathTo = new THREE.Vector3(1e9, 0, 0);
   private waiting = false;
+  private rallyT = 0;
   private moving = false;
 
   // Skeleton (never in the scene; its matrices feed the batches).
@@ -573,7 +580,16 @@ export class Spirit {
         const lag = w.lead && toPlayer > 10 && Math.hypot(this.player.x - dest.x, this.player.z - dest.z) > Math.hypot(this.pos.x - dest.x, this.pos.z - dest.z) - 2;
         if (lag) this.waiting = true;
         if (this.waiting && (toPlayer < 6 || !w.lead)) this.waiting = false;
-        if (this.waiting) {
+        const rc = w.rally && !this.waiting ? (this.rallyT += dt) % RALLY_GO : 9;
+        if (rc < 1.3 && toPlayer < 30) {
+          // A stop to turn and wave you on, with a hop.
+          this.vel.multiplyScalar(Math.exp(-10 * dt));
+          this.moving = true;
+          faceAt = lookAt = this.player;
+          beckon = 1;
+          bounce = 0.5;
+          if (rc - dt < 0.2 && rc >= 0.2) this.hooks.sound('call');
+        } else if (this.waiting) {
           this.vel.multiplyScalar(Math.exp(-10 * dt));
           beckon = 1;
           this.beckonT -= dt;
@@ -607,6 +623,18 @@ export class Spirit {
             else if (g === 'hop') bounce = 0.6;
             else if (g === 'cheer') { armsUp = 1; bounce = 0.8; happy = true; }
             else if (g === 'nod') { bounce = 0.2; this.happyT = Math.max(this.happyT, 0.3); }
+          }
+        } else if (w.rally && w.face) {
+          // That way! Hopping, arm out at it; then round to you, waving you over.
+          const c = (this.rallyT += dt) % RALLY_AT;
+          if (c < 2.6) {
+            pointAt = lookAt = w.face;
+            bounce = 0.6;
+            if (c - dt < 0.3 && c >= 0.3 && toPlayer < 40) this.hooks.sound('chirp');
+          } else {
+            faceAt = lookAt = this.player;
+            beckon = 1;
+            bounce = 0.4;
           }
         } else if (w.usher && toPlayer < 30) {
           // Ushering: turned between you and the doorway, it holds a hand
@@ -858,12 +886,14 @@ export class Spirit {
     // Only up close: from across the yard the pantomime does the talking.
     // "Close" covers every build zone (you can build from 7 m), with a
     // little slack before it lets go so the edge doesn't flicker.
-    this.bubbleNear = toPlayer < (this.bubbleNear ? 9.5 : 8);
+    // (Rallying you along, it's seen from further back: you're following it.)
+    if (!w.rally) this.rallyT = 0;
+    this.bubbleNear = toPlayer < (w.rally ? 20 : this.bubbleNear ? 9.5 : 8);
     // A tally that's reached 0 has nothing left to ask for (the last of it
     // is flying in; the heart comes next).
     const want = w.count === 0 ? null : w.icon;
     // (Frightened or grieving, it isn't asking for anything.)
-    const icon = !this.bubbleNear || (this.mood && this.mood !== 'down' && this.mood !== 'brave') ? null : act?.kind === 'celebrate' || (act?.kind === 'pat' && act.t > PAT.end) ? 'heart' : this.moving || this.waiting ? null : want;
+    const icon = !this.bubbleNear || (this.mood && this.mood !== 'down' && this.mood !== 'brave') ? null : act?.kind === 'celebrate' || (act?.kind === 'pat' && act.t > PAT.end) ? 'heart' : (this.moving || this.waiting) && !w.rally ? null : want;
     const count = icon === w.icon ? w.total ?? w.count ?? 0 : 0;
     if (icon !== this.bubbleIcon && this.bubbleA < 0.05) {
       this.bubbleIcon = icon;

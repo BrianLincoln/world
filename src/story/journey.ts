@@ -34,12 +34,15 @@ import { Puffs } from '../gfx/puffs';
 //           you home for it.
 //
 // The send-off (sendOff(), within `done`): once a creature lives at the
-// stable, the spirit looks a moment at a wrecked house, then walks you to
+// stable and you're at home (the village, or the pasture where you've just
+// brought it in), the spirit comes over to you and walks you (waving you on, the `prints`
+// bubble up all the way) to
 // the edge of the village, to the rim of the giant's first print beyond the
-// houses, and points down the trail (the `prints` bubble), its face set:
+// houses, and stands there hopping and pointing down the trail, its face set:
 // go that way, bring them back. It stays there. When you're well on your
-// way it goes home; if you come back without having found the ring, it
-// takes you out and points again.
+// way it goes home; if you come back without having found the ring (or just
+// wander back to the yard and leave it pointing), it takes you out and
+// points again.
 //
 // (ride2, lock2 and enter2 were a second guided ride to the next tower; the
 // giant's trail goes that way instead. Old saves can still be in them.)
@@ -87,14 +90,20 @@ const GRIEVE = 75;
 const GRIEVE_MIN = 20;
 /** Keeping it company brings it round sooner: this close to it while it sits by its fire (m), for this long (s). */
 const COMPANY_R = 3, COMPANY = 6;
-/** The send-off: seconds at home with the creature in before it starts, and how long it looks at the wrecked house first. */
-const SEND_AFTER = 6, SEND_LOOK = 2.4;
+/** The send-off: seconds at home with the creature in before it starts. */
+const SEND_AFTER = 6;
 /** The village ends this far from the lane and the cabin (m): the first print past that is where it points from. */
 const TOWN_EDGE = 55;
 /** This far from it and out of the village (m), you're on your way: it goes home. Within this of the ring (m), you've found it. */
 const SENT = 90, RING_FOUND = 70;
 /** You're "in the village" within this of the cabin or of the lane (m). */
 const VILLAGE_R = 32;
+/** ...and "at home" there or within this of the pasture fence (m): the stable stands well out from the yard. */
+const PASTURE_R = 16;
+/** Left standing at the trail's edge with you back at home for this long (s), it comes and gets you. */
+const SEND_LEFT = 8;
+/** It sets off with you from within this of you (m). */
+const SEND_NEAR = 7;
 
 /** Rides the spirit's bike along a path, keeping a little ahead of you. */
 class Leader {
@@ -205,9 +214,10 @@ export class Journey {
   private beside = 0;
   private comforted = false;
   /** The send-off: where it's at, its clock, and whether you've been away since it last sent you. */
-  private send: 'idle' | 'look' | 'lead' | 'sent' = 'idle';
+  private send: 'idle' | 'come' | 'lead' | 'sent' = 'idle';
   private sendT = 0;
   private away = false;
+  private leftT = 0;
   /** You've been to the ring (saved): nothing more to point at. */
   private found = false;
   private edge: { n: number; at: THREE.Vector3; on: THREE.Vector3 } | null = null;
@@ -484,9 +494,9 @@ export class Journey {
       if (Math.hypot(b.pos.x - dg.x, b.pos.z - dg.z) < RING_FOUND) { this.found = true; this.save(); }
     }
     const due = !this.found && story.giantGone && story.phase.id === 'stable' && story.step.id === 'ranch';
-    const here = this.inVillage(b.pos);
+    const here = this.atHome(b.pos);
     if (!due) {
-      if (this.send === 'look' || this.send === 'lead') this.sendHome();
+      if (this.send === 'come' || this.send === 'lead') this.sendHome();
       this.send = 'idle';
       this.sendT = 0;
       return false;
@@ -498,20 +508,24 @@ export class Journey {
         if (this.sendT < SEND_AFTER || !this.trailEdge()) return false;
         story.lent = true;
         sp.home = null;
-        this.send = 'look';
+        this.send = 'come';
         this.sendT = 0;
-        // First a look at what's left of the nearest house.
-        let house: THREE.Vector3 | null = null, bd = Infinity;
-        for (const p of this.d.gen.story.village?.plots ?? []) {
-          const d = Math.hypot(p.x - sp.pos.x, p.z - sp.pos.z);
-          if (p.house && d < bd) { bd = d; house = new THREE.Vector3(p.x, p.y + 0.6, p.z); }
-        }
-        sp.want = { at: sp.pos.clone(), face: house, pose: 'stand', icon: null, lead: false, settled: true };
         return true;
       }
-      case 'look': {
+      case 'come': {
+        // Over to you first, if it isn't with you (it leads from where you are, not from across the yard).
         this.sendT += dt;
-        if (this.sendT > SEND_LOOK) { this.send = 'lead'; this.hintT = 0; }
+        const gap = sp.pos.distanceTo(b.pos);
+        if (gap > SEND_NEAR && this.sendT < 25) {
+          const to = this.tmp.copy(sp.pos).sub(b.pos).setY(0).setLength(SEND_NEAR - 2).add(b.pos);
+          to.y = this.d.gen.height(to.x, to.z);
+          if (sp.want.at.distanceTo(to) > 2 || sp.want.settled) sp.want = { at: to.clone(), face: null, pose: 'stand', icon: null, lead: false };
+          return true;
+        }
+        // Straight to it: the grieving's done, there's a job on.
+        this.send = 'lead';
+        this.hintT = 0;
+        this.leftT = 0;
         return true;
       }
       case 'lead': {
@@ -520,8 +534,11 @@ export class Journey {
         const gone = !here && Math.min(sp.pos.distanceTo(b.pos), e ? e.at.distanceTo(b.pos) : Infinity) > SENT;
         if (!e || gone) { this.sendHome(); this.send = 'sent'; this.away = true; return false; }
         sp.mood = 'brave';
-        if (sp.want.at.distanceTo(e.at) > 0.5 || sp.want.icon !== 'prints') sp.want = { at: e.at.clone(), face: e.on, pose: 'point', icon: 'prints', lead: true };
+        if (sp.want.at.distanceTo(e.at) > 0.5 || sp.want.icon !== 'prints') sp.want = { at: e.at.clone(), face: e.on, pose: 'point', icon: 'prints', lead: true, rally: true };
         if (sp.arrived) this.nudge(dt, e.at, e.on);
+        // Pointing at nobody (you've gone back to the yard or the stable): it comes for you and starts over.
+        this.leftT = sp.arrived && here && sp.pos.distanceTo(b.pos) > HINT_NEAR ? this.leftT + dt : 0;
+        if (this.leftT > SEND_LEFT) { this.sendHome(); this.send = 'idle'; this.sendT = 0; return false; }
         return true;
       }
       case 'sent': {
@@ -531,6 +548,11 @@ export class Journey {
         return false;
       }
     }
+  }
+
+  /** At home: in the village, or at the stable and its pasture (which is where you are when a creature comes in). */
+  private atHome(p: THREE.Vector3) {
+    return this.inVillage(p) || !!this.d.story.stable?.inside(p.x, p.z, -PASTURE_R);
   }
 
   /** In the village: by the cabin, or somewhere along the lane. */

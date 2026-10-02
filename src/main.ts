@@ -30,10 +30,11 @@ import { Bikes, type Bike } from './vehicles/bikes';
 import { Dungeon, DUNGEON_LOOK } from './dungeon/dungeon';
 import { Giant } from './giant/giant';
 import { Trail } from './giant/trail';
+import { Homecoming } from './giant/homecoming';
 import { Offering } from './giant/offering';
 import { Hands } from './world/hands';
 import { Ring } from './giant/ring';
-import { Visit } from './giant/visit';
+import { restOf, Visit } from './giant/visit';
 import { TowerDebug } from './ui/towerDebug';
 import { Beacons } from './story/beacons';
 import { Journey, STAGES, type Stage } from './story/journey';
@@ -58,6 +59,19 @@ initMaterials();
 const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(36, 1, 0.5, 18000);
 
+/**
+ * Which land the saves in storage belong to. Bump it whenever world gen moves
+ * every seed's land (2: less water, 2026-10-02): every save of every seed is
+ * then thrown away on the next load, before anything reads one, since they
+ * hold places (felled trees, lit towers, the dungeon sites) that are gone.
+ */
+const WORLD_VERSION = '2';
+try {
+  if (localStorage.getItem('fjellheim.world') !== WORLD_VERSION) {
+    for (const k of Object.keys(localStorage)) if (k.startsWith('fjellheim.')) localStorage.removeItem(k);
+    localStorage.setItem('fjellheim.world', WORLD_VERSION);
+  }
+} catch { /* no storage: nothing to wipe */ }
 let seedText = params.get('seed') ?? 'hilda';
 let gen = new WorldGen(seedFromString(seedText));
 /**
@@ -65,16 +79,20 @@ let gen = new WorldGen(seedFromString(seedText));
  * once per seed, kept in localStorage, and handed to the chunk workers.
  */
 function primeDungeon(g: WorldGen) {
-  const key = `fjellheim.dungeon.v6.${g.seed}`;
+  // (v7: a list. The first dungeon's site, and the one the giant walks on to after it.
+  // v8: less water, 2026-10-02; every seed's land moved, and its sites with it.)
+  const key = `fjellheim.dungeon.v8.${g.seed}`;
   try {
     const raw = localStorage.getItem(key);
-    if (raw) g.presetDungeon(JSON.parse(raw));
-    else localStorage.setItem(key, JSON.stringify(g.dungeon));
-  } catch { /* private mode: it's found again each load */ }
-  return g.dungeon;
+    if (raw) g.presetDungeons(JSON.parse(raw));
+    else { const t0 = performance.now(); localStorage.setItem(key, JSON.stringify(g.dungeons)); siteSearchMs = performance.now() - t0; }
+  } catch { /* private mode: they're found again each load */ }
+  return g.dungeons;
 }
+/** Dev: how long the search for the dungeon sites took on this load (0: they were cached). */
+let siteSearchMs = 0;
 const terrain = new Terrain(gen.seed);
-terrain.dungeon = primeDungeon(gen);
+terrain.dungeons = primeDungeon(gen);
 scene.add(terrain.root);
 const groundShadow = new GroundShadow();
 if (params.get('shadows') === '0') groundShadowSettings.enabled = false;
@@ -98,6 +116,8 @@ const trail = new Trail({ ground: (x, z) => gen.height(x, z), colliders });
 let dungeon: Dungeon | null = null;
 // What you do with its light once you're back up: the shrine the ring becomes, the crow, the giant's hand.
 let offering: Offering | null = null;
+// What follows it: a crow takes one spirit's light home, and the giant gets up and walks on to the next ring.
+let homecoming: Homecoming | null = null;
 // Stone hands standing about the world, on islands and summits (world/hands.ts). They do nothing yet.
 let hands: Hands | null = null;
 const world: WorldQuery = {
@@ -298,6 +318,10 @@ const post = new PostPipeline(renderer);
 // The wordless opening runs on a plain start; shots and debug views that set
 // a time, a position or flight get the sandbox (?story=1 forces it on,
 // ?story=0 off; ?fresh=1 forgets saved progress for this seed).
+// Flying on foot is a dev tool: off unless ticked in the panel (Player), or ?fly=1 (0 clears it). Kept in this browser.
+const devFly = { on: false };
+try { devFly.on = params.has('fly') ? params.get('fly') !== '0' : localStorage.getItem('ow.devFly') === '1'; } catch { /* storage unavailable */ }
+if (params.has('fly')) try { localStorage.setItem('ow.devFly', devFly.on ? '1' : '0'); } catch { /* ignore */ }
 const storyActive = params.get('story') === '1' || (params.get('story') !== '0' && !params.has('t') && !params.has('x') && params.get('mode') !== 'fly');
 // Felled trees and smashed rocks (hidden on the GPU, left out of collision).
 const harvest = new Harvest();
@@ -305,20 +329,6 @@ colliders.skip = (kind, x, z) => { const [gi, gj] = Harvest.cellOf(kind, x, z); 
 colliders.busy = (kind, x, z) => { const [gi, gj] = Harvest.cellOf(kind, x, z); return harvest.has(kind, gi, gj); };
 storyHost = new StoryHost({ scene, post, env, rig, body: player.body, camera, puffs: (at, n, size, spread) => puffs.emit(at, n, size, spread), colliders, harvest, dent: (x, z) => trail.prints.offset(x, z) }, storyActive);
 const ambience = new Ambience(storyHost.sfx);
-let homeIn = false;
-/**
- * For the ambience's home bed: by the lit cabin, or along the village lane
- * until the giant has been. A wider ring to leave than to enter, so the
- * edge doesn't flutter.
- */
-function atHome() {
-  const story = storyHost?.story;
-  if (!story || !story.cabin.lit) return (homeIn = false);
-  const p = player.body.pos, r = homeIn ? 70 : 55;
-  let d = Math.hypot(p.x - story.cabin.hearthPos.x, p.z - story.cabin.hearthPos.z);
-  if (story.village && !story.giantGone) for (const q of story.village.site.lane) d = Math.min(d, Math.hypot(p.x - q.x, p.z - q.z));
-  return (homeIn = d < r);
-}
 if (params.has('fresh')) try { localStorage.removeItem(`fjellheim.story.${seedText}`); } catch { /* ignore */ }
 storyHost.build(gen, seedText);
 if (params.has('fresh')) try { localStorage.removeItem(`fjellheim.journey.${seedText}`); } catch { /* ignore */ }
@@ -373,7 +383,7 @@ function makeHerd() {
   // yours (saddled, and it comes home) once it's been brought to the stable.
   mobs.rules.stable = !!storyHost!.active;
 }
-if (params.has('fresh')) try { localStorage.removeItem(`fjellheim.herd.${seedText}`); localStorage.removeItem(`fjellheim.dungeon1.${seedText}`); localStorage.removeItem(`fjellheim.offer1.${seedText}`); } catch { /* ignore */ }
+if (params.has('fresh')) try { localStorage.removeItem(`fjellheim.herd.${seedText}`); localStorage.removeItem(`fjellheim.dungeon1.${seedText}`); localStorage.removeItem(`fjellheim.offer1.${seedText}`); localStorage.removeItem(`fjellheim.home1.${seedText}`); } catch { /* ignore */ }
 makeJourney();
 
 /** Dev: straight to a phase 3 step (the journey done, everything before it built), standing by the pasture gate. */
@@ -539,18 +549,27 @@ function enterDungeon(drop?: [number, number]) {
   camBlend = 1;
 }
 
-/** The giant asleep by the ring, where its walk ended. (Outside the story nothing has walked there: one is stood there.) */
-function giantByRing() {
+/** Where the giant lies by the first ring: where its walk there ended. (Outside the story nothing has walked there: 66 m back along the way it would have come by.) */
+function giantRest() {
+  if (visit?.route) return restOf(visit.route.falls);
   const d = gen.dungeon;
-  if (giant && Math.hypot(giant.origin.x - d.x, giant.origin.z - d.z) < 400) return giant;
-  // Back along the way it would have come by (the last point of that way that isn't the ring itself).
+  // (The last point of that way that isn't the ring itself.)
   let w: [number, number] = [d.x + 1, d.z];
   for (let i = d.way.length - 1; i >= 0; i--) if (Math.hypot(d.way[i][0] - d.x, d.way[i][1] - d.z) > 5) { w = d.way[i]; break; }
   const l = Math.hypot(w[0] - d.x, w[1] - d.z) || 1, ux = (w[0] - d.x) / l, uz = (w[1] - d.z) / l;
-  const g = summonGiant(d.x + ux * 66, d.z + uz * 66, Math.atan2(-ux, -uz));
+  return { x: d.x + ux * 66, z: d.z + uz * 66, heading: Math.atan2(-ux, -uz) };
+}
+/** The giant asleep by the ring, where its walk ended (one is stood there if nothing has walked there); or wherever it has got to since, once it has got up from there. */
+function theGiant() {
+  const d = gen.dungeon;
+  if (giant && (homecoming?.left || Math.hypot(giant.origin.x - d.x, giant.origin.z - d.z) < 400)) return giant;
+  const r = giantRest();
+  const g = summonGiant(r.x, r.z, r.heading);
   g.settle();
   return g;
 }
+/** The giant by the first ring, for as long as it's there: null once it has got up (it isn't the offering's any more). */
+function giantByRing() { return homecoming?.left ? null : theGiant(); }
 
 /** Back up: the world is the world again, and the ring's arms lift you out on to the field. */
 function leaveDungeon(won = false) {
@@ -596,6 +615,8 @@ function makeVisit() {
   visit?.dispose();
   ring?.dispose();
   offering?.dispose();
+  homecoming?.dispose();
+  homecoming = null;
   if (dungeon) {
     if (dungeon.inside) { dungeon.inside = false; world.waterLevel = SEA_LEVEL; mobs.under = null; scene.add(rig.root, puffs.group, mobs.group); orbit.maxDistance = 80; player.set('walk', ctx); }
     dungeon.dispose();
@@ -635,7 +656,18 @@ function makeVisit() {
     tree: (x, z, max) => colliders.nearestTree(x, z, max)?.d ?? Infinity,
   }, gen.seed);
   scene.add(offering.group);
-  if (dungeonWon) offering.restore();
+  homecoming = new Homecoming({
+    gen, ground: (x, z) => trail.height(x, z), body: player.body, sfx: host.sfx, story: host.active ? story ?? null : null, saveKey: seedText,
+    giant: theGiant, rest: giantRest, before: () => visit?.route?.falls ?? [], crows: () => (visit?.state === 'gone' ? visit.crows : null), summon: summonGiant,
+    stamp: (at, yaw) => { trail.stamp(at, yaw); },
+    puff: (p, n, size, spread) => puffs.emit(p, n, size, spread),
+    halt: () => { player.body.vel.x = player.body.vel.z = 0; rideMode.gallopState.speed = 0; },
+    tree: (x, z, max) => colliders.nearestTree(x, z, max)?.d ?? Infinity,
+    loading: () => terrain.busy,
+  });
+  scene.add(homecoming.group);
+  // (The giant's whereabouts first: the offering asks for it.)
+  if (dungeonWon) { homecoming.restore(); offering.restore(); }
 }
 makeVisit();
 if (params.has('giant')) {
@@ -711,7 +743,7 @@ else if (!params.has('x')) journey?.resume();
 // ?stable=<step>: straight to a phase 3 step.
 if (params.get('stable')) stableJump(params.get('stable')!);
 // A save from between taking the light and giving it: you're by the shrine with it, on the rockhopper, as you were.
-if (dungeonWon && (offering as Offering | null) && (offering as Offering | null)!.state !== 'given' && wonGoat && !params.has('x') && !params.has('cp')) atShrine();
+if (dungeonWon && (offering as Offering | null) && ((offering as Offering | null)!.state !== 'given' || (homecoming as Homecoming | null)?.state === 'idle') && wonGoat && !params.has('x') && !params.has('cp')) atShrine();
 
 /** Dev: set the story up as it stands at a checkpoint (`?fresh=1&cp=<id>`; see ui/checkpoints.ts). Expects a fresh save. */
 function checkpoint(id: string) {
@@ -799,7 +831,7 @@ if (params.get('mode') === 'fly') {
 function setSeed(s: string) {
   seedText = s;
   gen = new WorldGen(seedFromString(s));
-  terrain.dungeon = primeDungeon(gen);
+  terrain.dungeons = primeDungeon(gen);
   terrain.setSeed(gen.seed);
   colliders.reset(gen);
   trail.clear();
@@ -842,6 +874,14 @@ const ui = new DebugUI({
     player.set(m, ctx);
   },
   position: () => player.body.pos,
+  devFly: {
+    get: () => devFly.on,
+    set: (v) => {
+      devFly.on = v;
+      try { localStorage.setItem('ow.devFly', v ? '1' : '0'); } catch { /* ignore */ }
+      if (!v && player.current.name === 'fly') player.set('walk', ctx);
+    },
+  },
   character: rig,
   colliders,
   mobs,
@@ -990,10 +1030,10 @@ function frame(ts?: number) {
     resize();
   }
 
-  const storyBusy = !!storyHost?.story?.busy || !!visit?.busy || !!offering?.busy;
+  const storyBusy = !!storyHost?.story?.busy || !!visit?.busy || !!offering?.busy || !!homecoming?.busy;
   /** In the ring's arms (either way), and down in the dungeon. */
   const held = !!ring?.busy || !!dungeon?.busy, below = !!dungeon?.inside;
-  if (input.pressed('KeyF') && !riding && !cycling && !beacons.busy && !journey?.busy && !storyBusy && !held && !below) player.set(player.current.name === 'fly' ? 'walk' : 'fly', ctx);
+  if (devFly.on && input.pressed('KeyF') && !riding && !cycling && !beacons.busy && !journey?.busy && !storyBusy && !held && !below) player.set(player.current.name === 'fly' ? 'walk' : 'fly', ctx);
   // Only take the press (pressed() consumes it) when a tower is on offer.
   const beaconUsed = !!beacons.action(player.current.name) && (input.pressed('KeyE') || input.pressed('Mouse0')) && beacons.act(player.current.name);
   // Likewise the dungeon's (the pick, at its rockfall).
@@ -1044,7 +1084,7 @@ function frame(ts?: number) {
   // And the ring shuts behind you: the field closes over, and the shrine comes up in the middle of it.
   if (dungeonWon && ring && !ring.sealed && !ring.busy && !dungeon?.inside) ring.seal();
   if (dungeon?.inside) dungeon.update(dt, player.current.name, body.grounded, input.held('KeyE') || input.held('Mouse0'));
-  const veilK = Math.max(ring?.veil ?? 0, dungeon?.veil ?? 0);
+  const veilK = Math.max(ring?.veil ?? 0, dungeon?.veil ?? 0, homecoming?.veil ?? 0);
   if (veilK !== dungeonVeilK) dungeonVeil.style.opacity = String((dungeonVeilK = veilK));
   if (sandboxPickT > 0) {
     sandboxPickT -= dt;
@@ -1158,7 +1198,8 @@ function frame(ts?: number) {
     storyHost.story.noPat = beacons.busy || !!journey?.busy || storyBusy;
   }
   storyHost?.story?.update(dt, input, mode);
-  journey?.update(dt);
+  // (While the homecoming has the guide, the journey leaves it be.)
+  if (!homecoming?.busy) journey?.update(dt);
   // The giant comes the first time you look out of the home tower's head:
   // you see it from up there, then the village, then you're back in the
   // head as it walks off. (A save from before this order, already past the
@@ -1177,13 +1218,16 @@ function frame(ts?: number) {
   const visitWas = !!visit?.busy;
   visit?.update(dt);
   if (!dungeon?.inside) offering?.update(dt, mode);
+  // And on from its last frame: a spirit's light flown home, and the giant getting up.
+  if (!dungeon?.inside && offering) homecoming?.update(dt, offering.state === 'given' && offering.clock < 0 && !veil);
   // How the two of you take it. While it's here, she feels what the guide
   // does. Afterwards the guide stays downcast, and so does she among the
   // wreckage; away from it her grin is gone and her face is set.
   const moodHeld = params.has('mood');
   if (storyHost?.active && storyHost.story) {
     const st = storyHost.story, sp = st.spirit, was = rig.mood;
-    if (st.giantGone) {
+    // (Until one of them is home again: then there's something to be glad of, and neither is downcast.)
+    if (st.giantGone && !homecoming?.home) {
       let d = Infinity;
       if (st.village) for (const q of st.village.site.lane) d = Math.min(d, Math.hypot(body.pos.x - q.x, body.pos.z - q.z));
       grieving = d < (grieving ? 85 : 65);
@@ -1196,7 +1240,7 @@ function frame(ts?: number) {
     if (moodHeld) rig.mood = was;
   } else if (!moodHeld) rig.mood = null;
   // No buttons or tallies over the cutscene.
-  if (visitHud !== (!!visit?.busy || !!offering?.busy)) { visitHud = !!visit?.busy || !!offering?.busy; for (const id of ['story-inv', 'story-act']) { const el = document.getElementById(id); if (el) el.style.visibility = visitHud ? 'hidden' : ''; } }
+  if (visitHud !== (!!visit?.busy || !!offering?.busy || !!homecoming?.busy)) { visitHud = !!visit?.busy || !!offering?.busy || !!homecoming?.busy; for (const id of ['story-inv', 'story-act']) { const el = document.getElementById(id); if (el) el.style.visibility = visitHud ? 'hidden' : ''; } }
   // Handed back to the tower's eyes, looking after it.
   if (visitWas && visit && !visit.busy && beacons.inside && giant) beacons.lookToward(giant.centre.x, giant.centre.z, giant.centre.y - 10);
   // Far from the task: a small arrowhead shows the way.
@@ -1261,7 +1305,7 @@ function frame(ts?: number) {
   // A tower's spirit being freed: the camera watches it, not you, easing
   // in from where it was and back to you after (never a cut).
   // Or the hearth spirit pulling your bike out of its heart.
-  const cine = beacons.cinematic() ?? (dungeon?.inside ? dungeon.cinematic() : null) ?? visit?.cinematic() ?? offering?.cinematic() ?? journey?.cinematic() ?? storyHost?.story?.cinematic() ?? null;
+  const cine = beacons.cinematic() ?? (dungeon?.inside ? dungeon.cinematic() : null) ?? visit?.cinematic() ?? offering?.cinematic() ?? homecoming?.cinematic() ?? journey?.cinematic() ?? storyHost?.story?.cinematic() ?? null;
   if (cine) {
     if (!hadCine) {
       // From a tower's head the turn starts from the head's own view (last frame's camera), and takes its time.
@@ -1274,11 +1318,14 @@ function frame(ts?: number) {
     if (cf !== undefined && camera.fov !== cf) { camera.fov = cf; camera.updateProjectionMatrix(); }
     camLastPos.copy(camera.position); camLastQ.copy(camera.quaternion);
   } else if (hadCine) {
-    orbit.yaw = offering?.afterYaw ?? body.heading + Math.PI;
+    // (From the homecoming's far-off camera it's a cut: easing 200 m back to you goes through whatever's between.)
+    const cut = homecoming?.afterYaw != null;
+    orbit.yaw = homecoming?.afterYaw ?? offering?.afterYaw ?? body.heading + Math.PI;
     if (offering) offering.afterYaw = null;
-    orbit.pitch = 0.18;
+    if (homecoming) homecoming.afterYaw = null;
+    orbit.pitch = cut ? 0.06 : 0.18;
     orbit.targetDistance = 10;
-    camBlendPos.copy(camLastPos); camBlendQ.copy(camLastQ); camBlend = 0; camBlendDur = 1.1;
+    if (cut) { orbit.snap(); camBlend = 1; } else { camBlendPos.copy(camLastPos); camBlendQ.copy(camLastQ); camBlend = 0; camBlendDur = 1.1; }
   }
   hadCine = !!cine;
   if (camBlend < 1) {
@@ -1315,7 +1362,7 @@ function frame(ts?: number) {
   env.update(dt);
   // Down there the light is the cave's own, whatever the hour is above.
   if (dungeon?.inside) dungeon.applyLight(camera.position);
-  ambience.update(dt, { night: env.sky.night, home: atHome(), hush: !!visit?.busy || !!offering?.busy || !!dungeon?.inside });
+  ambience.update(dt, { hush: !!visit?.busy || !!offering?.busy || !!homecoming?.busy || !!dungeon?.inside });
   U.uTime.value = elapsed;
   sky.update(camera, elapsed);
   terrain.update(camera.position);
@@ -1343,12 +1390,6 @@ function frame(ts?: number) {
       `${player.current.name} · ${p.x.toFixed(0)}, ${p.y.toFixed(0)}, ${p.z.toFixed(0)} · ${env.hour.toFixed(1)}h · seed ${seedText}\n` +
       `creatures ${mobs.stats.drawn}/${mobs.stats.mobs} drawn · ${mobs.stats.flocks} flocks · ${mobs.tamed.length} tamed · bikes ${bikes.stats.drawn}/${bikes.stats.bikes}`;
   });
-  // TEMP (testing the drakittens): a crew rockets in and lands in front of
-  // you a moment after the world's up. ?drak=0 turns it off.
-  if (drakDemoT >= 0 && !terrain.busy && (drakDemoT += dt) > 2.5) {
-    drakDemoT = -1;
-    drakArrive(16);
-  }
   if (veil && !terrain.busy && ++readyFrames > 10) {
     veil.classList.add('gone');
     setTimeout(() => veil?.remove(), 1000);
@@ -1529,7 +1570,7 @@ function updateAimHud() {
     ride: next ? (mounted ? 'Switch' : 'Ride') : mounted ? 'Hop off' : null,
     lasso: a ? (a.action === 'lasso' ? 'Lasso' : a.action === 'lead' ? 'Lead' : 'Let go') : null,
     down: (!!riding && !!riding.species.mount.fly) || player.current.name === 'fly',
-    fly: !riding && !cycling,
+    fly: devFly.on && !riding && !cycling,
   });
   const html = tips.join(' · ');
   if (promptEl.innerHTML !== html) promptEl.innerHTML = html;
@@ -1538,9 +1579,8 @@ function updateAimHud() {
 
 let veil = document.getElementById('veil');
 let readyFrames = 0;
-let drakDemoT = params.get('drak') === '0' || params.has('capture') ? -1 : 0;
 /**
- * A crew of three drakittens (pink, dark, tabby) rockets in and lands in
+ * Dev (`__ow.drakArrive()`): a crew of three drakittens (pink, dark, tabby) rockets in and lands in
  * the cabin's front yard if you're at the cabin, else `d` m in front of you.
  */
 function drakArrive(d = 16, n = 3) {
@@ -1567,7 +1607,7 @@ window.__ow = {
   ready: () => !terrain.busy,
   stats: () => ({ ...terrain.stats, calls: renderer.info.render.calls, tris: renderer.info.render.triangles, kinds: terrain.kindStats() }),
   setHour: (h: number) => { env.hour = h; env.apply(); },
-  /** The ambient soundtrack's mix and what's playing (tests). */
+  /** The music's gain and what's playing (tests). */
   ambience,
   setPalette: (p: string | null) => { env.paletteOverride = p; },
   teleport: (x: number, z: number) => placePlayer(x, z),
@@ -1640,6 +1680,7 @@ window.__ow = {
   _body: player.body,
   _cam: camera,
   _orbit: orbit,
+  _rig: rig,
   mobs,
   /** Drop a flock (floof|crow|stelk) `d` m in front of the explorer. */
   spawnFlock: (name: string, d = 14, n?: number) => {
@@ -1677,12 +1718,25 @@ window.__ow = {
   leaveDungeon: () => { if (dungeon?.inside) { dungeon.inside = false; leaveDungeon(); } },
   /** What you do with the light, above (giant/offering.ts): `offering().debug('held'|'placed'|'given')`, `.state`, `.clock`, `.cues`. */
   offering: () => offering,
+  /** What follows it (giant/homecoming.ts): `.state`, `.phase`, `.clock`, `.waiting` (under the veil, for the land), `.left`, `.settled`, `.route`. */
+  homecoming: () => homecoming,
+  /** The giant's footfalls on to the second ring, and how long the search for the dungeon sites took this load (ms; 0: cached). */
+  onward: () => homecoming?.route ?? [],
+  siteSearchMs: () => siteSearchMs,
+  siteSearchEach: () => gen.searchMs,
   /** The stone hands about the world: `hands().list` so far, `hands().survey(x, z, cells)` looks further at once. */
   hands: () => hands,
   /** Dev: as if you'd just taken the light: the dungeon marked done, and up you come on the rockhopper. */
   winDungeon,
   /** The other spirits' houses down the lane (null when no lane fits the seed). */
   village: () => storyHost?.story?.village ?? null,
+  /** Dev: house `i` at step `step` of being built again (0 nothing, 5 home; `Village.setStep`), the giant's print under it filled in. With no step: the step it's at. */
+  house: (i: number, step?: number) => {
+    const v = storyHost?.story?.village, h = v?.houses[i];
+    if (!v || !h) return null;
+    if (step !== undefined) { if (step > 0) trail.fill(h.plot.x, h.plot.z); v.setStep(i, step); }
+    return h.step;
+  },
   trail,
   /** Phase 3 (shots/tests): `n` fresh creatures of a species, lassoed inside the pasture so they come to live there. */
   bringHome: (name: string, n = 1) => {

@@ -368,6 +368,19 @@ if (kinds.includes('quest')) {
   check('hands off while the crow and the giant have it', moved < 0.3, `moved ${moved.toFixed(2)} m with W held`);
   check('the giant opened its mouth', seen.mouth, JSON.stringify(seen));
   check('the giant has the light: awake, mouth shut, smiling; you are still on the rockhopper', o.state === 'given' && !o.busy && o.mouth === 0 && o.grin > 0.4 && o.awake && o.mode === 'ride', JSON.stringify(o));
+  // And it carries straight on (giant/homecoming.ts; no village out here, so no crow): the giant gets up out of
+  // the ground and walks off toward the second ring. Hands off (W held) until it has taken a few steps.
+  await run(() => window.__bot.key('KeyW', true));
+  let h, hmoved = 0;
+  for (let i = 0; i < 20; i++) {
+    await run(() => window.__bot.tick(90));
+    h = await run(() => { const ow = window.__ow, hc = ow.homecoming(), g = ow.giant(), p = ow._body.pos; return { state: hc.state, phase: hc.phase, left: hc.left, sunk: +g.sunk.toFixed(2), walking: g.walking, steps: +g.steps.toFixed(1), solid: g.surface(g.centre.x, g.centre.z, 1e4, 1e4) > -1e9, mode: ow.mode(), p: [p.x, p.z] }; });
+    if (h.state === 'playing') hmoved = Math.max(hmoved, Math.hypot(h.p[0] - from[0], h.p[1] - from[2]));
+    if (i % 2 === 0 || h.state === 'done') await shot(`q-23-rise-${String(i).padStart(2, '0')}`);
+    if (h.state === 'done') break;
+  }
+  await run(() => window.__bot.up());
+  check('the giant got up and walked off, not solid, and you were held until it had: still mounted', h.state === 'done' && h.left && h.sunk < 0.05 && h.walking && !h.solid && hmoved < 0.3 && h.mode === 'ride', JSON.stringify(h));
   await run(() => window.__bot.tick(90));
   await shot('q-23-after');
   // The dungeon is shut: walking about on what was the field does nothing.

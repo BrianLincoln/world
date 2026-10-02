@@ -176,13 +176,37 @@ to stay inside the art direction (`docs/BRIEF.md`) and "nothing scary".
   closes into paving and the dark spirit goes down with it; the shrine is
   the mount you found below, in stone, with a bowl on its back; the light
   goes to the bowl by itself; a crow comes off the giant's head, takes it,
-  and flies into the giant's open mouth. Not built: the spirit flown
-  home, the giant getting up. `docs/NEXT-dungeon1.md`.)*
+  and flies into the giant's open mouth. And on from the smile, still
+  hands off (`src/giant/homecoming.ts`): one of the crows in its trees
+  leaves with its light; the camera cuts to the village under a short
+  veil, to the guide's cabin, where the crow lets the light go from a few
+  metres up, it lands in dust and is the spirit again, and the two run to
+  each other; the crow flies on out of sight; the camera cuts back, and the
+  giant stands up out of the ground and walks to a second ring, leaving
+  prints, and lies down there. That ring is bare stones and shut: nothing
+  is under it yet, so **the trail ends there for now**.
+  `docs/NEXT-dungeon2.md`.)*
 - **Rescued spirits mend the village as you go** (owner, 2026-10-01): you
   see them working on it and clearing up, and it steps on at each
   checkpoint; to start with, a checkpoint is a dungeon finished. Not one
-  house rebuilt per rescue as a task for you. *(Not built. This answers
-  conflict 9's "awaiting a yes" differently.)*
+  house rebuilt per rescue as a task for you. **A house is built again in five steps, hands
+  off, unseen, one step per dungeon finished to start with** (owner,
+  2026-10-02). Step 0 is a spirit come home and nothing built, not even a
+  footing: that is where dungeon 1 leaves it. Then: 1 the stone footing and
+  a stack of its boards; 2 low walls; 3 walls and gables, open to the sky;
+  4 a bare boarded roof; 5 home (door, lit window, smoke). Every step is
+  solid, never a frame or an outline: nothing may look like it's yours to
+  build. The building isn't seen happening; the spirit only potters at the
+  plot. (Later, maybe: seen picking up debris, hammering, sawing.)
+  *(Built as geometry for all three huts, `Village.setStep`; steps 1 to 5
+  are wired to nothing yet. Which houses step on and when is undecided. Once a spirit is home, the guide and the explorer are no
+  longer downcast. A rescued spirit gives you nothing yet: the dungeon's
+  mount is the reward. `docs/NEXT-dungeon2.md`. This answers conflict 9's "awaiting a yes"
+  differently.)*
+- **There is a list of dungeon sites** (2026-10-02): `WorldGen.dungeons`,
+  two so far, each a ring of stones found from the seed, the second
+  0.9-1.5 km on from the first by a way a bike can take. Where the only
+  way on is back the way it came, the giant treads in its own prints.
 - **Stone hands stand about the world** (owner, 2026-10-01): the hand in
   dungeon 1 didn't read as the giant's but was liked, so the shape is
   reused out of doors, on islands, headlands and summits. They do nothing
@@ -470,9 +494,10 @@ it is Conflict 2; this is the shape once that's settled.
 2. The giant comes: the village is smashed, the spirits are taken, the
    guide is left with you.
 3. Follow the footprints to the first dungeon. *(The send-off is built,
-   2026-10-01: once a creature lives at the stable, the guide looks at a
-   wrecked house, walks you to the edge of the village and points down
-   the trail with a footprints bubble, its face brave and defiant: go
+   2026-10-01: once a creature lives at the stable, the guide comes over,
+   walks you to the edge of the village (waving you on, the footprints
+   bubble up all the way) and stands there hopping and pointing down
+   the trail, its face brave and defiant: go
    that way, save my people. It stays behind. Mounted or on foot is up to
    you. It does it again each time you come home, until you've found the
    ring.)*

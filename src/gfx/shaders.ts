@@ -913,7 +913,8 @@ void main() {
       vec2 pc = vec2(sign(p.x) * uEyePos.x, uEyePos.y) + lk;
       vec2 pq = (p - pc) / (uPupil * vec2(1.0, max(lids, 0.2)));
       float pd = (length(pq) - 1.0) * min(uPupil.x, uPupil.y);
-      col = mix(col, uInk, fillE(max(pd, d), aa));
+      // A pupil of no size is no pupil (blank eyes), not a divide by zero.
+      if (min(uPupil.x, uPupil.y) > 0.0) col = mix(col, uInk, fillE(max(pd, d), aa));
       col = mix(col, uInk, fillE(abs(d) - lw * 0.6, aa));
       keep = mix(keep, 0.95, white);
     } else if (lids < -0.02) {

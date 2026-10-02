@@ -7,7 +7,8 @@ import type { Input } from '../player/input';
 // - Left half: a floating stick that appears under the thumb. A light push
 //   walks, a full push jogs, pushing past the rim sprints.
 // - Right half: drag to look; a second finger pinches to zoom.
-// - Buttons: jump always; ride / hop off, lasso and descend when relevant; fly.
+// - Buttons: jump always; ride / hop off, lasso and descend when relevant; fly when
+//   the dev setting is on.
 
 export interface TouchContext {
   /** Label for the E button, or null to hide it. */
@@ -16,7 +17,7 @@ export interface TouchContext {
   lasso: string | null;
   /** Show the descend (C) button. */
   down: boolean;
-  /** Show the fly (F) toggle. */
+  /** Show the fly (F) toggle (dev only). */
   fly: boolean;
 }
 
@@ -38,7 +39,7 @@ export class TouchControls {
   private pinch = 0;
   /** Seconds since a finger last steered the camera (0 while one is down). */
   lookIdle = 99;
-  private last: TouchContext = { ride: null, lasso: null, down: false, fly: true };
+  private last: TouchContext = { ride: null, lasso: null, down: false, fly: false };
 
   constructor(private input: Input, el: HTMLElement) {
     document.body.classList.add('touch');

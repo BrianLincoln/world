@@ -1,24 +1,24 @@
-// Turns the ambient audio pack's WAVs (150 MB, not in the repo) into the MP3s
-// the game ships in public/audio.
+// Turns the music's WAVs (not in the repo) into the MP3s the game ships in
+// public/audio.
 //
-//   node scripts/audio.mjs [pack folder]
+//   node scripts/audio.mjs [folder the WAVs are in]
 //
 // MP3 adds a little silence at both ends, which would click at a loop's seam.
 // So each loop is written with its own tail in front and its own head behind
 // (PAD seconds of each): the file is periodic all the way through, and the
 // game loops a window exactly one period long inside it (see `PAD` and `len`
 // in src/audio/ambience.ts, which must match what this prints). One-shots go
-// through as they are. preview_reference_only.wav is never converted.
+// through as they are.
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 
 const PAD = 0.5;
-const LOOPS = ['bed_woods', 'bed_home', 'air_day', 'air_night', 'layer_night'];
-const SHOTS = ['pluck_warm_01', 'pluck_warm_02', 'pluck_warm_03', 'pluck_warm_04'];
+const LOOPS = ['warm_field_v3_exploration_loop'];
+const SHOTS = [];
 
-const src = process.argv[2] ?? join(homedir(), 'Downloads/fjellheim_audio_implementation_pack');
+const src = process.argv[2] ?? join(homedir(), 'Downloads');
 const out = new URL('../public/audio/', import.meta.url).pathname;
 mkdirSync(out, { recursive: true });
 

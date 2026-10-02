@@ -172,7 +172,24 @@ export function visitRoute(gen: WorldGen): VisitRoute | null {
   falls.push(...best);
 
   // The long walk: on to that way, rounded off, then a footfall every STEP along it.
-  let line: [number, number][] = [[bestEnd.x - Math.sin(bestEnd.h) * STEP, bestEnd.z - Math.cos(bestEnd.h) * STEP], [bestEnd.x, bestEnd.z], ...dg.way.slice(join)];
+  // (The line starts a step behind where the village steps ended, so the turn on to it is rounded too.)
+  // On dry ground, clear of the towers' rock and the ring: a foot that wouldn't be is drawn in toward the line.
+  falls.push(...stride([[bestEnd.x - Math.sin(bestEnd.h) * STEP, bestEnd.z - Math.cos(bestEnd.h) * STEP], [bestEnd.x, bestEnd.z], ...dg.way.slice(join)], bestEnd.side,
+    (x, z, sx, sz) => Math.min(ground(x, z), ground(sx, sz)) > 1.5 && (!tw || Math.hypot(sx - tw.x, sz - tw.z) > 55) && Math.hypot(sx - home.x, sz - home.z) > 55 && Math.hypot(sx - dg.x, sz - dg.z) > dg.r + 16));
+  const j = lead + 1;
+  return { start: { x: far.c.x + ox * STEP * (j - 0.5), z: far.c.z + oz * STEP * (j - 0.5), heading: far.yaw }, falls, firstHouse, lastHouse };
+}
+
+/**
+ * Footfalls along a line (rounded off first), one every STEP on alternate
+ * sides: the first on the other side from `side` (+1: its right), two steps
+ * along from the line's second point. `ok(x, z, sx, sz)`: may an ankle come
+ * down at (x, z), its sole's middle at (sx, sz)? One that may not is drawn in
+ * toward the line.
+ */
+function stride(way: [number, number][], side: number, ok: (x: number, z: number, sx: number, sz: number) => boolean): Footfall[] {
+  const falls: Footfall[] = [];
+  let line = way;
   for (let pass = 0; pass < 3; pass++) {
     const sm: [number, number][] = [line[0]];
     for (let i = 0; i + 1 < line.length; i++) {
@@ -182,27 +199,117 @@ export function visitRoute(gen: WorldGen): VisitRoute | null {
     sm.push(line[line.length - 1]);
     line = sm;
   }
-  let side = bestEnd.side, need = STEP * 2, i = 0;
-  // (The line starts a step behind where the village steps ended, so the turn on to it is rounded too.)
+  let need = STEP * 2, i = 0;
   while (i + 1 < line.length) {
     const a = line[i], b = line[i + 1], l = Math.hypot(b[0] - a[0], b[1] - a[1]);
     if (l < need) { need -= l; i++; continue; }
     const t = need / l, cx = a[0] + (b[0] - a[0]) * t, cz = a[1] + (b[1] - a[1]) * t;
     const h = Math.atan2(b[0] - a[0], b[1] - a[1]);
     side = -side;
-    // On dry ground, clear of the towers' rock and the ring: a foot that wouldn't be is drawn in toward the line.
     let x = cx, z = cz;
     for (const k of [1, 0.6, 0.25, 0]) {
       x = cx + Math.cos(h) * side * TRACK * k; z = cz - Math.sin(h) * side * TRACK * k;
-      const sx = x - Math.sin(h) * SOLE, sz = z - Math.cos(h) * SOLE;
-      if (Math.min(ground(x, z), ground(sx, sz)) > 1.5 && (!tw || Math.hypot(sx - tw.x, sz - tw.z) > 55) && Math.hypot(sx - home.x, sz - home.z) > 55 && Math.hypot(sx - dg.x, sz - dg.z) > dg.r + 16) break;
+      if (ok(x, z, x - Math.sin(h) * SOLE, z - Math.cos(h) * SOLE)) break;
     }
-    falls.push(fall(x, z, h, -1));
+    falls.push({ x: x - Math.sin(h) * SOLE, z: z - Math.cos(h) * SOLE, yaw: h, house: -1 });
     line[i] = [cx, cz];
     need = STEP;
   }
-  const j = lead + 1;
-  return { start: { x: far.c.x + ox * STEP * (j - 0.5), z: far.c.z + oz * STEP * (j - 0.5), heading: far.yaw }, falls, firstHouse, lastHouse };
+  return falls;
+}
+
+/** Where the giant comes to rest at the end of some footfalls: half way between the last two, facing as the last. */
+export function restOf(falls: Footfall[]) {
+  const a = falls[falls.length - 1], b = falls[falls.length - 2] ?? a;
+  return { x: (a.x + b.x) / 2, z: (a.z + b.z) / 2, heading: a.yaw };
+}
+
+/**
+ * The giant's footfalls from where it lay (`from`) by one dungeon's ring on
+ * to the next (`gen.dungeons[n]`, n >= 1): along the way worldgen found
+ * (round the ring it is leaving, never through it), a footfall every 21 m,
+ * the first with its left foot. A pure function of the seed, `from` and
+ * `before` (which are too: the walk before this one), so a reloaded save can
+ * lay the prints without the walk.
+ *
+ * `before`: the footfalls that brought it here. Often the only way on is
+ * back the way it came for a while (a ring on a headland). There it turns
+ * round and treads in its own prints, one after another, until the new way
+ * leaves the old: two sets of prints along one line would cut into each
+ * other (world/prints.ts keeps one print to a 12 m cell).
+ */
+export function onwardRoute(gen: WorldGen, n: number, from: { x: number; z: number; heading: number }, before: Footfall[] = []): Footfall[] {
+  const sites = gen.dungeons, dg = sites[n];
+  if (!dg) return [];
+  const ground = (x: number, z: number) => gen.height(x, z);
+  const W = dg.way;
+  // How far a point is from the new way, and how far along it that is.
+  const onWay = (x: number, z: number) => {
+    let best = Infinity, at = 0, run = 0;
+    for (let i = 0; i + 1 < W.length; i++) {
+      const ax = W[i][0], az = W[i][1], dx = W[i + 1][0] - ax, dz = W[i + 1][1] - az, l = Math.hypot(dx, dz) || 1;
+      const t = Math.max(0, Math.min(1, ((x - ax) * dx + (z - az) * dz) / (l * l))), d = Math.hypot(x - ax - dx * t, z - az - dz * t);
+      if (d < best) { best = d; at = run + t * l; }
+      run += l;
+    }
+    return { d: best, at };
+  };
+  // The middle of each old print, the side of the old line it's on (+1: its right, walking as it then was), and the line's own point there.
+  const N = before.length;
+  const mid = (f: Footfall) => ({ x: f.x + Math.sin(f.yaw) * SOLE, z: f.z + Math.cos(f.yaw) * SOLE });
+  const sideOf = (i: number) => {
+    const a = before[N - 1], b = before[N - 2];
+    const s = Math.sign((a.x - b.x) * Math.cos(a.yaw) - (a.z - b.z) * Math.sin(a.yaw)) || 1;
+    return (N - 1 - i) % 2 ? -s : s;
+  };
+  const centre = (i: number) => { const f = before[i], m = mid(f), s = sideOf(i); return { x: m.x - Math.cos(f.yaw) * s * TRACK, z: m.z + Math.sin(f.yaw) * s * TRACK }; };
+  // Back along its own prints for as long as the new way runs along the old: from the last print that isn't
+  // under it, each further along the new way than the one before.
+  const back: number[] = [];
+  if (N > 6) {
+    let last = -1;
+    for (let i = N - 3; i >= 0; i--) {
+      const c = centre(i), w = onWay(c.x, c.z);
+      if (w.d > 12 || w.at <= last || before[i].house >= 0) break;
+      last = w.at;
+      back.push(i);
+    }
+  }
+  // It lies down well short of the ring, whichever way the way comes at it: not on it (it is 44 m across the shoulders).
+  const short = (falls: Footfall[]) => {
+    while (falls.length > 4) { const r = restOf(falls); if (Math.hypot(r.x - dg.x, r.z - dg.z) >= 58) break; falls.pop(); }
+    return falls;
+  };
+  const dry = (x: number, z: number, sx: number, sz: number) => Math.min(ground(x, z), ground(sx, sz)) > 1.5 && gen.towerDist(sx, sz, 200) > 55 && sites.every((s) => Math.hypot(sx - s.x, sz - s.z) > s.r + 16);
+  if (back.length < 3) {
+    // It turns on to the way from where it stands: the way's first few points are nearly under it.
+    const way = W.filter((p, i) => i === W.length - 1 || Math.hypot(p[0] - from.x, p[1] - from.z) > 45);
+    return short(stride([[from.x - Math.sin(from.heading) * STEP, from.z - Math.cos(from.heading) * STEP], [from.x, from.z], ...way], 1, dry));
+  }
+  // Its first step is with its left foot: a print that was its right's, coming. (The one before `back[0]` if need be: it's stood half over it.)
+  if (sideOf(back[0]) < 0) back.unshift(N - 2);
+  const falls: Footfall[] = [];
+  for (const [k, i] of back.entries()) {
+    const f = before[i], m = mid(f);
+    // It comes round over its first three steps: each print is trodden a little more the new way.
+    let turn = f.yaw + Math.PI - from.heading;
+    turn = Math.atan2(Math.sin(turn), Math.cos(turn));
+    const yaw = k < 2 ? from.heading + turn * ((k + 1) / 3) : f.yaw + Math.PI;
+    falls.push({ x: m.x - Math.sin(yaw) * SOLE, z: m.z - Math.cos(yaw) * SOLE, yaw, house: -1 });
+  }
+  // And on, where the new way leaves the old: from the line's point at the last of those prints.
+  const iLast = back[back.length - 1], c1 = centre(iLast), c0 = centre(Math.min(N - 1, iLast + 1)), far = onWay(c1.x, c1.z).at;
+  const rest: [number, number][] = [];
+  let run = 0;
+  for (let i = 0; i < W.length; i++) {
+    if (i) run += Math.hypot(W[i][0] - W[i - 1][0], W[i][1] - W[i - 1][1]);
+    if (run > far + 12) rest.push(W[i]);
+  }
+  // (Its new side at that last print is the other from the old.) Never on what's left of the old prints near the fork.
+  const old = before.filter((_, i) => i < iLast).map(mid);
+  const clear = (x: number, z: number, sx: number, sz: number) => dry(x, z, sx, sz) && old.every((o) => Math.hypot(o.x - sx, o.z - sz) > 19);
+  if (rest.length) falls.push(...stride([[c0.x, c0.z], [c1.x, c1.z], ...rest], -sideOf(iLast), clear));
+  return short(falls);
 }
 
 export interface VisitDeps {
@@ -513,7 +620,8 @@ export class Visit {
     }
     // At the ring it gives up walking and settles into the ground: a hill
     // again, its crows back in its trees with their lights.
-    if (g.arrived && !g.dormant) {
+    if (g.arrived && !g.dormant && !this.settled) {
+      this.settled = true;
       // First, what it came here to do: it lets a dark spirit go, down into the ring.
       this.d.ring()?.free(v3.copy(g.centre).setY(g.centre.y - 6));
       g.dormant = true;
@@ -778,6 +886,13 @@ export class Visit {
     return { pos: this.pos, at: this.at, fov };
   }
 
+  /** It has got to the ring and lain down (once: when it gets up again and walks on, that's giant/homecoming.ts's). */
+  private settled = false;
+  /** Its crows, once there are any (bird n took spirit n, and roosts in its trees with that one's light). */
+  get crows() { return this.birds; }
+  /** How many spirits were taken. */
+  get spirits() { return this.count; }
+
   /** A save from after the visit: the prints, the wreckage, and the giant where it ended up with its birds and their lights. Nothing is replayed. */
   restore() {
     const r = this.route;
@@ -788,10 +903,11 @@ export class Visit {
       this.d.trail.stamp(v1.set(f.x, 0, f.z), f.yaw);
       if (f.house >= 0) v.smash(f.house, (x, z) => this.d.trail.height(x, z), true);
     }
-    const a = r.falls[r.falls.length - 1], b = r.falls[r.falls.length - 2];
-    const g = this.d.summon((a.x + b.x) / 2, (a.z + b.z) / 2, a.yaw);
+    const at = restOf(r.falls);
+    const g = this.d.summon(at.x, at.z, at.heading);
     this.flock(g);
     g.settle();
+    this.settled = true;
     this.d.ring()?.setOpen();
     for (const [i, bird] of this.birds!.birds.entries()) {
       bird.state = 'roost';

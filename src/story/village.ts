@@ -21,6 +21,14 @@ import type { Gesture } from './spirit';
 // Until then (and for anyone who's home again) they mill about: in at the
 // door and out again, a stroll along the lane, over to a neighbour to talk
 // with their arms, a wave across the way or at you (`mill`).
+//
+// A spirit brought home (`comeHome`: giant/homecoming.ts, when a dungeon is
+// done) is back among the wreckage, and that is all: step 0, nothing built.
+// Its house is built again in five steps (`setStep`, `buildStage`), each a
+// whole thing drawn from its number, never seen happening: the footing and
+// a stack of its boards; low walls; walls and gables; a bare boarded roof;
+// home. While it's part built, whoever lives there potters between the
+// stack and the plot (`work`).
 
 /** Hut scale: the door (1.2 m) is for a spirit, not for you. */
 const S = 1.8;
@@ -85,14 +93,88 @@ function buildHut(v: number): { geo: THREE.BufferGeometry; leaf: THREE.BufferGeo
   return { geo, leaf, hinge: new THREE.Vector3((dx - 0.22) * S, 0, (hd + 0.045) * S), doorX: dx * S, door: new THREE.Vector3(dx * S, 0, (hd + 0.62) * S), chimney: new THREE.Vector3(cx * S, (cTop + 0.1) * S, cz * S) };
 }
 
+/** A house whole again: the last of the steps (`Village.setStep`). */
+export const HOME = 5;
+/** How far up the walls are at step 2 (of their height). */
+const LOW = 0.45;
+/** How many of a house's boards are still in the stack, and of its stones still lying round the footing, at each step. */
+const STACKED = [0, 26, 18, 10, 4, 0], LYING = [0, 8, 4, 0, 0, 0];
+
+/**
+ * A house being built again, at step 1 to 4 (0 is nothing at all, 5 is the
+ * hut itself: `buildHut`). Every step is solid, something that has been
+ * built, never a frame or an outline: this is not yours to build.
+ *  1. the stone footing and the doorstep;
+ *  2. board walls part way up, the doorway a gap in them, the chimney begun;
+ *  3. walls to the eaves and both gables, a ridge beam across, the chimney
+ *     whole; a doorway and window holes, dark; open to the sky;
+ *  4. the roof boarded over, bare (not yet in its colour); the window has
+ *     its bars. No door, no light, no smoke.
+ */
+function buildStage(v: number, step: number): THREE.BufferGeometry {
+  const { w, d, h, rise, wall } = HUTS[v];
+  const top = BASE + h, hd = d / 2, dx = -w * 0.17;
+  const parts: THREE.BufferGeometry[] = [];
+  parts.push(rbox(w + 0.2, 0.9, d + 0.2, 0.07, 0, BASE - 0.45, 0, K.stone));
+  parts.push(rbox(0.6, 0.14, 0.3, 0.05, dx, BASE - 0.06, hd + 0.16, K.stone));
+  const cx = w * 0.24, cz = -d * 0.2, cTop = top + rise + 0.42;
+  if (step === 2) {
+    const wh = h * LOW;
+    parts.push(rbox(w, wh + 0.1, d, 0.05, 0, BASE + wh / 2, 0, wall));
+    // (Looking down into it: the dark between the walls.)
+    parts.push(kbox(w - 0.2, 0.02, d - 0.2, 0, BASE + wh + 0.052, 0, K.soot));
+    parts.push(kbox(0.42, wh + 0.05, 0.13, dx, BASE + wh / 2 + 0.03, hd - 0.04, K.soot));
+    parts.push(kbox(0.26, wh + 0.3, 0.26, cx, BASE + (wh + 0.3) / 2, cz, K.stone));
+  }
+  if (step >= 3) {
+    parts.push(rbox(w, h + 0.1, d, 0.05, 0, BASE + h / 2, 0, wall));
+    for (const sx of [-1, 1]) {
+      const g = gable(d, rise, 0.1, wall, -0.05);
+      g.rotateY(Math.PI / 2);
+      g.translate(sx * (w / 2 - 0.05), top, 0);
+      parts.push(g);
+    }
+    parts.push(kbox(0.42, 0.63, 0.024, dx, BASE + 0.335, hd + 0.01, K.soot));
+    parts.push(kbox(0.56, 0.07, 0.09, dx, BASE + 0.7, hd + 0.03, K.trim));
+    const wx = w * 0.24, wy = BASE + h * 0.58, ws = 0.24;
+    parts.push(kbox(ws + 0.1, ws + 0.1, 0.05, wx, wy, hd + 0.01, K.trim));
+    parts.push(kbox(ws, ws, 0.07, wx, wy, hd + 0.015, K.soot));
+    parts.push(kbox(ws + 0.14, 0.05, 0.1, wx, wy - ws / 2 - 0.06, hd + 0.03, K.trim));
+    parts.push(kbox(0.05, 0.2, 0.2, -w / 2 - 0.01, top + rise * 0.3, 0, K.soot));
+    parts.push(kbox(0.26, 0.9, 0.26, cx, cTop - 0.45, cz, K.stone));
+    parts.push(kbox(0.34, 0.07, 0.34, cx, cTop, cz, K.stone));
+    if (step === 3) {
+      parts.push(kbox(w - 0.2, 0.02, d - 0.2, 0, top + 0.052, 0, K.soot));
+      parts.push(kbox(w + 0.1, 0.09, 0.09, 0, top + rise - 0.03, 0, K.wood));
+    } else {
+      const a = Math.atan2(rise, hd), len = Math.hypot(hd, rise) * (1 + OVER / hd);
+      for (const sz of [-1, 1]) parts.push(kbox(w + 0.5, 0.11, len, 0, top + rise - Math.sin(a) * len / 2 + 0.06, sz * Math.cos(a) * len / 2, K.cut, sz * a));
+      parts.push(kbox(0.03, ws, 0.085, wx, wy, hd + 0.015, K.trim));
+      parts.push(kbox(ws, 0.03, 0.085, wx, wy, hd + 0.015, K.trim));
+    }
+  }
+  const geo = merge(parts);
+  geo.scale(S, S, S);
+  geo.computeVertexNormals();
+  geo.computeBoundingSphere();
+  return geo;
+}
+
 export interface House {
   plot: Plot; hw: number; hd: number; wallTop: number; rise: number; door: THREE.Vector3; chimney: THREE.Vector3;
   meshes: THREE.Object3D[]; smashed: boolean;
+  /**
+   * How far built it is (`Village.setStep`): `HOME` is whole (as is a house
+   * never trodden on), 0 is a wreck with nothing done about it, 1 to 4 are
+   * `buildStage`'s. And at 1 to 4: what's drawn of it, where its boards are
+   * stacked, and how high its walls stand (above the plot).
+   */
+  step: number; stage?: THREE.Object3D[]; stack?: THREE.Vector3; high: number;
   /** The door: where it is along the front (house-local), its leaf, and how far it's swung in (0..1). */
   doorX: number; leaf: THREE.Object3D; ajar: number;
 }
 
-type Doing = 'home' | 'stroll' | 'look' | 'back' | 'meet' | 'chat' | 'part' | 'in' | 'inside' | 'out';
+type Doing = 'home' | 'stroll' | 'look' | 'back' | 'meet' | 'chat' | 'part' | 'in' | 'inside' | 'out' | 'work';
 /** What one of them is up to while nothing's wrong. */
 interface Life {
   doing: Doing;
@@ -115,7 +197,13 @@ interface Life {
 const EYE = 0.34;
 
 /** A board or a stone thrown out of a smashed house. */
-interface Piece { stone: boolean; pos: THREE.Vector3; vel: THREE.Vector3; rot: THREE.Euler; spin: THREE.Vector3; size: THREE.Vector3; tint: THREE.Color; rest: boolean }
+interface Piece {
+  stone: boolean; pos: THREE.Vector3; vel: THREE.Vector3; rot: THREE.Euler; spin: THREE.Vector3; size: THREE.Vector3; tint: THREE.Color; rest: boolean;
+  /** Whose house it was a piece of. */
+  house: number;
+  /** Where it came to rest when the house burst (kept once the house's step first moves it), and whether it has since gone back into the house. */
+  lay?: { pos: THREE.Vector3; rot: THREE.Euler; size: THREE.Vector3 }; used?: boolean;
+}
 const BOARDS = 26, STONES = 8;
 const WALL_TINT = [BIOME.cabinWall, BIOME.cabinWall2, BIOME.cabinWall];
 const ROOF_TINT = [BIOME.cabinRoof, BIOME.moss, BIOME.cabinRoof];
@@ -145,6 +233,7 @@ export class Village {
   private smoke = new Puffs('#f3ebe0', 40, 0, 0.55);
   private smokeT: number[] = [];
   private mat = glintMat({ toneVar: 0 });
+  private caster = makeCasterMaterial({});
   private pieces: Piece[] = [];
   private boards = new PartBatch(colored(new THREE.BoxGeometry(1, 1, 1), '#ffffff'), { keep: 0.5 }, 5 * BOARDS);
   private stones = new PartBatch(colored(new THREE.IcosahedronGeometry(0.5, 2), '#ffffff'), { keep: 0.3 }, 5 * STONES);
@@ -155,7 +244,7 @@ export class Village {
     this.gy = d.ground;
     // Lit windows by day too: somebody's home.
     this.mat.uniforms.uWin.value = 1;
-    const caster = makeCasterMaterial({});
+    const caster = this.caster;
     const lane = site.lane, mid = lane[Math.floor(lane.length / 2)];
     for (const [i, p] of site.plots.filter((q) => q.house).entries()) {
       const built = buildHut(p.variant);
@@ -205,7 +294,7 @@ export class Village {
         this.taken.push(false);
         this.group.add(spirit.group);
       }
-      this.houses.push({ plot: p, hw: (sp.w / 2) * S, hd: (sp.d / 2) * S, wallTop: (BASE + sp.h) * S, rise: sp.rise * S, door, chimney, meshes: [mesh, shade, leaf], smashed: false, doorX: built.doorX, leaf, ajar: 0 });
+      this.houses.push({ plot: p, hw: (sp.w / 2) * S, hd: (sp.d / 2) * S, wallTop: (BASE + sp.h) * S, rise: sp.rise * S, door, chimney, meshes: [mesh, shade, leaf], smashed: false, step: HOME, high: (BASE + sp.h) * S, doorX: built.doorX, leaf, ajar: 0 });
     }
     this.mid.set(mid.x, d.ground(mid.x, mid.z) + EYE, mid.z);
     this.group.add(this.smoke.group, this.boards.mesh, this.stones.mesh);
@@ -222,6 +311,7 @@ export class Village {
     const h = this.houses[i];
     if (h.smashed) return;
     h.smashed = true;
+    h.step = 0;
     for (const m of h.meshes) m.visible = false;
     if (instant) for (const [k, s] of this.spirits.entries()) if (this.home[k] === i) { this.taken[k] = true; s.group.visible = false; }
     const v = h.plot.variant;
@@ -232,7 +322,7 @@ export class Village {
       const a = r(1) * 6.283, out = 7 + r(2) * 10, ring = 5 + r(6) * 4;
       const size = stone ? new THREE.Vector3(0.5 + r(3) * 0.5, 0.35 + r(4) * 0.3, 0.5 + r(5) * 0.4) : new THREE.Vector3(1.5 + r(3) * 1.9, 0.12, 0.4 + r(4) * 0.35);
       const p: Piece = {
-        stone, size, rest: false,
+        stone, size, rest: false, house: i,
         pos: new THREE.Vector3(h.plot.x + Math.cos(a) * ring, h.plot.y + 0.6 + r(7) * 2.5, h.plot.z + Math.sin(a) * ring),
         vel: new THREE.Vector3(Math.cos(a) * out, 11 + r(9) * 11, Math.sin(a) * out),
         rot: new THREE.Euler(r(10) * 6, r(11) * 6, r(12) * 6),
@@ -302,6 +392,111 @@ export class Village {
     return tail;
   }
 
+  /**
+   * Spirit `k` is home again: set down at `at` (or on its doorstep), itself
+   * once more, and with a life to get on with among what's left. (`mill`
+   * runs again for anyone who's here.)
+   */
+  comeHome(k: number, at?: THREE.Vector3) {
+    const s = this.spirits[k], l = this.life[k];
+    this.taken[k] = false;
+    s.carried = null;
+    s.mood = null;
+    s.gesture = null;
+    s.group.visible = true;
+    s.haste = 1.6 + hash01(k, 3, this.seed, 979) * 0.5;
+    this.way[k] = null;
+    const p = (at ?? l.spot).clone();
+    p.y = this.gy(p.x, p.z);
+    s.teleport(p);
+    l.doing = 'home';
+    l.t = 6;
+    l.mate = -1;
+    l.gt = 0;
+    l.due = null;
+    l.face = this.mid;
+    s.want = { at: p, face: this.mid, pose: 'stand', icon: null, lead: false, settled: true };
+    this.calm = true;
+  }
+
+  /** Houses part built (step 1 to 4). */
+  get mended(): number[] { return this.houses.map((_h, i) => i).filter((i) => this.houses[i].step > 0 && this.houses[i].step < HOME); }
+
+  /**
+   * House `i` is at step `n` of being built again (0 to `HOME`; see
+   * `buildStage`), all at once and from whatever step it was at, so a save
+   * can put any house at any step. Nothing is seen to happen. At 1 to 4 the
+   * boards not yet used are in a stack beside the plot; at 1 and 2 some of
+   * its stones still lie round the footing. From step 1 the ground under it
+   * must be level: the caller fills the giant's print first (`Trail.fill`).
+   * (A house still standing is knocked down first, its spirits left at
+   * home: dev.)
+   */
+  setStep(i: number, n: number) {
+    const h = this.houses[i];
+    n = THREE.MathUtils.clamp(Math.round(n), 0, HOME);
+    if (!h || n === h.step) return;
+    const gy = this.ground ?? this.gy;
+    if (!h.smashed) {
+      this.smash(i, gy, true);
+      for (const [k] of this.spirits.entries()) if (this.home[k] === i) this.comeHome(k);
+    }
+    h.step = n;
+    h.smashed = n < HOME;
+    for (const m of h.meshes) m.visible = n === HOME;
+    for (const m of h.stage ?? []) { m.removeFromParent(); }
+    if (h.stage) (h.stage[0] as THREE.Mesh).geometry.dispose();
+    h.stage = undefined;
+    h.stack = undefined;
+    const p = h.plot, sp = HUTS[p.variant];
+    h.high = (BASE + (n === 2 ? sp.h * LOW : sp.h) + 0.05) * S;
+    const side = h.doorX > 0 ? -1 : 1;
+    if (n > 0 && n < HOME) {
+      const geo = buildStage(p.variant, n);
+      const mesh = propMesh(geo, this.mat), shade = propMesh(geo, this.caster);
+      for (const m of [mesh, shade]) { m.position.set(p.x, p.y, p.z); m.rotation.y = p.rot; }
+      shade.layers.set(SHADOW_LAYER);
+      this.group.add(mesh, shade);
+      h.stage = [mesh, shade];
+      // The stack: off the end of the house away from its door's side, boards lying along the house's depth.
+      h.stack = this.world(h, side * (h.hw + 2.3), 0, new THREE.Vector3());
+      h.stack.y = gy(h.stack.x, h.stack.z);
+    }
+    let nb = 0, ns = 0;
+    for (const q of this.pieces) {
+      if (q.house !== i) continue;
+      q.lay ??= { pos: q.pos.clone(), rot: q.rot.clone(), size: q.size.clone() };
+      q.rest = true;
+      q.used = false;
+      q.size.copy(q.lay.size);
+      if (n === 0) {
+        // As it fell.
+        q.pos.copy(q.lay.pos);
+        q.rot.copy(q.lay.rot);
+        q.pos.y = gy(q.pos.x, q.pos.z) + (q.stone ? q.size.y * 0.3 : 0.07);
+      } else if (q.stone) {
+        if (ns >= LYING[n]) { q.used = true; continue; }
+        // Round the footing: its four corners, and the middle of each side.
+        const [cx, cz] = [[1, 1], [-1, 1], [-1, -1], [1, -1], [0, 1], [1, 0], [0, -1], [-1, 0]][ns++];
+        this.world(h, cx * (h.hw + 0.55), cz * (h.hd + 0.55), q.pos);
+        q.pos.y = gy(q.pos.x, q.pos.z) + q.size.y * 0.3;
+        q.rot.set(0, p.rot + ns, 0);
+      } else {
+        if (nb >= STACKED[n]) { q.used = true; continue; }
+        // Four across, layer on layer; each layer a hair askew, as stacked by hand.
+        const layer = Math.floor(nb / 4), col = nb % 4;
+        nb++;
+        this.world(h, side * (h.hw + 2.3) + (col - 1.5) * 0.62, ((layer * 7 + col * 3) % 5 - 2) * 0.09, q.pos);
+        q.pos.y = h.stack!.y + 0.08 + layer * 0.135;
+        q.rot.set(0, p.rot + Math.PI / 2 + ((layer * 5 + col * 3) % 7 - 3) * 0.022, 0);
+        // (Boards lie with their length along x: all cut to much the same, so the stack has square ends.)
+        q.size.x = Math.min(q.size.x, 2.3) * 0.5 + 1.15;
+        q.size.z = 0.56;
+      }
+    }
+    this.drawPieces();
+  }
+
   private fleeT = 0;
   private waiting: { at: number; go: () => void }[] = [];
 
@@ -335,7 +530,7 @@ export class Village {
   private drawPieces() {
     this.boards.begin();
     this.stones.begin();
-    for (const p of this.pieces) (p.stone ? this.stones : this.boards).push(m4.compose(p.pos, q.setFromEuler(p.rot), p.size), p.tint);
+    for (const p of this.pieces) if (!p.used) (p.stone ? this.stones : this.boards).push(m4.compose(p.pos, q.setFromEuler(p.rot), p.size), p.tint);
     this.boards.end();
     this.stones.end();
   }
@@ -396,8 +591,10 @@ export class Village {
   /** The ground for someone who lives at house `i`: up its step and on to its floor. */
   private floor(i: number, x: number, z: number): number {
     const h = this.houses[i], g = this.gy(x, z);
-    if (!h || h.smashed) return g;
+    if (!h) return g;
     const l = this.local(h, x, z, this.l);
+    // (Its footing laid again and no walls yet: that's a step up too.)
+    if (h.step < 2) return h.step === 1 && Math.abs(l.x) < h.hw + 0.18 && Math.abs(l.z) < h.hd + 0.18 ? Math.max(g, h.plot.y + BASE * S) : g;
     if (Math.abs(l.x - h.doorX) > 0.3 * S || l.z > h.hd + 0.31 * S + 0.25 || l.z < -h.hd) return g;
     return Math.max(g, h.plot.y + BASE * S);
   }
@@ -463,6 +660,17 @@ export class Village {
     l.mate = -1;
     l.face = this.mid;
     this.go(k, l.spot.clone(), 'back', this.along(k, this.laneAt[k], l.spot));
+  }
+
+  /** At its own house being built again: over to the stack of boards or the footing, to stand and do something about it. */
+  private work(k: number) {
+    const h = this.houses[this.home[k]], l = this.life[k];
+    const atStack = Math.random() < 0.5, a = Math.random() * 6.283;
+    const c = atStack ? h.stack! : new THREE.Vector3(h.plot.x, 0, h.plot.z), r = atStack ? 1.9 : Math.max(h.hw, h.hd) + 1.5;
+    const at = new THREE.Vector3(c.x + Math.cos(a) * r, 0, c.z + Math.sin(a) * r);
+    l.mate = -1;
+    l.face = new THREE.Vector3(c.x, this.gy(c.x, c.z) + 0.4, c.z);
+    this.go(k, at, 'work');
   }
 
   /** A wander a little way along the lane, to stand and look at something. */
@@ -554,6 +762,8 @@ export class Village {
           }
           if ((l.t -= dt) > 0 || !idle) break;
           const r = Math.random();
+          // Its house is being built again: mostly, it's at that.
+          if (h.stack && r < 0.7) { this.work(k); break; }
           if (r < 0.3 && !h.smashed) {
             // Indoors for a bit: to the door and in.
             const inside = this.world(h, h.doorX, h.hd - 0.85, new THREE.Vector3());
@@ -572,8 +782,18 @@ export class Village {
             s.want.face = l.face = this.sight();
           }
           break;
+        case 'work':
+          // There: it looks the thing over, and does a bit (a hop, a nod, its arms out at the size of the job).
+          if (s.arrived || (l.t += dt) > 30) {
+            l.doing = 'look';
+            l.t = 2.5 + Math.random() * 3;
+            s.want.face = l.face;
+            const r = Math.random();
+            l.due = { t: 0.5, g: r < 0.45 ? 'hop' : r < 0.75 ? 'nod' : 'wide', secs: 1.2 };
+          }
+          break;
         case 'look':
-          if ((l.t -= dt) <= 0 && idle) { if (Math.random() < 0.35) this.stroll(k); else this.goHome(k); }
+          if ((l.t -= dt) <= 0 && idle) { if (h.stack && Math.random() < 0.6) this.work(k); else if (Math.random() < 0.35) this.stroll(k); else this.goHome(k); }
           break;
         case 'back':
         case 'out':
@@ -642,7 +862,14 @@ export class Village {
   /** The roof under a foot circle (you can land and stand on one), at most `step` above the feet. */
   surface(x: number, z: number, feetY: number, r: number, step: number): number {
     for (const h of this.houses) {
-      if (h.smashed || Math.abs(x - h.plot.x) > 6 || Math.abs(z - h.plot.z) > 6) continue;
+      if (Math.abs(x - h.plot.x) > 6 || Math.abs(z - h.plot.z) > 6) continue;
+      if (h.step < 4) {
+        // A footing laid again: a low step up, to stand on. Walls without a roof: their top, flat.
+        if (!h.step) continue;
+        const l = this.local(h, x, z, this.l), up = h.step > 1, y = h.plot.y + (up ? h.high : BASE * S), m = (up ? 0 : 0.18) + r * 0.5;
+        if (Math.abs(l.x) < h.hw + m && Math.abs(l.z) < h.hd + m && y <= feetY + step) return y;
+        continue;
+      }
       const l = this.local(h, x, z, this.l);
       const over = OVER * S + 0.2;
       if (Math.abs(l.x) > h.hw + 0.45 + r || Math.abs(l.z) > h.hd + over + r || feetY < h.plot.y + h.wallTop - 0.3) continue;
@@ -656,8 +883,8 @@ export class Village {
   /** Push a body circle out of the walls. */
   push(pos: THREE.Vector3, vel: THREE.Vector3, r: number) {
     for (const h of this.houses) {
-      if (h.smashed || Math.abs(pos.x - h.plot.x) > 6 || Math.abs(pos.z - h.plot.z) > 6) continue;
-      if (pos.y > h.plot.y + h.wallTop - 0.05) continue;
+      if (h.step < 2 || Math.abs(pos.x - h.plot.x) > 6 || Math.abs(pos.z - h.plot.z) > 6) continue;
+      if (pos.y > h.plot.y + h.high - 0.1) continue;
       const l = this.local(h, pos.x, pos.z, this.l);
       const qx = Math.max(-h.hw, Math.min(h.hw, l.x)), qz = Math.max(-h.hd, Math.min(h.hd, l.z));
       let nx = l.x - qx, nz = l.z - qz, depth: number;

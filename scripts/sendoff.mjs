@@ -1,5 +1,5 @@
 // The send-off: node scripts/sendoff.mjs <outdir> [seed=hilda]
-//   With a creature home at the stable, the guide looks at a wrecked house, walks you to the edge of the
+//   With a creature home at the stable, the guide comes over and walks you (waving you on) to the edge of the
 //   village and points down the giant's trail (the prints bubble, its brave face). Then you leave along the
 //   trail (it goes home), come back (it takes you out again), and find the ring (it stops for good).
 // Needs a build (npx vite build).

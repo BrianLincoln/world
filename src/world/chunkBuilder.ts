@@ -18,8 +18,8 @@ export interface ChunkRequest {
   size: number;
   /** Skip ground detail (tufts, flowers): used for main-thread colliders. */
   propsOnly?: boolean;
-  /** The dungeon site, found once on the main thread (the search is slow: see WorldGen.dungeon). */
-  dungeon?: DungeonSite | null;
+  /** The dungeon sites, found once on the main thread (the search is slow: see WorldGen.dungeons). */
+  dungeons?: DungeonSite[] | null;
 }
 
 /** Instance layout (8 floats): x, y, z, scaleXZ, rotY, scaleY, lean, tone. */

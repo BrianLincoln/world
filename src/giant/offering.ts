@@ -5,7 +5,7 @@ import { rockhopperStatue } from '../mobs/rockhopper';
 import type { Body } from '../player/movement';
 import type { Sfx } from '../story/audio';
 import type { DungeonSite } from '../world/worldgen';
-import { Birds } from './birds';
+import { Birds, GRIP, STAND } from './birds';
 import type { Giant } from './giant';
 import type { Ring } from './ring';
 
@@ -19,7 +19,8 @@ import type { Ring } from './ring';
 // spirit goes down with it, and what's left is paving and a shrine: a stone
 // rockhopper on a plinth, with a bowl on its back. The light leaves your
 // shoulder and settles in the bowl. One of the giant's crows comes down off
-// its head, lands, hops up and takes the light; hops back toward the giant.
+// its head, lands, walks up, and hops up and snatches the light in its claws;
+// it hangs there in the air with it, turning to the giant.
 // The giant's eyes open, and then its mouth, wide: a real hole into the
 // hollow of its head. The crow flies up and straight in through it, the
 // light lighting the hollow round it, and the mouth shuts on them both; it
@@ -36,8 +37,8 @@ export interface OfferDeps {
   body: Body;
   sfx: Sfx;
   ring: Ring;
-  /** The giant asleep by the ring (main summons one if the story hasn't brought it). */
-  giant(): Giant;
+  /** The giant asleep by the ring (main summons one if the story hasn't brought it). Null once it has got up and gone (giant/homecoming.ts). */
+  giant(): Giant | null;
   puff(at: THREE.Vector3, n: number, size: number, spread: number): void;
   /** Stop whatever you're on where it stands. */
   halt(): void;
@@ -49,27 +50,30 @@ export interface OfferDeps {
 /**
  * The sequence, in seconds from when the light leaves your shoulder. It
  * goes to the bowl (`set`); the crow leaves the giant's head at `come` and
- * takes `dive` to land; it looks at you for `look`, takes `hops` hops to
- * the shrine, `take` to pick the light up, `turn` to turn round, and hops
- * back out. The giant's eyes open at `wake` (the camera cuts to its face
- * `cut` later) and its mouth at `open`; the crow takes off at `fly` and is
+ * takes `dive` to land, and walks straight on to the shrine in `walk`; it
+ * takes `take` to crouch, hop up and snatch the light in its claws (it has
+ * it `SNATCH` of the way through), and then hangs in the air with it, backing
+ * off. The giant's eyes open at `wake` (the camera cuts to
+ * its face `cut` later) and its mouth at `open`; the crow takes off at `fly` and is
  * `climb` getting to the back of the hollow (`gone`), in through the lips
  * a second or so before; the mouth starts to shut behind it at `shut` and
  * is shut at `closed`; the smile comes at `smile`; `end`.
  */
 const T = (() => {
-  const set = 1.7, come = 1.2, dive = 4.3, look = 0.9, hops = 5, hop = 0.45, take = 1.2, turn = 0.7;
-  const landed = come + dive, atBowl = landed + look + hops * hop, has = atBowl + take, out = has + turn, away = out + hops * hop;
+  const set = 1.7, come = 1.2, dive = 4.3, walk = 2.8, take = 1.6;
+  const landed = come + dive, atBowl = landed + walk, has = atBowl + take;
   const wake = has + 0.4, cut = wake + 1.0, open = cut + 1.7, fly = open + 1.4, climb = 4.8;
   const gone = fly + climb, shut = gone - 0.7, closed = shut + 0.75, smile = gone + 1.8, end = smile + 3.4;
-  return { set, come, dive, landed, look, hops, hop, atBowl, take, has, turn, out, away, wake, cut, open, fly, climb, gone, shut, closed, smile, end };
+  return { set, come, dive, landed, walk, atBowl, take, has, wake, cut, open, fly, climb, gone, shut, closed, smile, end };
 })();
 /** A beat after the shrine is up before the light leaves you (s). */
 const PAUSE = 0.7;
 /** The shrine: its plinth's radius (what you can't walk through) and height, how big the stone rockhopper is beside a live one, and how far over the ground the light sits in the bowl on its back. */
 const FOOT_R = 1.5, PLINTH = 0.5, STATUE = 1.35, BOWL_Y = PLINTH + STATUE * 1.33 + 0.42;
-/** A crow's middle over the ground it stands on, and how high it hops (m). */
-const CROW_Y = 0.95, HOP_Y = 0.4;
+/** A crow's middle over the ground it stands on, and how far it sinks on its legs before it hops (m). */
+const CROW_Y = STAND, CROUCH = 0.22;
+/** The hop: how long it crouches (s), how far through `T.take` its claws close on the light, how long it takes to back off with it (s) and how far over the bowl it hangs then (m). */
+const CROUCH_T = 0.4, SNATCH = 0.6, BACK_OFF = 2.8, HANG = 1.8;
 /** The camera for the giant's face: how far in front of it (toward the ring), how far to one side, and how far above (m). */
 const CAM_FRONT = 40, CAM_ASIDE = 15, CAM_ABOVE = 2;
 /** The light's size on your shoulder and in the bowl, and under the crow (as the lights the other crows carry). */
@@ -81,7 +85,7 @@ const LINE_UP = 5, DEEP_IN = -0.2;
 /** The grin it keeps. */
 const GRIN_KEEP = 0.55;
 
-const v1 = new THREE.Vector3(), v2 = new THREE.Vector3(), v3 = new THREE.Vector3();
+const v1 = new THREE.Vector3(), v2 = new THREE.Vector3();
 const ss = THREE.MathUtils.smoothstep;
 
 /** Flat stones laid over the ground where the field was: one mesh, each stone on the slope where it lies. */
@@ -149,7 +153,10 @@ export class Offering {
   private camFace = new THREE.Vector3();
   private land = new THREE.Vector3();
   private byBowl = new THREE.Vector3();
-  private wayOut = new THREE.Vector3();
+  private over = new THREE.Vector3();
+  private hang = new THREE.Vector3();
+  /** The crow's footfalls so far (to hear each). */
+  private foot = 0;
   /** The crow has gone into the giant's mouth: it isn't drawn again. */
   private eaten = false;
   private lookAt = new THREE.Vector3();
@@ -193,7 +200,9 @@ export class Offering {
     if (this.planned) return;
     this.planned = true;
     const g = this.d.giant();
-    this.u.set(g.centre.x - this.centre.x, 0, g.centre.z - this.centre.z).normalize();
+    // (Long gone, in a save from after: the way its walk here ended will do.)
+    if (!g) { const w = this.d.site.way, q = w[Math.max(0, w.length - 2)] ?? [this.centre.x + 1, this.centre.z]; this.u.set(q[0] - this.centre.x, 0, q[1] - this.centre.z).normalize(); }
+    else this.u.set(g.centre.x - this.centre.x, 0, g.centre.z - this.centre.z).normalize();
     this.p.set(this.u.z, 0, -this.u.x);
     const k = this.pick(this.camNear, [[-7.4, 4.6], [-7.4, -4.6], [-7.4, 5.8], [-7.4, -5.8], [-8.6, 3.6], [-8.6, -3.6]], 2.2, 3);
     this.side = k % 2 ? -1 : 1;
@@ -237,8 +246,9 @@ export class Offering {
   /** The giant as the offering leaves it: awake, its mouth shut on the light, smiling. (`now`: at once, a restored save.) */
   private keep(now: boolean) {
     const g = this.d.giant();
-    this.stage();
     this.eaten = true;
+    if (!g) return;
+    this.stage();
     g.awake = true;
     g.wide = 0;
     g.look = this.bowl;
@@ -283,7 +293,7 @@ export class Offering {
   private stage() {
     if (this.staged) return;
     this.staged = true;
-    const g = this.d.giant(), c = this.centre, gy = this.d.ground;
+    const g = this.d.giant()!, c = this.centre, gy = this.d.ground;
     this.plan();
     const u = this.u, p = this.p, side = this.side;
     // The camera for the giant: in front of its face and off to one side, about level with it, so the crow is
@@ -291,11 +301,13 @@ export class Offering {
     g.face(v1);
     const fx = v1.x - c.x, fz = v1.z - c.z, along = fx * u.x + fz * u.z, across = fx * p.x + fz * p.z, up = v1.y + CAM_ABOVE - c.y;
     this.pick(this.camFace, [[along - CAM_FRONT, across + CAM_ASIDE * side], [along - CAM_FRONT, across - CAM_ASIDE * side], [along - CAM_FRONT + 8, across + (CAM_ASIDE + 5) * side], [along - CAM_FRONT + 8, across - (CAM_ASIDE + 5) * side]], up, 4);
-    // The crow's marks: it lands on the giant's side of the shrine (away from the near camera's side, so it's seen), comes to the bowl, and goes back out that way.
+    // The crow's marks: it lands on the giant's side of the shrine (away from the near camera's side, so it's seen), comes to the bowl, hops up over it, and hangs in the air back out that way.
     this.land.copy(c).addScaledVector(u, 6.8).addScaledVector(p, -side * 1.6);
     this.byBowl.copy(c).addScaledVector(u, 2.15).addScaledVector(p, -side * 0.2);
-    this.wayOut.copy(c).addScaledVector(u, 8.6).addScaledVector(p, -side * 0.6);
-    for (const m of [this.land, this.byBowl, this.wayOut]) m.y = gy(m.x, m.z) + CROW_Y;
+    for (const m of [this.land, this.byBowl]) m.y = gy(m.x, m.z) + CROW_Y;
+    // (Over the bowl its claws, `GRIP` under it, are on the light.)
+    this.over.copy(this.bowl).addScaledVector(u, 0.2).setY(this.bowl.y + GRIP - 0.22);
+    this.hang.copy(c).addScaledVector(u, 6.5).addScaledVector(p, -side * 0.6).setY(this.over.y + HANG);
     this.atNow.copy(this.bowl);
   }
 
@@ -333,6 +345,8 @@ export class Offering {
     this.crow.group.visible = this.state !== 'none' && !this.eaten;
     if (this.state === 'none') return;
     const g = this.d.giant();
+    // The giant has got up and gone: what's left here is the shrine.
+    if (!g) { this.crow.group.visible = false; this.orb.visible = false; this.after = -1; return; }
 
     // The shrine is up: a beat, and the light goes to it. (A save from part way through: on from the light in the bowl.)
     if (this.state === 'held' && ring.sealK >= 1 && this.off < 40) {
@@ -343,7 +357,7 @@ export class Offering {
     if (this.t >= 0) this.play(dt, g);
     const bird = this.crow.birds[0];
 
-    // The light: at your shoulder; across to the bowl; in the crow's beak, then under it; falling; in the giant's hand.
+    // The light: at your shoulder; across to the bowl; in the crow's claws; in through the giant's mouth.
     const t = this.t;
     this.orb.visible = !this.eaten;
     let size = ORB * (1 + 0.07 * Math.sin(this.time * 4.1));
@@ -352,19 +366,18 @@ export class Offering {
       v1.set(b.pos.x - Math.sin(b.heading) * 0.55 + Math.cos(b.heading) * 0.5, b.pos.y + lift + 0.08 * Math.sin(this.time * 2.1), b.pos.z - Math.cos(b.heading) * 0.55 - Math.sin(b.heading) * 0.5);
       this.orbAt.lerp(v1, 1 - Math.exp(-(ring.busy ? 30 : 5) * dt));
       size *= 0.6;
-    } else if (t < 0 || t < T.atBowl + T.take * 0.55) {
+    } else if (t < 0 || t < T.atBowl + T.take * SNATCH) {
       // Up off your shoulder and over to the bowl in one slow arc, and it settles there with a bounce.
       v1.copy(this.bowl).setY(this.bowl.y + 0.05 * Math.sin(this.time * 1.7));
       if (t >= 0 && t < T.set) { const k = ss(t, 0.1, T.set * 0.85); this.orbAt.lerpVectors(this.orbFrom, v1, k).setY(this.orbAt.y + Math.sin(k * Math.PI) * 1.3); size *= 0.6 + 0.4 * k; }
       else this.orbAt.copy(v1);
       if (this.popT >= 0 && this.popT < 2) { const k = this.popT; size *= k < 0.12 ? 0.82 + (k / 0.12) * 0.3 : 1 + 0.12 * Math.exp(-k * 7) * Math.cos(k * 22); }
     } else {
-      // The crow has it: in its beak on the ground, and hanging under it once it's in the air.
-      const air = ss(t, T.fly + 0.2, T.fly + 1.0), k = ss(t, T.atBowl + T.take * 0.55, T.has);
-      v1.copy(bird.pos).addScaledVector(v2.copy(bird.dir).setY(0).normalize(), 1.55).setY(bird.pos.y + 0.55);
-      v1.lerp(v3.copy(bird.grip).setY(bird.grip.y + 0.35), air);
-      this.orbAt.lerp(v1, k < 1 ? k : 1 - Math.exp(-14 * dt));
-      // (Small in its beak; in the air it's the light the other crows carry.)
+      // The crow has it: in its claws, close under it, and hanging a little higher as it grows on the way up.
+      const air = ss(t, T.fly + 0.2, T.fly + 1.0), k = ss(t, T.atBowl + T.take * SNATCH, T.has);
+      v1.copy(bird.grip).addScaledVector(v2.copy(bird.dir).setY(0).normalize(), 0.3 * (1 - air)).setY(bird.grip.y + THREE.MathUtils.lerp(0.22, 0.35, air));
+      this.orbAt.lerp(v1, k);
+      // (Small in its claws; flying off it's the light the other crows carry.)
       size *= 1 + (ORB_CROW / ORB - 1) * ss(t, T.fly + 0.3, T.fly + 2.2);
     }
     this.orbSize = size;
@@ -403,30 +416,53 @@ export class Offering {
     // Down off its head, in a long glide, to land on the far side of the shrine.
     if (passed(T.come)) {
       v1.copy(this.land).addScaledVector(this.u, 16).setY(this.land.y + 2.2);
+      bird.grab = 0;
       crow.send(0, 'dive', v1, this.land, T.dive, 'stand');
       fx.whoosh();
     }
     if (passed(T.landed)) this.d.puff(v1.copy(this.land).setY(this.land.y - CROW_Y + 0.2), 6, 0.16, 2);
-    const hop = (from: THREE.Vector3, to: THREE.Vector3, since: number) => {
-      const k = THREE.MathUtils.clamp(since / (T.hops * T.hop), 0, 1) * T.hops, i = Math.min(T.hops - 1, Math.floor(k)), f = Math.min(1, (k - i) / 0.8);
-      bird.pos.lerpVectors(from, to, (i + f * f * (3 - 2 * f)) / T.hops);
-      bird.pos.y = this.d.ground(bird.pos.x, bird.pos.z) + CROW_Y + HOP_Y * 4 * f * (1 - f);
-      if (since > 0 && since < T.hops * T.hop && Math.floor(since / T.hop) !== Math.floor((since - dt) / T.hop)) fx.tug();
+    // It walks (the walk itself is the bird's own: `Birds`), a pat at each foot put down.
+    const foot = Math.floor(bird.stride / Math.PI + 0.5);
+    if (foot !== this.foot && bird.state === 'stand') fx.step();
+    this.foot = foot;
+    const walk = (from: THREE.Vector3, to: THREE.Vector3, since: number, dur: number, carry: number) => {
+      // (Off at a trot and slowing to a stop: out of a landing, it keeps coming.)
+      const x = THREE.MathUtils.clamp(since / dur, 0, 1);
+      bird.pos.lerpVectors(from, to, THREE.MathUtils.lerp(ss(x, 0, 1), x * (2 - x), carry));
+      bird.pos.y = this.d.ground(bird.pos.x, bird.pos.z) + CROW_Y;
     };
+    const hop = T.atBowl + CROUCH_T, snatch = T.atBowl + T.take * SNATCH;
     const face = (to: THREE.Vector3, k: number) => { v1.set(to.x - bird.pos.x, 0, to.z - bird.pos.z).normalize(); bird.dir.lerp(v1, k).setY(0).normalize(); };
     if (bird.state === 'stand') {
       const e = 1 - Math.exp(-7 * dt);
-      if (t < T.landed + T.look) face(b.pos, e);
-      else if (t < T.atBowl) { hop(this.land, this.byBowl, t - T.landed - T.look); face(this.bowl, e); }
-      else if (t < T.has) {
-        // It stretches up and takes the light out of the bowl on the stone creature's back.
-        const k = Math.sin(ss(t, T.atBowl, T.has) * Math.PI);
-        bird.pos.copy(this.byBowl).addScaledVector(v1.copy(this.u), -0.35 * k).setY(this.byBowl.y + 0.8 * k);
+      if (t < T.atBowl) { walk(this.land, this.byBowl, t - T.landed, T.walk, 1); face(this.bowl, e); }
+      else {
+        // It sinks on its legs, to hop.
+        bird.reach = -CROUCH * ss(t, T.atBowl, hop);
+        bird.pos.copy(this.byBowl).setY(this.byBowl.y + bird.reach);
         face(this.bowl, e);
-      } else if (t < T.out) face(this.wayOut, 1 - Math.exp(-5 * dt));
-      else if (t < T.fly) { hop(this.byBowl, this.wayOut, t - T.out); face(g.centre, e); }
+      }
     }
-    if (passed(T.atBowl + T.take * 0.55)) fx.snatch();
+    // Up off the ground, wings out, its claws coming forward and down on to the light in the bowl...
+    if (passed(hop)) { bird.state = 'hover'; bird.reach = 0; fx.whoosh(); }
+    if (bird.state === 'hover' && t < T.fly) {
+      bird.grab = ss(t, hop, snatch);
+      if (t < snatch) {
+        const k = (t - hop) / (snatch - hop);
+        bird.pos.lerpVectors(this.byBowl, this.over, k).setY(THREE.MathUtils.lerp(this.byBowl.y, this.over.y, k * (2 - k)));
+        face(this.bowl, 1 - Math.exp(-7 * dt));
+      } else {
+        // ...and it has it: back and up, beating on the spot, and round to face the giant.
+        const k = ss(t, snatch, snatch + BACK_OFF);
+        bird.pos.lerpVectors(this.over, this.hang, k).setY(bird.pos.y + 0.18 * Math.sin((t - snatch) * 2.6) * k);
+        const a = Math.atan2(bird.dir.x, bird.dir.z);
+        let da = Math.atan2(g.centre.x - bird.pos.x, g.centre.z - bird.pos.z) - a;
+        da = Math.atan2(Math.sin(da), Math.cos(da));
+        const to = a + da * (1 - Math.exp(-2.2 * ss(t, snatch + 0.3, snatch + 1) * dt));
+        bird.dir.set(Math.sin(to), 0, Math.cos(to));
+      }
+    }
+    if (passed(snatch)) fx.snatch();
     // The giant: its eyes open; it sees what the crow has; and its mouth opens, wide.
     if (passed(T.wake)) { g.awake = true; g.wide = 1; g.look = this.lookAt.copy(this.bowl); fx.stomp(); }
     // (It watches the crow until that takes off, and then holds still for it: its mouth is what the crow is flying at.)
@@ -465,6 +501,7 @@ export class Offering {
   cinematic(): { pos: THREE.Vector3; at: THREE.Vector3; fov: number } | null {
     if (this.t < 0) return null;
     const t = this.t, g = this.d.giant(), bird = this.crow.birds[0];
+    if (!g) return null;
     let fov = FOV;
     if (t < T.cut) {
       // Over your shoulder: the shrine, the crow coming down to it out of the giant, and the giant beyond.
@@ -494,7 +531,7 @@ export class Offering {
     this.after = -1;
     this.wait = 0;
     const g = this.d.giant();
-    g.awake = false; g.mouth = 0; g.gulp = 0; g.grin = 0; g.wide = 0; g.look = null; g.snap();
+    if (g) { g.awake = false; g.mouth = 0; g.gulp = 0; g.grin = 0; g.wide = 0; g.look = null; g.snap(); }
     this.eaten = false;
     this.crow.birds[0].state = 'roost';
     this.state = to;

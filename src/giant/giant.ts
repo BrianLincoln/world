@@ -32,8 +32,19 @@ const SHOULDER = new THREE.Vector3(27, 22, 1);
 const SWING = 0.45, LEAD = 0.55;
 
 export const GIANT_HEIGHT = 82;
-/** How far a dormant giant settles into the ground (m). */
-const SINK = 43;
+/** How far a dormant giant settles into the ground (m), and how long it takes to go down, and to get up again (s). */
+const SINK = 43, SINK_TIME = 9, RISE_TIME = 9.5;
+/**
+ * Getting up (and lying down, the same backwards) isn't a lift: it comes up
+ * out of the ground in a squat, knees first, leaning forward with its hands
+ * on the ground, and then stands, pushing off. In terms of how far up it is
+ * (0: a hill; 1: on its feet): it's out of the ground by `out`; it is
+ * folded into the squat by `squat[0]` and unfolds from `squat[1]`; squatting,
+ * its hips are `hip` over the ground, it leans `lean` further forward, and
+ * its knees point `knee` more up than forward. Standing up it leans a
+ * further `push` at the middle of the push.
+ */
+const UP = { out: 0.45, squat: [0.3, 0.42], hip: 10, lean: 0.5, knee: 0.9, push: 0.28, hand: 3.5 };
 /** How far down it starts when it comes up out of the ground or the water (`emerge`): all of it (m). */
 const DEEP = 100;
 /** Asleep and solid: the rise a body steps up without being stopped, and how tall a body is (m). */
@@ -225,7 +236,6 @@ export class Giant {
   private trees: { mesh: THREE.Mesh; rest: THREE.Quaternion; sx: Spring; sz: Spring }[] = [];
   private lastTop = new THREE.Vector3();
   private topVel = new THREE.Vector3();
-  private blinkT = 4;
   private breathT = 2;
 
   constructor(private host: GiantHost) {
@@ -367,12 +377,33 @@ export class Giant {
 
   settle() { this.dormant = true; this.sink = 1; this.hug = 0; this.hugNow = 0; this.pose(0); }
 
+  /**
+   * It gets up again: no longer dormant, it comes back up out of the ground
+   * and stands, over RISE_TIME (see `UP`), and from this moment it isn't
+   * solid (`shell`). Its feet are put together under it where it lies, while
+   * they're still deep under the ground, so it can be walked on from here
+   * (`walkRoute`).
+   */
+  rise() {
+    if (!this.dormant) return;
+    const sink = this.sink;
+    this.route = null;
+    this.pauseAt = null;
+    this.place(this.pelvis.position.x, this.pelvis.position.z, this.pelvis.rotation.y);
+    this.dormant = false;
+    this.sink = sink;
+    this.solid = null;
+    this.pose(0);
+  }
+  /** How far down it is (1: a hill; 0: up on its feet). */
+  get sunk() { return this.sink; }
+
   /** Whatever it has been told to do with its face, done at once (a restored save). */
   snap() {
     this.grinNow = this.grin;
     this.mouthNow = this.mouth;
     this.chinNow = this.mouth > 0 ? 1 : 0;
-    this.lidNow = this.lidWant(0);
+    this.lidNow = this.lidWant();
     this.pose(0);
   }
 
@@ -382,8 +413,8 @@ export class Giant {
   /** A point on the line out through the middle of its open mouth: `k` = 1 at the lips, 0 the middle of its head, more than 1 out in front, less than 0 the back of the hollow. */
   throat(out: THREE.Vector3, k: number) { return this.hollow.localToWorld(out.copy(GAPE).multiplyScalar(k)); }
 
-  private lidWant(blink: number) {
-    return this.dormant && !this.awake ? Math.min(1, 0.45 + this.sink * 3) : Math.max(0.45 - 0.3 * this.wide, 0) + (0.55 + 0.3 * this.wide) * blink;
+  private lidWant() {
+    return this.dormant && !this.awake ? Math.min(1, 0.45 + this.sink * 3) : Math.max(0.45 - 0.3 * this.wide, 0);
   }
 
   /** Carry on after a pause. */
@@ -583,7 +614,8 @@ export class Giant {
     }
 
     if (this.under > 0 && this.rising) this.under = Math.max(0, this.under - dt / this.riseTime);
-    if (this.dormant) { this.hug = 0; this.sink = Math.min(1, this.sink + dt / 9); }
+    if (this.dormant) { this.hug = 0; this.sink = Math.min(1, this.sink + dt / SINK_TIME); }
+    else if (this.sink > 0) this.sink = Math.max(0, this.sink - dt / RISE_TIME);
     this.hugNow += (this.hug - this.hugNow) * (1 - Math.exp(-1.5 * dt));
     // Its head turns to what it's looking at (not far: it is stone).
     {
@@ -602,13 +634,8 @@ export class Giant {
     this.chinNow = this.mouth > 0 ? Math.min(1, this.chinNow + dt / 2.2) : this.mouthNow > 0 ? this.chinNow : Math.max(0, this.chinNow - dt / 2.6);
     this.pose(dt);
 
-    // Slow blinks, the way the spirit does; the lids never open far.
-    this.blinkT -= dt;
-    if (this.blinkT < -0.9) this.blinkT = 4 + 5 * Math.random(); // presentation only
-    const blink = this.blinkT < 0 ? Math.sin((-this.blinkT / 0.9) * Math.PI) : 0;
-    // (Waking, they open slowly; a blink is quick.)
-    const lid = this.lidWant(blink);
-    this.lidNow += (lid - this.lidNow) * (1 - Math.exp(-(blink > 0 ? 30 : 2.2) * dt));
+    // It never blinks (too animal); the lids never open far, and move slowly.
+    this.lidNow += (this.lidWant() - this.lidNow) * (1 - Math.exp(-2.2 * dt));
     this.lids = this.lidNow;
     this.grinNow += (this.grin - this.grinNow) * (1 - Math.exp(-2.5 * dt));
     this.mat.uniforms.uGrin.value = this.grinNow;
@@ -693,21 +720,25 @@ export class Giant {
     if (dt > 0) this.hipY.step(top, 70, 15, dt);
     else this.hipY.x = top;
     const breathe = Math.sin(t * 1.14);
-    pelvis.position.set(px, Math.min(this.hipY.x, top + 1.5), pz);
+    // How far up it is, and how far folded into the squat it gets up through (and lies down through).
+    const up = 1 - this.sink;
+    const squat = THREE.MathUtils.smoothstep(up, 0, UP.squat[0]) * (1 - THREE.MathUtils.smoothstep(up, UP.squat[1], 1));
+    const push = this.sink > 0 ? Math.sin(THREE.MathUtils.clamp((up - UP.squat[1]) / (1 - UP.squat[1]), 0, 1) * Math.PI) : 0;
+    pelvis.position.set(px, THREE.MathUtils.lerp(Math.min(this.hipY.x, top + 1.5), this.host.ground(body.x, body.z) + UP.hip, squat), pz);
     pelvis.rotation.z = this.walking ? 0.05 * sway : 0;
 
-    torso.rotation.set(LEAN + 0.035 * Math.sin(phi * Math.PI * 2) * (this.walking ? 1 : 0) + 0.012 * breathe, -twist * 1.5, -0.07 * sway);
+    torso.rotation.set(LEAN + UP.lean * squat + UP.push * push + 0.035 * Math.sin(phi * Math.PI * 2) * (this.walking ? 1 : 0) + 0.012 * breathe, -twist * 1.5, -0.07 * sway);
     torso.scale.setScalar(1 + 0.008 * breathe);
     const chin = this.chinNow * this.chinNow * (3 - 2 * this.chinNow);
     head.position.set(0, NECK[0] + CHIN_UP * chin, NECK[1] + CHIN_OUT * chin);
-    head.rotation.set(-LEAN * 0.7 - 0.02 * breathe + this.lookNow.y - CHIN_BACK * chin, twist * 0.6 + this.lookNow.x, 0.03 * sway);
+    head.rotation.set(-LEAN * 0.7 - 0.6 * (UP.lean * squat + UP.push * push) - 0.02 * breathe + this.lookNow.y - CHIN_BACK * chin, twist * 0.6 + this.lookNow.x, 0.03 * sway);
     pelvis.updateMatrixWorld(true);
 
     // The limbs' bones hang off the group, not the pelvis, so they're placed in the group's own space: what
     // `localToWorld` gives, less however far the group has sunk. (They used to be given the sunk place and
     // then sank again with the group: a dormant giant's arms and legs lay 43 m under where they belonged.)
     const off = this.group.matrixWorld.elements[13];
-    const sk = this.sink * this.sink * (3 - 2 * this.sink);
+    const sk = 1 - THREE.MathUtils.smoothstep(up, 0, UP.out);
     const gy = -SINK * sk - DEEP * this.under * this.under * (3 - 2 * this.under);
     const pole = new THREE.Vector3();
     const knee = new THREE.Vector3(), hip = new THREE.Vector3(), tgt = new THREE.Vector3();
@@ -717,7 +748,7 @@ export class Giant {
       hip.y -= off;
       tgt.copy(f.ankle);
       // Knees forward and a little out.
-      pole.set(Math.sin(f.yaw) + Math.cos(h) * side * 0.25, 0.15, Math.cos(f.yaw) - Math.sin(h) * side * 0.25);
+      pole.set(Math.sin(f.yaw) + Math.cos(h) * side * 0.25, 0.15 + UP.knee * squat, Math.cos(f.yaw) - Math.sin(h) * side * 0.25);
       bend(hip, tgt, L1, L2, pole, knee);
       aim(this.thigh[i], hip, knee, pole);
       aim(this.shin[i], knee, tgt, pole);
@@ -737,7 +768,11 @@ export class Giant {
       const reach = (A1 + A2) * 0.95;
       hang.set(side * (SHOULDER.x + 5), 0, 0).applyAxisAngle(Y, h).add(pelvis.position);
       hang.y = sh.y - reach * Math.cos(sw);
-      hang.addScaledVector(fwd, 5 + reach * Math.sin(sw));
+      hang.addScaledVector(fwd, 5 + reach * Math.sin(sw) + 9 * squat);
+      // Getting up, its hands are on the ground until its shoulders have lifted them off it. (Asleep, its
+      // arms go on down into the earth.)
+      const onGround = THREE.MathUtils.smoothstep(up, 0.08, 0.3) * (this.sink > 0 ? 1 : 0);
+      if (onGround > 0) hang.y = THREE.MathUtils.lerp(hang.y, Math.max(hang.y, this.host.ground(hang.x, hang.z) - off + UP.hand), onGround);
       // Hands on the opposite arm, one above the other.
       torso.localToWorld(tgt.set(-side * 12, 14.5 + side * 3.4, 24.5 + side * 1.2));
       tgt.y -= off;

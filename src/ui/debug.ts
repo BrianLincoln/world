@@ -9,7 +9,7 @@ import type { Terrain } from '../world/terrain';
 
 export interface DebugHooks {
   env: Environment;
-  ambience: { gains: Record<'master' | 'bed' | 'air' | 'layer' | 'pluck', number> };
+  ambience: { gains: { music: number } };
   terrain: Terrain;
   getSeed(): string;
   setSeed(s: string): void;
@@ -17,6 +17,8 @@ export interface DebugHooks {
   modeName(): string;
   setMode(m: string): void;
   position(): { x: number; y: number; z: number };
+  /** Whether F (and the touch button) flies the explorer. */
+  devFly: { get(): boolean; set(v: boolean): void };
   character: { eyeType: 'dot' | 'round'; faceValues: number[] };
   colliders: { enabled: boolean };
   /** Camera close-up on the face, and the explorer holds still. */
@@ -59,12 +61,8 @@ export class DebugUI {
     for (const [k, v] of Object.entries(SKY_PRESETS)) opts[v.name] = k;
     ft.add(pal, 'palette', opts).name('palette').onChange((v: string) => (h.env.paletteOverride = v === 'auto' ? null : v));
 
-    const fs = this.gui.addFolder('Ambient sound');
-    fs.add(h.ambience.gains, 'master', 0, 1, 0.01);
-    fs.add(h.ambience.gains, 'bed', 0, 1, 0.01).name('tonal bed');
-    fs.add(h.ambience.gains, 'air', 0, 1, 0.01).name('air (day / night)');
-    fs.add(h.ambience.gains, 'layer', 0, 1, 0.01).name('night layer');
-    fs.add(h.ambience.gains, 'pluck', 0, 1, 0.01).name('plucks');
+    const fs = this.gui.addFolder('Music');
+    fs.add(h.ambience.gains, 'music', 0, 1, 0.01).name('volume');
     fs.close();
 
     const fp = this.gui.addFolder('Palette');
@@ -156,8 +154,9 @@ export class DebugUI {
 
     const fm = this.gui.addFolder('Player');
     const mode = { mode: h.modeName() };
-    fm.add(mode, 'mode', ['walk', 'glide', 'fly', 'swim', 'ride', 'bike']).name('mode (F = fly)').onChange((v: string) => h.setMode(v)).listen();
+    fm.add(mode, 'mode', ['walk', 'glide', 'fly', 'swim', 'ride', 'bike']).name('mode').onChange((v: string) => h.setMode(v)).listen();
     setInterval(() => (mode.mode = h.modeName()), 250);
+    fm.add({ fly: h.devFly.get() }, 'fly').name('F flies (dev)').onChange((v: boolean) => h.devFly.set(v));
     fm.add(h.character, 'eyeType', ['dot', 'round']).name('eyes').listen();
 
     // Round-eye face tuning. Values persist in this browser (localStorage);
@@ -193,7 +192,7 @@ export class DebugUI {
 
     // Back to the values each control had at startup. Seed, clock and movement
     // mode are world/game state, not settings, so they're left alone.
-    const keep = new Set(['seed', 'hour', 'mode']);
+    const keep = new Set(['seed', 'hour', 'mode', 'fly']);
     this.gui.add({ reset: () => this.gui.controllersRecursive()
       .filter((c) => !keep.has(c.property) && typeof c.initialValue !== 'function')
       .forEach((c) => c.reset()) }, 'reset').name('reset to defaults');

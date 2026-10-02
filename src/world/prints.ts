@@ -2,8 +2,11 @@ import * as THREE from 'three';
 
 // The giant's footprints. Like the harvest flags, they are story state laid
 // over a world that is a pure function of the seed: chunks are never rebuilt.
-// A wrap-around texture holds at most one print per 12 m cell (prints are
-// always further apart than that), and the terrain shader presses the hollow
+// A wrap-around texture holds up to two prints per 12 m cell (two layers,
+// one above the other in the texture: the giant comes back over ground it
+// has trodden, and a second print mustn't cut the first off at the cell's
+// edge), and at any point the one whose sole is nearer counts. The terrain
+// shader presses the hollow
 // into the ground and paints it, the prop shaders hide whatever stood in it,
 // and `offset` gives the same hollow to anything that walks (the GLSL in
 // PRINT_GLSL and the functions below must stay the same shape).
@@ -19,7 +22,7 @@ const DEPTH = 1.9, RIM = 0.5;
 /** Past this far from the middle of a print nothing is touched. */
 const REACH = 17;
 
-export const PRINT_TEX = new THREE.DataTexture(new Float32Array(N * N * 4), N, N, THREE.RGBAFormat, THREE.FloatType);
+export const PRINT_TEX = new THREE.DataTexture(new Float32Array(N * N * 2 * 4), N, N * 2, THREE.RGBAFormat, THREE.FloatType);
 PRINT_TEX.magFilter = THREE.NearestFilter;
 PRINT_TEX.minFilter = THREE.NearestFilter;
 PRINT_TEX.generateMipmaps = false;
@@ -37,11 +40,6 @@ export const PRINT_GLSL = /* glsl */ `
 uniform sampler2D uPrints;
 uniform float uPrintHead;
 uniform float uPrintCool;
-// The print in this 12 m cell: x, z, heading, number (0 = none).
-vec4 printAt(vec2 xz) {
-  ivec2 c = ivec2(floor(xz / ${PRINT_CELL.toFixed(1)}));
-  return texelFetch(uPrints, ((c % ${N}) + ${N}) % ${N}, 0);
-}
 // Signed distance (m) to the edge of its sole: negative inside.
 float soleSdf(vec2 xz, vec4 p) {
   if (p.a < 0.5) return 99.0;
@@ -56,6 +54,15 @@ float soleSdf(vec2 xz, vec4 p) {
   float s = (sqrt(sqrt(dot(a, a))) - 1.0) * 6.5;
   float crack = length(vec2(abs(q.x) - 2.6, q.y - clamp(q.y, 6.5, 12.0))) - 0.5;
   return max(s, -crack);
+}
+// The print that matters at this point: x, z, heading, number (0 = none). Of the (up to) two in its 12 m
+// cell, the one whose sole is nearer.
+vec4 printAt(vec2 xz) {
+  ivec2 c = ((ivec2(floor(xz / ${PRINT_CELL.toFixed(1)})) % ${N}) + ${N}) % ${N};
+  vec4 a = texelFetch(uPrints, c, 0);
+  vec4 b = texelFetch(uPrints, c + ivec2(0, ${N}), 0);
+  if (b.a < 0.5) return a;
+  return soleSdf(xz, a) <= soleSdf(xz, b) ? a : b;
 }
 // How the ground moves: a flat floor, a steep wall, a squashed-up rim.
 float printLift(float s) {
@@ -88,13 +95,12 @@ export function printLift(s: number): number {
 
 export class Prints {
   readonly list: Print[] = [];
-  private cells = new Map<number, Print>();
+  private cells = new Map<number, Print[]>();
 
   /** Press a print: the middle of the sole and the way the foot points. */
   add(x: number, z: number, heading: number): Print {
     const p: Print = { x, z, heading, n: this.list.length + 1 };
     this.list.push(p);
-    const d = PRINT_TEX.image.data as Float32Array;
     // Every cell the sole, toes and rim can reach (a circle a little ahead of the middle).
     const cx = x + Math.sin(heading) * 2, cz = z + Math.cos(heading) * 2, r = 15.5;
     for (let j = Math.floor((cz - r) / PRINT_CELL); j <= Math.floor((cz + r) / PRINT_CELL); j++) {
@@ -102,8 +108,11 @@ export class Prints {
         const nx = Math.max(i * PRINT_CELL, Math.min(cx, (i + 1) * PRINT_CELL)), nz = Math.max(j * PRINT_CELL, Math.min(cz, (j + 1) * PRINT_CELL));
         if (Math.hypot(nx - cx, nz - cz) > r) continue;
         const k = wrap(j) * N + wrap(i);
-        this.cells.set(k, p);
-        d.set([x, z, heading, p.n], k * 4);
+        // Beside what's there, if there's room; else in place of the older of the two.
+        const c = this.cells.get(k) ?? [];
+        if (c.length < 2) c.push(p); else c[c[0].n < c[1].n ? 0 : 1] = p;
+        this.cells.set(k, c);
+        this.write(k, c);
       }
     }
     PRINT_TEX.needsUpdate = true;
@@ -111,10 +120,33 @@ export class Prints {
     return p;
   }
 
+  /**
+   * Take a print away again (the ground is whole there: a house's plot,
+   * mended). It stays in `list`, so the others keep their numbers.
+   */
+  erase(p: Print) {
+    for (const [k, c] of this.cells) {
+      if (!c.includes(p)) continue;
+      const left = c.filter((q) => q !== p);
+      if (left.length) this.cells.set(k, left); else this.cells.delete(k);
+      this.write(k, left);
+    }
+    PRINT_TEX.needsUpdate = true;
+  }
+
+  /** A cell's prints into the texture's two layers. */
+  private write(k: number, c: Print[]) {
+    const d = PRINT_TEX.image.data as Float32Array;
+    for (let l = 0; l < 2; l++) { const q = c[l]; d.set(q ? [q.x, q.z, q.heading, q.n] : [0, 0, 0, 0], (k + l * N * N) * 4); }
+  }
+
   /** The print whose cell holds this point, if it is near enough to matter. */
   at(x: number, z: number): Print | null {
-    const p = this.cells.get(wrap(Math.floor(z / PRINT_CELL)) * N + wrap(Math.floor(x / PRINT_CELL)));
-    return p && (x - p.x) ** 2 + (z - p.z) ** 2 < REACH * REACH * 2 ? p : null;
+    const c = this.cells.get(wrap(Math.floor(z / PRINT_CELL)) * N + wrap(Math.floor(x / PRINT_CELL)));
+    if (!c) return null;
+    // (Of two, the one whose sole is nearer: as the shader has it.)
+    const p = c.length > 1 && soleSdf(x, z, c[1]) < soleSdf(x, z, c[0]) ? c[1] : c[0];
+    return (x - p.x) ** 2 + (z - p.z) ** 2 < REACH * REACH * 2 ? p : null;
   }
 
   /** Signed distance to the nearest sole's edge (99 = no print about). */
