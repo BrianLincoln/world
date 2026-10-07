@@ -315,8 +315,8 @@ export function buildLanterns(L: { lanterns: Lantern[] }): { geometry: THREE.Buf
   let count = 0;
   const prof: [number, number][] = [[0.02, 1.25], [0.45, 1.15], [0.8, 0.8], [0.95, 0.3], [0.98, -0.25], [0.9, -0.7], [0.7, -0.95], [0.02, -0.9]];
   for (const o of L.lanterns) {
-    const yaw = Math.atan2(o.nx, o.nz), S = 0.36;
-    const at = new THREE.Vector3(o.x + o.nx * 0.5, o.y + 0.36, o.z + o.nz * 0.5);
+    const yaw = Math.atan2(o.nx, o.nz), S = 0.36 * (o.s ?? 1);
+    const at = new THREE.Vector3(o.x + o.nx * 0.5, o.y + S, o.z + o.nz * 0.5);
     const start = count;
     const add = (g: THREE.BufferGeometry, part: number, pivot: THREE.Vector3) => {
       const k = (g.index ? g.toNonIndexed() : g).rotateY(yaw).translate(at.x, at.y, at.z);

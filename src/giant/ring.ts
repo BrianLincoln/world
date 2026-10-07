@@ -1,9 +1,8 @@
 import * as THREE from 'three';
-import { makeSolidMaterial } from '../gfx/materials';
+import { FIELD_U, makeSolidMaterial } from '../gfx/materials';
 import type { Body } from '../player/movement';
 import type { Sfx } from '../story/audio';
 import { Arm } from '../story/beacons';
-import { OCCLUDE, overlayMat } from '../story/overlay';
 import type { DungeonSite } from '../world/worldgen';
 
 // A dungeon's ring, once it's open: the towers' dark opposite. The giant
@@ -34,50 +33,17 @@ const ARM = 1.4;
 
 type Phase = 'reach' | 'hold' | 'pull' | 'rise' | 'letgo';
 
-const FIELD_VERT = /* glsl */ `
-out vec2 vP;
-out float vDepth;
-void main() {
-  vP = position.xz;
-  vec4 vc = modelViewMatrix * vec4(position, 1.0);
-  vDepth = -vc.z;
-  gl_Position = projectionMatrix * vc;
-}
-`;
-const FIELD_FRAG = /* glsl */ `
-precision highp float;
-${OCCLUDE}
-uniform float uTime;
-uniform float uOpen;
-uniform float uR;
-uniform vec2 uStir;
-in vec2 vP;
-in float vDepth;
-out vec4 fragColor;
-void main() {
-  float r = length(vP) / uR;
-  if (r > uOpen) discard;
-  float a = atan(vP.y, vP.x);
-  // Slow flat bands winding in to the middle, and a hard pale lip.
-  float swirl = step(0.5, fract(a * 0.477 + r * 2.2 - uTime * 0.07));
-  float ring = step(0.5, fract(r * 3.0 - uTime * 0.11));
-  vec3 col = mix(vec3(0.085, 0.06, 0.15), vec3(0.16, 0.11, 0.27), 0.55 * swirl + 0.25 * ring);
-  float lip = smoothstep(uOpen - 0.07, uOpen - 0.03, r);
-  col = mix(col, vec3(0.62, 0.55, 0.86), lip);
-  // Where something stands on it, it pales in a ring round the feet.
-  float d = length(vP - uStir);
-  col = mix(col, vec3(0.45, 0.38, 0.7), (1.0 - smoothstep(0.0, 0.5, abs(d - 1.6 - 0.25 * sin(uTime * 3.0)))) * 0.6);
-  fragColor = vec4(col, (0.78 + 0.16 * lip) * occlusion(vDepth));
-}
-`;
-
 const p = new THREE.Vector3();
 
 export class Ring {
-  /** Solid things (the spirit, its arms): the main scene. */
+  /**
+   * Solid things (the spirit, its arms): the main scene. The forcefield has
+   * no mesh: the ground's own shader paints it (`FIELD_U`, TERRAIN_FRAG), so
+   * it lies on the ground whatever its shape, and nothing shows through it.
+   */
   readonly group = new THREE.Group();
-  /** The forcefield: translucent, so the overlay scene. */
-  readonly overlay = new THREE.Group();
+  /** Which ring the ground is painting a field for just now. */
+  private static painted: Ring | null = null;
   open = false;
   /**
    * Done with (the light below has been taken): the field closes in to its
@@ -90,7 +56,6 @@ export class Ring {
   onTaken: (() => void) | null = null;
   private openNow = 0;
   private time = 0;
-  private field: THREE.Mesh;
   private spirit = new THREE.Group();
   private arms: Arm[];
   private take: { phase: Phase; t: number; from: THREE.Vector3 } | null = null;
@@ -100,25 +65,12 @@ export class Ring {
   private fall = -1;
   private from = new THREE.Vector3();
   private centre: THREE.Vector3;
-  private stir = new THREE.Vector2(99, 99);
-  /** The field's tilt (rise per metre along x and z). */
-  private sx = 0;
-  private sz = 0;
 
-  constructor(readonly site: DungeonSite, ground: (x: number, z: number) => number, private d: RingDeps) {
+  constructor(readonly site: DungeonSite, private ground: (x: number, z: number) => number, private d: RingDeps) {
     this.centre = new THREE.Vector3(site.x, ground(site.x, site.z), site.z);
     const R = site.r - 2.4;
-    this.field = new THREE.Mesh(new THREE.CircleGeometry(R, 56).rotateX(-Math.PI / 2), overlayMat(FIELD_VERT, FIELD_FRAG, { uOpen: { value: 0 }, uR: { value: R }, uStir: { value: this.stir } }));
-    // The ground in the ring is never quite level: the field lies on its slope, just clear of it.
     const g = (dx: number, dz: number) => ground(site.x + dx, site.z + dz);
-    this.sx = (g(R, 0) - g(-R, 0)) / (2 * R);
-    this.sz = (g(0, R) - g(0, -R)) / (2 * R);
     this.centre.y = (g(R, 0) + g(-R, 0) + g(0, R) + g(0, -R) + 2 * this.centre.y) / 6;
-    this.field.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), new THREE.Vector3(-this.sx, 1, -this.sz).normalize());
-    this.field.position.copy(this.centre).setY(this.centre.y + 0.55);
-    this.field.frustumCulled = false;
-    this.field.visible = false;
-    this.overlay.add(this.field);
 
     // The dark spirit: the tower spirit's shape (a dome over a wavy hem, tall eyes) in ink, with pale eyes.
     const prof: [number, number][] = [[0.02, 1.25], [0.45, 1.15], [0.8, 0.8], [0.95, 0.3], [0.98, -0.25], [0.9, -0.7], [0.7, -0.95], [0.02, -0.9]];
@@ -158,9 +110,16 @@ export class Ring {
   /** Where you stood (your feet) when it took you, while it has you: the camera stays up there, it can't follow you under the ground. */
   get heldY() { return this.take ? this.take.from.y : -Infinity; }
 
-  /** The field's height at a point (it lies on the ground's slope). */
-  private fieldY(x: number, z: number) {
-    return this.centre.y + 0.55 + this.sx * (x - this.centre.x) + this.sz * (z - this.centre.z);
+  /** Hand the field to the ground's shader (or take it back: `open` 0). */
+  private paint(open: number) {
+    if (open > 0.01) {
+      Ring.painted = this;
+      FIELD_U.uField.value.set(this.centre.x, this.centre.z, this.site.r - 2.4, open);
+    } else if (Ring.painted === this) {
+      Ring.painted = null;
+      FIELD_U.uField.value.w = 0;
+      FIELD_U.uFieldStir.value.set(1e6, 1e6);
+    }
   }
 
   /** Back from the dungeon: the arms lift you out through the middle of the field and let go. */
@@ -177,7 +136,7 @@ export class Ring {
   seal(now = false) {
     this.sealed = true;
     this.open = false;
-    if (now) { this.sealK = 1; this.openNow = 0; this.fall = -1; this.spirit.visible = false; this.field.visible = false; }
+    if (now) { this.sealK = 1; this.openNow = 0; this.fall = -1; this.spirit.visible = false; this.paint(0); }
   }
 
   /** The giant lets it go from `from`: it drops into the ring, and the ring opens. */
@@ -224,8 +183,7 @@ export class Ring {
     // (Sealing, it closes steadily, lip and all, rather than easing off.)
     if (this.sealed) this.openNow = this.take ? this.openNow : Math.max(0, Math.min(this.openNow, 1 - THREE.MathUtils.smoothstep(this.sealK, 0.05, 0.8)));
     else this.openNow += ((this.open ? 1 : 0) - this.openNow) * (1 - Math.exp(-1.4 * dt));
-    this.field.visible = this.openNow > 0.01;
-    (this.field.material as THREE.ShaderMaterial).uniforms.uOpen.value = this.openNow;
+    this.paint(this.openNow);
     if (!this.spirit.visible && !this.take) { this.hideArms(); return; }
     // It watches whoever is nearest: you.
     const off = Math.hypot(player.x - ctr.x, player.z - ctr.z);
@@ -234,7 +192,7 @@ export class Ring {
 
     const R = this.site.r - 2.4;
     const on = this.open && off < R - 0.4 && Math.abs(player.y - ctr.y) < 3;
-    this.stir.set(on ? player.x - ctr.x : 99, on ? player.z - ctr.z : 99);
+    if (Ring.painted === this) { if (on) FIELD_U.uFieldStir.value.set(player.x, player.z); else FIELD_U.uFieldStir.value.set(1e6, 1e6); }
     if (off > R + 1) this.disarmed = false;
     // Walk well on to the field, on your own feet, and it takes you.
     if (!this.take && allow && !this.disarmed && this.openNow > 0.9 && mode === 'walk' && grounded && off < R - WELL_ON && Math.abs(player.y - ctr.y) < 3) {
@@ -284,7 +242,7 @@ export class Ring {
       // Never out past the field's lip: it's the field they come out of.
       const far = Math.hypot(root.x - ctr.x, root.z - ctr.z) / (R - 0.7);
       if (far > 1) { root.x = ctr.x + (root.x - ctr.x) / far; root.z = ctr.z + (root.z - ctr.z) / far; }
-      root.y = this.fieldY(root.x, root.z) - drop;
+      root.y = this.ground(root.x, root.z) - drop;
       const sh = root.clone().setY(root.y - 1.2);
       // The hand's way up: from just under the field's skin, high over your shoulder, down to your chest.
       const rest = root.clone().setY(root.y - 0.4);
@@ -301,7 +259,7 @@ export class Ring {
   private hideArms() { this.arms[0].group.visible = this.arms[1].group.visible = false; }
 
   dispose() {
+    this.paint(0);
     this.group.removeFromParent();
-    this.overlay.removeFromParent();
   }
 }

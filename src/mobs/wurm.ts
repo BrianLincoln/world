@@ -44,6 +44,35 @@ function headGeometry() {
 
 const tv = new THREE.Vector3();
 
+/** A woolly wurm in stone, curled round on itself with its head up (the shrine the fourth ring becomes): position and normal, on y = 0, facing +z. */
+export function wurmStatue(): THREE.BufferGeometry {
+  const pos: number[] = [], nor: number[] = [];
+  const n3 = new THREE.Matrix3(), v = new THREE.Vector3(), q = new THREE.Quaternion(), one = new THREE.Vector3();
+  const add = (g: THREE.BufferGeometry, at: THREE.Matrix4) => {
+    const flat = g.index ? g.toNonIndexed() : g;
+    const p = flat.getAttribute('position'), n = flat.getAttribute('normal');
+    n3.getNormalMatrix(at);
+    for (let i = 0; i < p.count; i++) {
+      v.fromBufferAttribute(p, i).applyMatrix4(at);
+      pos.push(v.x, v.y, v.z);
+      v.fromBufferAttribute(n, i).applyMatrix3(n3).normalize();
+      nor.push(v.x, v.y, v.z);
+    }
+  };
+  // Half size: she is long. The head at the front, lifted; the body behind it in most of a ring.
+  const S = 0.5, R = 0.95;
+  add(headGeometry(), new THREE.Matrix4().compose(new THREE.Vector3(0, 1.05 * S + 0.42, R * 0.55), q.setFromEuler(new THREE.Euler(-0.35, 0, 0)), one.setScalar(S)));
+  for (let k = 1; k < SEGS.length; k++) {
+    const a = 0.5 + k * 0.62, s = SEGS[k] * S;
+    add(segmentGeometry(k % 2 === 1, 70 + k), new THREE.Matrix4().compose(new THREE.Vector3(Math.sin(a) * R, s * 0.95 + (k === 1 ? 0.2 : 0), Math.cos(a) * R * 0.9 - 0.1), q.setFromEuler(new THREE.Euler(0, a - Math.PI / 2, 0)), one.setScalar(s)));
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  g.setAttribute('normal', new THREE.Float32BufferAttribute(nor, 3));
+  g.computeVertexNormals();
+  return g;
+}
+
 export class Wurm extends Beast {
   private headB: PartBatch; private segB: PartBatch[]; private saddleB: PartBatch; private collarB: PartBatch;
 
@@ -157,7 +186,8 @@ export class Wurm extends Beast {
       // Yaw and pitch toward the one in front (never a roll: it stays upright).
       if (tv.lengthSq() > 1e-6) {
         tv.normalize();
-        o.rotation.set(-Math.asin(clamp(tv.y, -1, 1)), Math.atan2(tv.x, tv.z), 0, 'YXZ');
+        // (Straight up or down a wall there's no way it's turned to read off the path: it's the head's, so its back is to the open air.)
+        o.rotation.set(-Math.asin(clamp(tv.y, -1, 1)), Math.hypot(tv.x, tv.z) > 0.05 ? Math.atan2(tv.x, tv.z) : m.heading, 0, 'YXZ');
       }
       prev.copy(o.position);
       o.updateMatrixWorld(true);

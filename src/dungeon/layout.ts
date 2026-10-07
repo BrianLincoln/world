@@ -48,7 +48,7 @@ export interface Shelf { x: number; z: number; dx: number; dz: number; h: number
 /** A drop: a disc `depth` deep, and a tunnel from a (inside it) to b whose floor climbs back up to the level outside. */
 export interface Pit { x: number; z: number; r: number; depth: number; ax: number; az: number; bx: number; bz: number; tr: number; t0: number; t1: number }
 /** A spirit lantern on a wall: where it hangs, and which way it faces (into the room). */
-export interface Lantern { x: number; y: number; z: number; nx: number; nz: number }
+export interface Lantern { x: number; y: number; z: number; nx: number; nz: number; /** How big, times the ordinary (one on a post, to be seen from afar). */ s?: number }
 
 /** The well's radius, and its four columns'. */
 export const WELL_R = 16, COLUMN_R = 13;

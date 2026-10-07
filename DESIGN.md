@@ -183,14 +183,20 @@ to stay inside the art direction (`docs/BRIEF.md`) and "nothing scary".
   leaves with its light; the camera cuts to the village under a short
   veil, to the guide's cabin, where the crow lets the light go from a few
   metres up, it lands in dust and is the spirit again, and the two run to
-  each other; the crow flies on out of sight; the camera cuts back, and the
+  each other, with everyone brought home before there in the yard
+  celebrating (owner, 2026-10-07: a head count of the saved); the crow
+  flies on out of sight and never returns to the giant (same day: the crows
+  left on it are the spirits still taken); the camera cuts back, and the
   giant stands up out of the ground and walks to a second ring, leaving
   prints, and lies down there. Lying down, it lets a second dark spirit go
   into that ring, which opens as the first did: under it is dungeon 2 (below).
   After dungeon 2 the same happens again (owner, 2026-10-06): the second
   spirit taken is flown home to the guide's cabin, and the giant gets up
-  and walks to a third ring and lies down. **The trail ends there for
-  now**: the third ring is bare stones with nothing under it.
+  and walks to a third ring and lies down; under it is dungeon 3 (below).
+  After dungeon 3 the same again (owner, 2026-10-07): the third spirit
+  taken is flown home, and the giant walks to a fourth ring and lies down.
+  **The trail ends there for now**: the fourth ring is bare stones, with
+  nothing under it yet.
   `docs/NEXT-dungeon2.md`.)*
 - **Rescued spirits mend the village as you go** (owner, 2026-10-01): you
   see them working on it and clearing up, and it steps on at each
@@ -210,7 +216,7 @@ to stay inside the art direction (`docs/BRIEF.md`) and "nothing scary".
   mount is the reward. `docs/NEXT-dungeon2.md`. This answers conflict 9's "awaiting a yes"
   differently.)*
 - **There is a list of dungeon sites** (2026-10-02): `WorldGen.dungeons`,
-  three so far, each a ring of stones found from the seed, each
+  four so far, each a ring of stones found from the seed, each
   0.9-1.5 km on from the one before by a way a bike can take (and never
   within 700 m of an older one). Where the only
   way on is back the way it came, the giant treads in its own prints.
@@ -277,19 +283,97 @@ to stay inside the art direction (`docs/BRIEF.md`) and "nothing scary".
     round and she comes and fetches you; walk up to her then and it counts.
   - **The ride:** into the pocket; three veils in a row down the middle;
     out into the first cell; the last veil, and the light. Taking it ends
-    the dungeon with a small success beat, and she carries you out through
-    a veil in the wall of the entry well: you are on the surface, on her.
+    the dungeon with a small success beat, and the ring's arms lift you
+    out as from dungeon 1 (changed by the owner, 2026-10-06; see
+    "Dungeons"): you are on the surface, on her.
   - **Above:** dungeon 1's offering told quickly (about 20 s hands off:
     the ring shuts into a shrine, a glimmer in stone; a crow takes the
     light into the giant's mouth; it smiles). Then dungeon 1's homecoming again
     (owner, 2026-10-06): a crow flies the second spirit's light home, and
     the giant gets up and walks on to a third ring.
   - You go in on foot; the rockhopper stays above.
+- **Dungeon 3's interior: the Moon Hall** (agreed with the owner in
+  outline 2026-10-06/07; *built, played by the owner only in its first rough
+  form*). Its creature is the moonmoth. Dusk rose where the others are
+  violet and teal. A long way in with a bend, then one great dark hall
+  (112 m across, 130 m high: the owner asked for as tall as feasible) with
+  no lanterns in it.
+  - **She is seen first, and out of reach.** She sleeps on the face of a
+    pulpit of rock that stands out from a ledge 50 m up the far wall, wings
+    spread, eyespots alight. The first time you walk into the hall the
+    camera goes up to her.
+  - **The puzzle is the moon's month** (owner, 2026-10-07, settled on the
+    fourth telling). In the middle stands a lamp, out. Let into the floor
+    round it is a ring of eight pictures of the moon, in the month's order
+    (new, waxing crescent, first quarter, waxing gibbous, full, waning
+    gibbous, third quarter, waning crescent), glowing a quiet yellow-white.
+    They never change. Out along the lines of new, the quarters and full
+    stand four turning stones, the only things standing there, each with
+    those four moons on its faces: turn each to the moon pictured at its
+    place in the ring. A stone that's right sends the lamp a beam, so trying
+    every face also gets there: no way to fail.
+  - A few glowcaps grow out of the hall's walls and the gallery's, sparse,
+    at any height (owner, 2026-10-07).
+  - **Light brings her.** All eight, and the lamp is lit: the hall's colour
+    comes back, she flies down off her ledge to it, is glad (a heart), and
+    offers her back.
+  - **The lamp points the way on:** one more beam, up to a pale stone on the
+    pulpit she came from. Fly up; behind the ledge a long gallery (20 m
+    wide, 46 m high, 200 m with a bend) leads to the dungeon's light. She flies freely down here, as she does above.
+  - **Out:** taking the light ends it as the other two end: the cut, and
+    the ring's arms lift you out. (Her carrying you up the well, tried
+    first, read as a teleport on foot: owner, 2026-10-07.) In every
+    dungeon you come up on the creature if you were on it when you took
+    the light; otherwise it stands beside you. Above: the short offering
+    (a moonmoth in stone). You are
+    off her for it, as at the other two, and she stays down where you got
+    off. Then the third homecoming: a third spirit flown home, and the
+    giant up and on to a fourth ring (bare stones; dungeon 4 isn't built).
+  - Not agreed, the builder's: see `docs/NEXT-dungeon3.md`.
 - **The light a dungeon keeps is a dark light** (2026-10-02, changed in
   another session while dungeon 2 was being built): an ink heart with a
   violet rim, the ring's colours, in both dungeons and in the offering.
   Orange is only ever a spirit. See NOTES.md, "the dungeon's light is a
   dark light".
+
+### The cold country (decided 2026-10-07, not built)
+What you do in the open world, and why. The whole of the talk it came out
+of, what was tried and left, and what it collides with in the built game
+are in `docs/ROADMAP-openworld.md`; the first thing to build is in
+`docs/NEXT-warmth.md`.
+- **The country has gone cold, and you warm it tower by tower.** Cold, not
+  dark: the sun still rises, but land with no light near it is pale, near
+  one colour, the fog close, nothing living in it and nothing to find. Lit
+  land is the game as it looks now.
+- **Lighting a tower warms a big swath round it,** and the warming rolls
+  out across the land while you watch.
+- **Sparks open a tower,** in place of the padlock and the pickaxe. Sparks
+  are the common resource: small, found often, always wanted. Nothing
+  drains as you walk.
+- **Sparks come out of warm land:** what's worth finding only shows, or
+  opens, where it's warm.
+- **No tower stands near a dungeon's ring. When the dungeon is won a tower
+  rises out of the sealed ring** and warms that country for nothing. The
+  story alone warms a chain of regions along the trail.
+- **The giant is a tower whose light has gone out** (the direction for the
+  lore; details open). Cold and empty, it took the hearth spirits to fill
+  its head; they're too small. The dark lights under the rings are pieces
+  of its own; each one it swallows is one borrowed light it lets go home.
+  It walks on because the next piece is under the next ring. At the end
+  its head is lit and **you ride it from inside its head,** as you look
+  out of a tower's. The stone hands about the world are other giants',
+  asleep.
+- **The lasso is handed over much later in the game** than the stable.
+  Until then your mounts are the ones the dungeons give you.
+- **Every dungeon also gives a treasure: one particular new structure for
+  the village.** Probably found by the shrine on the sealed ring. And
+  **small caches**, worth less, about each dungeon and rarely in the world.
+- You mend no house after the guide's. The spirits rebuild their own,
+  hands off, as you get on.
+- Open, among much else: a swath's size, a tower's price, what sparks are
+  in the world besides a number, whether cold cabins warm a pocket of
+  their own, whether anything is cold before the giant comes, and which
+  structure each dungeon gives.
 
 ### The trail and the core loop (decided, not built)
 - **Loop:** follow the trail → go down into the dungeon on foot → unlock
@@ -310,7 +394,46 @@ to stay inside the art direction (`docs/BRIEF.md`) and "nothing scary".
   riding the new one, and it is the reward. Abilities a dungeon can be
   built round: swimmer, digger, glider, heavy pusher, climber, small-gap,
   and glowing (for dark rooms). The axe and pickaxe still matter.
+- **One ending for every dungeon, the same each time** (owner, 2026-10-06;
+  widened 2026-10-07 to the whole run from the light to the spirit home).
+  It is one standard sequence, and a new dungeon gets it whole, with only
+  its own creature, statue and colours swapped in. Don't give a dungeon an
+  ending of its own unless the owner asks for one:
+  1. **The light.** You take it where it is, on foot or riding. The small
+     success beat plays on the spot (the hops, the heart).
+  2. **Pulled up.** The cut comes down and the ring's arms lift you out of
+     the ground on the surface. No ride out of your own, no cut to
+     somewhere else in the dungeon first. The creature comes up too: under
+     you if you were riding it when you took the light, standing beside
+     you if you weren't.
+  3. **The offering.** Hands off: the ring shuts into a shrine, you get
+     down, hold the light up, a crow takes it into the giant's mouth.
+  4. **A spirit comes home.** A crow leaves with a light, the cut to the
+     village, the spirit lands and is met, the cut back, and the giant gets
+     up and walks on to the next ring.
+
+  *(Steps 1 to 3 are built in all three; step 4 in dungeons 1 and 2, not
+  yet in 3. Dungeon 2 first had the glimmer run you out through a veil,
+  and dungeon 3 the moth fly you up its well with a cut to put you on her:
+  played, both read as a teleport, and were taken out.)*
 - Each dungeon teaches one ability. Later ones combine them.
+- **Dungeon 4 is to be harder, through action that isn't combat** (owner,
+  2026-10-07): evading something that puts you back at the start, a course
+  against the clock, floors that fall away. The pool of ideas is
+  `docs/IDEAS-dungeon4.md`; don't build from the rest of it unasked.
+- **Dungeon 4's interior: the Drop** (the owner's idea, 2026-10-07; *built
+  in a first rough form, dev only, not yet played by the owner*). Its
+  creature is the woolly wurm. You come out on a lip very high up in a
+  cavern, the dungeon's light in sight across it, level with you. The way
+  is down: precision landings on the parachute from one pillar's top to
+  the next, a lantern waking at each next landing. A wind blows up out of
+  the deep the whole time and never stops; drop past the lit top and it
+  carries you back up to the lip. There is no floor: below the lips it is
+  dark but for the lantern you're to land by and the one you stand by, and
+  dust comes up past you. The last landing is a long ledge out of the mouth
+  of a burrow; in the burrow the wurm, who clings: she goes out along the
+  ledge and climbs the cavern's own far face to the light. No other way up. Its ring and its offering are built; nothing follows yet. What
+  was taken as a default and what's to be asked: `docs/NEXT-dungeon4.md`.
 - **Generated backward from an ability chain** so they're solvable by
   construction, using room templates per ability.
 - Abilities that exist today, by creature (what the code has now; see
@@ -349,6 +472,10 @@ to stay inside the art direction (`docs/BRIEF.md`) and "nothing scary".
 
 ### Side content (decided, not built)
 None of it is required.
+(2026-10-07: the owner wants much more of this: quests, treasure, a
+second currency, village structures, shops, clothes, vehicles. What came of
+it is "The cold country" above; the rest is a pool, not worked out, in
+`docs/ROADMAP-openworld.md`.)
 - Mini one-room hollows.
 - Oversized dropped giant items as collectibles.
 - Rare off-path creatures with odd abilities.
@@ -658,7 +785,7 @@ into yet; the dungeon itself is a later slice.
 
 ## Open Questions
 
-- How do towers get lit in the long term? A resource, or a challenge, later.
+- (Answered 2026-10-07: towers are lit with sparks. See "The cold country".)
 - Can creatures travel through towers?
 - How do tower spirits differ from each other?
 - What makes the home tower look special? Currently: 12% bigger, golden

@@ -5253,3 +5253,224 @@ into P's wall and her head comes out; come up, and it comes out once more
 a room on (W3); there she comes out for good, with the heart. Seven
 veils' ends in all, about 85 s at a run by the script. `PEEKS` has five
 entries now. Not saved: a reload in round 2 starts from the well.
+
+And: "one more section where it goes into that next room and is already
+there waiting for me. just doesn't run away that time". **The end is a
+room on** (`LAST`, W2): come up to her last head (W3) and she comes out of
+the wall by you and through one more short veil; in the middle of the
+room beyond she stands, tail going, and doesn't run. Walk up to her
+(`CATCH`, 4.5 m): the heart, the bouncing, her back. Eight veils' ends in
+all.
+
+### Dungeon 2's ending is dungeon 1's (2026-10-06, owner)
+
+"the ending of D2 is messed up. when I get the orb I should get pulled up
+to the surface like in D1. it does a weird teleport thing rn". The
+glimmer's run out (a cut to the well, across it, through the `out` veil;
+`leave`, `OUT`, `snapYaw`) is gone. Now as `dungeon.ts`: the gladness, the
+cut over its last `WIN_VEIL`, `onWon`; `leaveCave(true)` calls
+`ring2.emerge` as `leaveDungeon` does, the glimmer stood beside the ring
+as `bringUp`. **A rule for every dungeon from here on**, unless decided
+otherwise for one (DESIGN.md, "Dungeons"). The `out` veil is still in the
+plan, a veil in the well's wall with nothing behind it to do.
+`scripts/veil.mjs quest` checks the lift. Its last check ("the second ring
+does not take you again": E doesn't get you off the glimmer there) fails,
+and failed before this change too (same result on an older build).
+
+## The offering: the crow swoops, and you carry the light (2026-10-06)
+- Owner's change: the crow doesn't land. One swoop off the giant's head,
+  level between two of the ring's stones (`LEVEL`, `ASKEW` in
+  `offering.ts`: in from the giant's side and round toward the near camera,
+  so it crosses the view and isn't flying at you), claws down over the last
+  0.8 s, the light taken at full speed (`T.has`), then up and round on the
+  far side losing its speed (`Bird.stall`) to hang facing the giant. The
+  walk, crouch and hop are gone, and with them `landed` / `walk` / `atBowl`
+  / `take` from the timing: 4.4 s shorter (3 s in `OFFER_SHORT`).
+- Owner's change: the light is held, not floating at your shoulder.
+  `Character.carry`: 1, on both mittens before her belly; 2, lifted a
+  little, to her chest. (Aloft on one mitten like a lantern was tried
+  first, because held before her it's hidden from straight behind; the
+  owner chose held close, and it reads from the shrine's side-on camera.)
+  She doesn't throw it: at the shrine it rises out of her mittens by
+  itself. `hands()`
+  is where it sits, and the light is put there after the rig has moved
+  (`carryAt` in the two dungeons, straight from `d.hands` in the offering),
+  so it never lags a hop. Taking it below is 2 through the glad hops, 1
+  after; mounted or not.
+- And the offering is hers to make (`Offering.approach`): a beat, down off
+  the mount, a slow walk to `MARK` from the shrine's middle with the near
+  camera on her, the light held up for `RAISE`, and it leaves her mittens
+  for the bowl. She stays on foot there to the end (the checks that said
+  "still mounted" now say on foot). A reload mid-way still finds her
+  mounted, as before.
+- Not done: the Moon Hall (`mothCave.ts`, another session's) still floats
+  its light at the shoulder. `scripts/veil.mjs home2`'s "third ring is bare
+  stones" check now fails: on foot the third ring takes you down, since
+  there is a dungeon under it.
+
+## Dungeon 3: the Moon Hall (2026-10-07)
+Built in one go from an outline agreed with the owner, then reworked twice from their notes. DESIGN.md has what it
+is; `docs/NEXT-dungeon3.md` the defaults and what's rough.
+- **Plan** (`mothPlan.ts`): the same 2.5D plan as the other two (rooms, halls, one `Shelf`), so `buildShell` draws
+  it. The high ledge is a shelf 22 m tall across the gallery's mouth, as dungeon 1's wrong-way ledge is one of 3.4.
+  A ledge that juts into the hall can't be a shelf (its sides would have no face), so the part that sticks out is a
+  `Solid`: a round flat-topped pillar (`pulpit`, with `y`) whose top is level with the ledge.
+- **You fly in it**, so `collide` adds the walls' lean at the body's height (`leanAt`): the other two only ever had
+  feet on the floor.
+- **Moons are geometry** (`mothShell.ts`), no textures: the lit part is a `Shape` (an arc and the terminator's
+  ellipse), mirrored for waning; craters are discs kept only where they lie wholly in the lit or the dark part. The
+  dark side is a dim disc with its own marks: a new moon is a moon.
+- **The moth** is a puppet until she's yours. Clinging to the pulpit is `d.s.hang` in `Moonmoth.pose` (the body
+  pitched nose up; her heading is into the rock so her back and wings face the hall).
+- **Above ground she drifted round the shrine**: the offering takes you off your mount, and a tamed flier left
+  alone hovers in loops. `Mob.settle` makes one stay down (`Beast.resting`, `hover`).
+- **Scripts that step frames must call `__ow.manual(true)`**: `frame()` asks for another animation frame each time
+  it runs, so every `advance(1)` left another loop running and after a few hundred the page drew 2 frames a second
+  and screenshots timed out. (True of any script here; `moth.mjs` does it in `ready`.)
+- Not done: a plan checker, perf on the bigger hall, anything after the offering.
+
+- 2026-10-07: the giant's crows take things feet first and carry them in their feet (owner). `Bird.fore`
+  (`Birds.reach(t, at)`: legs thrown out ahead from 0.8 s before, snapped back under as they close) for the
+  orb and the spirits alike; `Bird.holds` keeps the legs down while anything is carried; `Bird.claw` is where
+  the claws are, and every carried thing hangs from it (`Birds.clasp` for a ball, `grip` for a spirit), not
+  from a fixed drop under the bird's middle. Check with `scripts/offering.mjs <dir> claws`.
+
+- 2026-10-07: a freed tower spirit climbs from where it was happy (owner: the float over to the foot of the
+  tower before the pull was a second movement and felt clunky). `planClimb` takes the celebration spot as the
+  climb's foot; the arc and the arms are proved clear of rock from there as before. The gap between the cheer
+  and the arms going up is a turn on the spot (`T_REACH` 7.5 → 6.7), and the wide shot sits lower and further
+  back until it leaves the ground, since the spot is out from the rock and often downhill of the door. Check
+  with `DIST=<folder> node scripts/beacon.mjs <dir> tower=3 shots=free` (and `tower=4`, the other camera side).
+
+- 2026-10-07: the glimmer's phase is a blink (owner: out in the world the flickering dash looked lame; like a
+  mage's blink, a poof, moved up a bit, dust going back from where she was, something phasing in where she
+  lands). Presentation only: the body still runs the same `PHASE` 0.42 s the same way, so the Veil Cave's
+  distances, its veil passes and the camera's holes are untouched (`veil-plan.mjs` and `veil.mjs quest,dash`
+  pass as before). For all but the last `PHASE_IN` 0.1 s she and the rider aren't drawn (`d.hidden`,
+  `blinkWork` in main; no shadow either); at the press dust is thrown back the way she came with a few motes
+  of her light in it; while she's gone a thin line of motes marks where she went; back, she opens out of a
+  tall sliver over `BLINK_IN` 0.3 s (`blinkIn`, the rider with her), pale as her light and taking her coat
+  again, in a ring of motes and a kick of dust. The glimmer by herself in the cave (`ghost`) is as she was:
+  never gone, only stretched. Check with `DIST=<folder> node scripts/blink.mjs <dir> [t]` (every other frame).
+- **The moonmoth walks** (2026-10-07). Her six legs were part of the body's mesh, so on foot she slid. They're
+  parts of their own now (`thighB` / `shinB`, twelve nodes `hip<k>` / `knee<k>`, `LEGS` in `moonmoth.ts`; the
+  statue keeps the fixed ones, `bodyGeometry(true)`): an insect's tripod walk off `a.cyc` (fore and hind of one
+  side with the middle of the other, `swing`), a small waddle and bob, the wings held about 0.3 rad up and
+  shivering with each step so they don't drag; standing they're where they were, in the air they tuck under
+  (`a.air`). No `feet()` yet: on a cross slope the downhill feet can hang a little.
+
+- **The Moon Hall has music** (2026-10-07, owner's four files). `moonhall_way_in` (28 s, once),
+  `moonhall_dark_hall_loop` (72 s loop), `moonhall_lamp_lights` (14 s, once), `moonhall_flying_loop` (64 s loop);
+  `public/audio/*.mp3` by `scripts/audio.mjs <folder>`. Played by `Ambience` the way the giant's pieces are
+  (`CUES`, now a table per piece: its group, its fade in, what the one before goes out over, a loop's length);
+  which piece is `MoonHall.music`, from the hall's own events and no timers: the way in from `enter()`; the
+  hall's loop from coming out into the great room (the same test as the first look at her, latched for the
+  visit, so turning stones never restarts it); the lamp's from the fourth stone coming right (`show = 0`); the
+  flying loop from first being on her back with the lamp lit, then to the end. Null once you're out, which
+  fades whatever sounds over `DROP`.
+  - Cross-fades: way in → hall 4 s; hall → lamp 3 s out, the lamp let in over 0.5 s (the file brings itself
+    in, as the way in does); flying 3 s in (4 s over anything still sounding); out 4 s. A way in that runs out
+    before you reach the hall (it stops dead in the file) goes out over its last 4 s.
+  - Volume: `gains.hall` (1), times `gains.music`; in the panel's Music folder.
+  - Timing as played by the keys on `hilda`: the hall at 26.9 s (the way in is 28 s); the lamp's piece ends
+    1.8 s before she can be got on, so there is a breath with no music until you're on her.
+  - Taken as defaults, not asked: coming back down with the lamp already lit plays the hall's loop until
+    you're on her; the flying loop stays if you get off her.
+  - Check: `DIST=<folder> node scripts/moth-music.mjs` (real time, the levels), and `scripts/moth.mjs <dir>
+    quest` prints when each piece is asked for.
+
+### Dungeon endings made one sequence (2026-10-07)
+The Moon Hall's own way out (a cut to the well, put on the moth, flown up
+its roof) is gone: on foot it read as a teleport. It now ends as the other
+two do (`win` runs out under the veil, `onWon`, `ring3.emerge`). In all
+three `leaveX(true)` only sets `bringUp` if you were riding when the light
+was taken; otherwise `standBy` puts the creature beside where you come up.
+The whole run (light, pulled up, offering, spirit home) is the standard for
+every dungeon: DESIGN.md "Dungeons". Dungeon 3 still lacks the homecoming.
+
+## A third homecoming, and a fourth ring (2026-10-07)
+Asked for: after dungeon 3's offering, what follows the other two, and the
+giant walking to where dungeon 4 will be. Dungeon 4 itself isn't built.
+- `WorldGen.dungeons` finds a fourth site (`nextSite(third, [first, second])`). The first three don't move:
+  `scripts/sites.mjs` fingerprints match the build before on `hilda`, `hildaz2`, `fjord`. Cache key
+  `embla.dungeon.v10`. `WORLD_VERSION` not bumped: the land only changes at the new ring and along its way,
+  1 km past anything a save holds. The fourth search costs 0.1-1.6 s once per seed on the five seeds tried.
+- `homecoming3` in main: the same class, `who: 2, leg: 3, name: 'home3'`, `before` the second's route, veil
+  rose (the Moon Hall's). No `settledAt` and no `Ring` for the fourth: the POI's bare stones only, as the
+  third was before dungeon 3. `offering3`'s giant is null once it has got up.
+- A save from between the third offering and the spirit landing puts you back by the shrine on the moth, as
+  the other two do.
+- Check: `scripts/moth.mjs <dir> home3 [sandbox]` (all ok on `hilda`), `scripts/sites.mjs` (now checks the walk
+  to ring 4 too: dry, off rings and towers, ends 45-130 m short; ok on five seeds).
+- No dev shortcut for "third done" (`thirdDone`, a `ring4` checkpoint): nothing to stand in front of yet.
+
+## The ring's forcefield is painted by the ground (2026-10-07)
+It was a flat tilted disc in the overlay scene, 0.55 m over the ring's average
+slope, at 78% alpha. Rings stand on ground up to a few metres out of level
+(2-2.6 m inside the three on seed hilda), so humps came up through it, and the
+ground showed through it anyway. Now it has no mesh: `TERRAIN_FRAG` paints it
+as the ground's own colour inside `uField` (x, z, radius, open; `FIELD_U` in
+materials.ts, written by whichever `Ring` is open, one at a time). It can't be
+poked through at any LOD, is opaque, and is fogged like everything else. It
+writes emissive -1 so the grade leaves its violet alone. World props (tufts,
+flowers) inside the open radius are hidden by `trodden()` in the prop shader.
+The land itself is untouched (no flattening, no `WORLD_VERSION` bump). The
+arms now root at the ground's height. `scripts/ring-field.mjs` shoots all three.
+
+## Counting the saved, and the still taken (2026-10-07)
+Owner: at each homecoming everyone already home should be there celebrating,
+so you see how many are saved; and a crow with no light should be gone from
+the giant, so the crows left on it are how many are still to save.
+- `Homecoming.crowd`: every spirit home before this one is stood in the
+  guide's yard round where the two meet (`CROWD` slots: angle from "across
+  the yard, away from the camera", metres out; the guide's and the light's
+  ways in kept clear). They watch the light down, start when it lands, and
+  jump a beat after the two. `Village.attend` holds one out of `mill`;
+  `dismiss` (at the cut back) sends it home down the lane. Nothing saved: a
+  reload finds them at their doors.
+- `Birds.leave(i)`: sheds the light and marks the bird `gone` (not flown,
+  not drawn). Called at the cut back (it was last seen flying off over the
+  village; it used to be put back in its tree under the veil) and in
+  `Homecoming.restore`. Perches aren't reshuffled: the others stay in their
+  own trees.
+- Check: `scripts/veil.mjs <dir> home2` (now also checks `gone`). Its "third
+  ring is bare stones" check fails since dungeon 3 was built: stale, not this.
+
+### Dungeon 4, the Drop: a first rough form (2026-10-07)
+- The owner asked for a harder dungeon by way of action that isn't combat,
+  and gave the shape: start high, precision parachute landings down
+  pillars, a mistake brings you back to the top, the wurm at the bottom
+  climbs you out to the light. Built inside only (`?dungeon=4`); what's a
+  default and what's to be asked is `docs/NEXT-dungeon4.md`.
+- **The cavern is the shell's pit,** not a ledge: `pitSd` is a band straight
+  across a round room, 112 m deep. `buildShell` drew it unchanged (walls'
+  feet at the pit's floor, the two faces as its pit faces).
+- **The wind is a `WorldQuery.updraft`,** not a mode of its own: while it
+  returns a velocity `GlideMode` goes where it says and can't be let go of,
+  and `WalkMode` in the air opens the parachute. So the rig, the camera and
+  the landing are the parachute's own.
+- **The wurm needed nothing new to climb:** `RideMode`'s wall climb asks
+  `world.climbTop`, which in a dungeon was always -Infinity; the Drop
+  answers it (a lip over a face, a pillar's top). Its collision holds a
+  body its own radius off a face from below, as a cabin's wall does.
+- **Found on the way:** the wurm's segments on a sheer wall took their yaw
+  from `atan2(0, 0)` (see `wurm.ts`): fixed for the overworld too.
+- The wind's sound (`Sfx.wind`) has not been heard by anyone.
+
+### The cold country: what the open world is for (2026-10-07, decided, not built)
+- A long brainstorm with the owner about what there is to do outside the
+  dungeons. Free building, a homestead game, and a currency-and-shops
+  economy were each tried and didn't land; the owner's reading was that a
+  core idea was missing. Every use offered for a common resource was a
+  toll on something that needed none, because nothing in the game used
+  anything up.
+- What stuck: the land is cold until beacon towers are lit, towers are
+  opened with sparks, sparks are found in warm land. It gives the towers,
+  the cabins and the hands a job and answers how towers get lit.
+- The owner's own additions: no towers near a ring and one rising from
+  each won dungeon; a treasure (one village structure) with every
+  dungeon; the lasso much later.
+- Lore direction: the giant is a tower whose light has gone out.
+- In DESIGN.md "The cold country"; the whole of it, with what was left
+  and what it collides with, in `docs/ROADMAP-openworld.md`; first job
+  (mock the look) in `docs/NEXT-warmth.md`.

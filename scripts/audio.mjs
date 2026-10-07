@@ -6,8 +6,8 @@
 // MP3 adds a little silence at both ends, which would click at a loop's seam.
 // So each loop is written with its own tail in front and its own head behind
 // (PAD seconds of each): the file is periodic all the way through, and the
-// game loops a window exactly one period long inside it (see `PAD` and `len`
-// in src/audio/ambience.ts, which must match what this prints). One-shots go
+// game loops a window exactly one period long inside it (see `PAD`, `LEN` and
+// each `loop` in src/audio/ambience.ts, which must match what this prints). One-shots go
 // through as they are. A WAV that isn't in the folder is left as it was.
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, statSync } from 'node:fs';
@@ -15,8 +15,8 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 
 const PAD = 0.5;
-const LOOPS = ['warm_field_v3_exploration_loop'];
-const SHOTS = ['giant_emergence', 'giant_village', 'giant_aftermath'];
+const LOOPS = ['warm_field_v3_exploration_loop', 'moonhall_dark_hall_loop', 'moonhall_flying_loop'];
+const SHOTS = ['giant_emergence', 'giant_village', 'giant_aftermath', 'moonhall_way_in', 'moonhall_lamp_lights'];
 
 const src = process.argv[2] ?? join(homedir(), 'Downloads');
 const out = new URL('../public/audio/', import.meta.url).pathname;

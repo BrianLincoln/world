@@ -29,6 +29,11 @@ export interface WorldQuery {
   ramp?(x: number, z: number, radius: number, maxRise: number): number;
   /** Top of anything built (cabin walls and roofs) under a circle, however tall; -Infinity if none. What a clinger climbs. */
   climbTop?(x: number, z: number, radius: number): number;
+  /**
+   * A wind that has hold of whoever is at `pos` in the air: the way it's carrying them (m/s), or null. It
+   * opens the parachute of anyone falling, and the parachute goes where it says, hands off (the Drop's).
+   */
+  updraft?(pos: THREE.Vector3): THREE.Vector3 | null;
   /** 0..1 bog wetland (mud slows most mounts). */
   wetland?(x: number, z: number): number;
   /** 0..1 forest density. */
@@ -140,6 +145,7 @@ export class WalkMode implements MovementMode {
 
   update(b: Body, ctx: MoveContext): string | null {
     const { dt, world, input } = ctx;
+    if (!b.grounded && world.updraft?.(b.pos)) return 'glide';
     const wish = wishDir(ctx, tmp);
     const wishLen = wish.length();
     const target = input.walk ? this.walkSpeed : input.run ? this.sprintSpeed : this.runSpeed;
@@ -244,6 +250,15 @@ export class GlideMode implements MovementMode {
   update(b: Body, ctx: MoveContext): string | null {
     const { dt, world, input } = ctx;
     this.t += dt;
+    // A wind has it: it goes where the wind goes, and can't be let go of.
+    const wind = world.updraft?.(b.pos);
+    if (wind) {
+      b.vel.lerp(wind, 1 - Math.exp(-5 * dt));
+      if (Math.hypot(b.vel.x, b.vel.z) > 1) turnToward(b, tmp.set(b.vel.x, 0, b.vel.z), 3.5, dt);
+      b.pos.addScaledVector(b.vel, dt);
+      collide(b, world);
+      return null;
+    }
     if (input.jumpPressed && this.t > 0.15) return 'walk';
     const wish = wishDir(ctx, tmp);
     const dive = input.run;
@@ -615,6 +630,13 @@ export class GallopState {
 
 /** Charge speed (m/s). */
 export const CHARGE_RUN = 30;
+/**
+ * A glimmer's phase is a blink: `PHASE` seconds of it, and for all but the
+ * last `PHASE_IN` she and her rider aren't there to be seen (presentation
+ * only: the body runs the whole way, so what it passes and how far is the same).
+ */
+export const PHASE = 0.42;
+export const PHASE_IN = 0.1;
 
 export function gallopUpdate(st: GallopState, b: Body, ctx: MoveContext, s: MountSpec): void {
   const { dt, world, input } = ctx;
@@ -637,8 +659,8 @@ export function gallopUpdate(st: GallopState, b: Body, ctx: MoveContext, s: Moun
   let used = false;
   if (tr?.ability && input.jumpPressed) {
     if (tr.ability === 'phase' && st.cool <= 0 && !deep) {
-      // A glimmering dash: a few metres through whatever's in the way.
-      st.phase = 0.42;
+      // A blink: gone here, and back a few metres on, through whatever's in the way.
+      st.phase = PHASE;
       st.cool = 1.1;
       st.speed = Math.max(st.speed, walk.sprint * 1.15);
       st.fx = 'phase';

@@ -20,6 +20,8 @@ export class Sfx {
   /** Fire crackle loop level (0..1), set every frame from distance to the hearth. */
   crackle = 0;
   private crackleT = 0;
+  private windNext = 0;
+  private windN: { src: AudioBufferSourceNode; moan: { f: BiquadFilterNode; g: GainNode }; howl: { f: BiquadFilterNode; g: GainNode }; rush: { f: BiquadFilterNode; g: GainNode } } | null = null;
 
   constructor() {
     const unlock = () => this.unlock();
@@ -332,6 +334,55 @@ export class Sfx {
 
   private pop(t: number, level: number) {
     this.noise(t, { a: 0.001, d: 0.015 + Math.random() * 0.02, peak: level * (0.4 + Math.random() * 0.6) }, 'highpass', 1500 + Math.random() * 2500, 1200, 0.7);
+  }
+
+  /**
+   * The Drop's wind, a loop of its own: `level` (0..1) is how much of its low moan there is, `gust` (0..1)
+   * the whoosh over it (falling through it; all of it while it's carrying you up). Called every frame you're
+   * down there; `wind(0)` stops it.
+   */
+  wind(level: number, gust = 0) {
+    const ctx = this.ctx;
+    if (!ctx || !this.noiseBuf) return;
+    if (!this.windN) {
+      if (level <= 0 && gust <= 0) return;
+      const src = ctx.createBufferSource();
+      src.buffer = this.noiseBuf;
+      src.loop = true;
+      const band = (type: BiquadFilterType, q: number) => {
+        const f = ctx.createBiquadFilter(), g = ctx.createGain();
+        f.type = type;
+        f.Q.value = q;
+        g.gain.value = 0;
+        src.connect(f).connect(g).connect(this.master!);
+        return { f, g };
+      };
+      // The moan (low, wide), the howl in it (a narrow band that wanders), and the rush (high, only in a gust).
+      this.windN = { src, moan: band('lowpass', 0.7), howl: band('bandpass', 5), rush: band('bandpass', 0.8) };
+      src.start();
+    }
+    const n = this.windN, t = ctx.currentTime, on = this.muted || ctx.state !== 'running' ? 0 : 1;
+    // (It never blows evenly: two slow waves against one another.)
+    const sway = 0.5 + 0.5 * Math.sin(t * 0.41) * Math.sin(t * 0.93 + 1.3), flutter = 0.5 + 0.5 * Math.sin(t * 2.7 + Math.sin(t * 0.6) * 2);
+    // (The owner, of the first version: the carrying-up hurt the ears. So the rush is lower and far quieter, and all of a gust is under half what it was; the moan is up a little.)
+    n.moan.f.frequency.setTargetAtTime(170 + 140 * sway + 330 * gust, t, 0.25);
+    n.moan.g.gain.setTargetAtTime(on * (level * (0.15 + 0.1 * sway) + gust * 0.13), t, 0.2);
+    n.howl.f.frequency.setTargetAtTime(380 + 260 * sway + 240 * gust, t, 0.35);
+    n.howl.g.gain.setTargetAtTime(on * (level * 0.07 * sway + gust * 0.04), t, 0.3);
+    n.rush.f.frequency.setTargetAtTime(650 + 250 * flutter + 600 * gust, t, 0.15);
+    n.rush.g.gain.setTargetAtTime(on * gust * (0.06 + 0.025 * flutter), t, 0.15);
+    // And now and then a swoosh goes by: a soft band of it that swells, slides up or down, and is gone.
+    if (on && level > 0.05 && t > this.windNext) {
+      const r = Math.random(), f = 260 + Math.random() * 240, up = Math.random() < 0.6;
+      this.windNext = t + 2.2 + Math.random() * 4.5;
+      this.noise(t, { a: 0.6 + r * 0.7, d: 1.1 + r * 1.2, peak: level * (0.035 + 0.04 * Math.random()) }, 'bandpass', up ? f : f * 2.2, up ? f * 2.4 : f, 1.3);
+    }
+    if (level <= 0 && gust <= 0) {
+      // Gone quiet: let it die away, then stop.
+      const dead = n;
+      this.windN = null;
+      setTimeout(() => { try { dead.src.stop(); dead.src.disconnect(); } catch { /* already stopped */ } }, 1500);
+    }
   }
 
   /** Called every frame: the lit hearth's crackle, louder as you get close. */

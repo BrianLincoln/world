@@ -665,6 +665,7 @@ export abstract class Beast implements Species {
 
   /** Fliers: settled on the ground rather than drifting (by default, the ones that rest do so by day). */
   protected resting(m: Mob, ctx: MobCtx, idling: boolean) {
+    if (m.settle) return true;
     return idling && !!this.cfg.flier!.rests && (ctx.night ?? 0) < 0.35 && m.state === 'wild' && m.flock?.data.mode === 'graze';
   }
 
@@ -679,7 +680,7 @@ export abstract class Beast implements Species {
     const resting = this.resting(m, ctx, idling);
     d.drift += dt;
     let gx = goal.x, gz = goal.z, gy: number;
-    if (idling) {
+    if (idling && !m.settle) {
       // Lazy loops about the spot.
       const r = 2.5 + this.cfg.spread * 0.4;
       gx = goal.x + Math.sin(d.drift * 0.23 + m.id.length) * r;

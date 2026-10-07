@@ -6,7 +6,9 @@ import { mirrorX, PartBatch } from '../mobs/parts';
 // The giant's birds: a flock of big black crows that roosts in the trees on
 // its shoulders. When it stops they lift off all together, stoop down the
 // lane, and each snatches up a spirit; from then on they wheel round its
-// head, every one carrying a small warm light. They are the world's crow
+// head, every one carrying a small warm light. One that has set its light
+// down in the village (giant/homecoming.ts) doesn't come back (`leave`): the
+// crows on the giant are how many spirits it still has. They are the world's crow
 // (mobs/crow.ts) in soot black with blank yellow eyes: the spooky thing in
 // the story, by the owner's wish.
 //
@@ -19,6 +21,12 @@ const S = 1.9;
 export const STAND = 0.78 * S;
 /** What a crow carries hangs this far under it. */
 export const GRIP = 1.6;
+/** Its claws under its middle, flying level with its legs down. */
+export const CLAW = (0.3 + 0.46) * S;
+/** Reaching for what it takes on the wing: how far forward of straight down its legs swing (rad), and how much longer they stretch. */
+const FORE = 1.05, STRETCH = 0.15;
+/** And when: they start forward this long before it has it, are out by this long before, and back down under it this long after (s). */
+const REACH = [0.8, 0.25, 0.14];
 /** Soot: the crow's ink, nearly put out. */
 const SOOT = [0.3, 0.26, 0.34].map((k) => new THREE.Color(k, k, k * 1.12));
 
@@ -39,6 +47,8 @@ export interface Bird {
   arc: Float32Array;
   /** What it does when it gets there. */
   then: BirdState;
+  /** It loses its speed along the way and gets there stopped (a pull up into a hover), from twice the even pace at the start. */
+  stall: boolean;
   /** How much of the curve, at its start and at its end, it's let off keeping clear (`Birds.clear`) to leave and arrive where it was sent. */
   ease: [number, number];
   /** How far it's being kept clear just now (0: flying the curve as sent; 1: wholly). */
@@ -46,7 +56,7 @@ export interface Bird {
   /** Carrying a spirit: its light hangs under it (and how far it has come up, 0..1). */
   light: THREE.Mesh | null;
   glow: number;
-  /** Where what it carries hangs: straight down under it. */
+  /** Where what it carries hangs: from its claws (`GRIP` under it, flying level). */
   grip: THREE.Vector3;
   flap: number;
   /** Standing: its walk's phase (a foot comes down at each odd half turn), where it stood last frame, and how far it's up on its toes (m). */
@@ -56,9 +66,18 @@ export interface Bird {
   /** Its legs: down under it (1) or tucked back (0). And its wings: shut along its flanks (1) or out (0). */
   down: number;
   shut: number;
-  /** In the air, its legs held straight down under it, claws on what it has (0..1), not tucked back. */
+  /** In the air, its legs held straight down under it (0..1), not tucked back. */
   grab: number;
+  /** And thrown out ahead of it from there, claws first, to take something on the wing (0..1). */
+  fore: number;
+  /** Something is in its claws, so its legs stay down to it (and how far down they've come for that, 0..1). */
+  holds: boolean;
+  held: number;
+  /** Where its claws are, legs down. */
+  claw: THREE.Vector3;
   tint: THREE.Color;
+  /** It has given up its light and left the giant for good: not flown, not drawn. */
+  gone: boolean;
 }
 
 const m4 = new THREE.Matrix4(), m5 = new THREE.Matrix4(), part = new THREE.Matrix4(), wingM = new THREE.Matrix4();
@@ -97,7 +116,7 @@ export class Birds {
     for (let i = 0; i < n; i++) {
       this.birds.push({
         pos: new THREE.Vector3(), dir: new THREE.Vector3(0, 0, 1), state: 'roost', phase: (i / n) * Math.PI * 2 + (i % 2) * 0.35, perch: i,
-        a: new THREE.Vector3(), b: new THREE.Vector3(), c: new THREE.Vector3(), t: 0, dur: 1, arc: new Float32Array(ARC + 1), then: 'wheel', ease: [0.1, 0.1], kept: 0, light: null, glow: 0, grip: new THREE.Vector3(), flap: i * 1.7, stride: 0, last: null, reach: 0, down: 0, shut: 1, grab: 0, tint: SOOT[i % SOOT.length],
+        a: new THREE.Vector3(), b: new THREE.Vector3(), c: new THREE.Vector3(), t: 0, dur: 1, arc: new Float32Array(ARC + 1), then: 'wheel', stall: false, ease: [0.1, 0.1], kept: 0, light: null, glow: 0, grip: new THREE.Vector3(), flap: i * 1.7, stride: 0, last: null, reach: 0, down: 0, shut: 1, grab: 0, fore: 0, holds: false, held: 0, claw: new THREE.Vector3(), tint: SOOT[i % SOOT.length], gone: false,
       });
     }
   }
@@ -105,13 +124,14 @@ export class Birds {
   /**
    * Send bird `i` from where it is to `to`, swinging out by way of `via`, in `dur` seconds.
    * (`easeIn`, `easeOut`: see `Bird.ease`. More than a little, for an end that is in under what it keeps clear of.)
+   * Returns how long the way is (m).
    */
   send(i: number, state: 'dive' | 'climb', via: THREE.Vector3, to: THREE.Vector3, dur: number, then: BirdState = 'wheel', easeIn = 0.1, easeOut = 0.1) {
     const b = this.birds[i];
     b.state = state;
     b.ease = [easeIn, easeOut];
     b.a.copy(b.pos); b.b.copy(via); b.c.copy(to);
-    b.t = 0; b.dur = dur; b.then = then;
+    b.t = 0; b.dur = dur; b.then = then; b.stall = false;
     // Measure it: the curve's own pace bunches up at a short leg (the level run at the mark), which is
     // just where it mustn't dawdle.
     let len = 0;
@@ -125,12 +145,15 @@ export class Birds {
       bx.copy(v);
     }
     for (let j = 1; j <= ARC; j++) b.arc[j] = len > 1e-4 ? b.arc[j] / len : j / ARC;
+    return len;
   }
 
   /** What bird `i` has hold of becomes a warm light under it (`now`: lit already, a restored save). */
   carry(i: number, now = false) {
     const b = this.birds[i];
     if (b.light) return;
+    b.holds = true;
+    if (now) b.held = 1;
     b.glow = now ? 1 : 0;
     b.light = new THREE.Mesh(this.glowGeo, this.glow);
     b.light.frustumCulled = false;
@@ -143,7 +166,29 @@ export class Birds {
     const b = this.birds[i];
     if (b.light) this.group.remove(b.light);
     b.light = null;
+    b.holds = false;
     b.glow = 0;
+  }
+
+  /**
+   * Bird `i` has no light any more, and is gone from the giant for good: the
+   * crows left in its trees are the spirits still to bring home. (Done out of
+   * sight: it was last seen flying off over the village.)
+   */
+  leave(i: number) {
+    this.shed(i);
+    this.birds[i].gone = true;
+  }
+
+  /** How many are still with the giant. */
+  get left() { return this.birds.filter((b) => !b.gone).length; }
+
+  /** Where a ball of radius `r` sits in bird `b`'s claws: under them, their toes just into the top of it. */
+  static clasp(b: Bird, r: number, out: THREE.Vector3) { return out.copy(b.claw).setY(b.claw.y - 0.8 * r); }
+
+  /** How far its feet are thrown out ahead of it at `t`, taking something on the wing at `at`: out by `REACH` before, and snapped back under it as they close (`Bird.fore`). */
+  static reach(t: number, at: number) {
+    return THREE.MathUtils.smoothstep(t, at - REACH[0], at - REACH[1]) * (1 - THREE.MathUtils.smoothstep(t, at - 0.04, at + REACH[2]));
   }
 
   /**
@@ -156,6 +201,7 @@ export class Birds {
     const all = [this.body, this.head, ...this.wing, ...this.hand, this.leg];
     for (const b of all) b.begin();
     for (const [i, b] of this.birds.entries()) {
+      if (b.gone) continue;
       let fold = 0, flapRate = 7, glide = 0;
       b.kept = 0;
       if (b.state === 'roost') {
@@ -184,7 +230,7 @@ export class Birds {
         b.t = Math.min(1, b.t + dt / b.dur);
         // Down, level through the mark and up again all at one speed: it doesn't slow for what it takes.
         // (Home to roost, it eases in to land.)
-        const s = b.then === 'roost' ? b.t * b.t * (3 - 2 * b.t) : b.t;
+        const s = b.then === 'roost' ? b.t * b.t * (3 - 2 * b.t) : b.stall ? b.t * (2 - b.t) : b.t;
         // That far along the curve by distance, as the curve's own parameter.
         let j = 1;
         while (j < ARC && b.arc[j] < s) j++;
@@ -268,19 +314,23 @@ export class Birds {
         this.hand[k].push(part, b.tint);
       }
       // Legs: straight down under it whatever the body's tilt, stepping; tucked back under the tail in the air.
-      // (None on a perch: it sits on them. With something in its claws they hang straight down to it.)
+      // (None on a perch: it sits on them. With something in its claws they hang straight down to it; reaching for it, out ahead.)
+      b.held += ((b.holds ? 1 : 0) - b.held) * (1 - Math.exp(-20 * dt));
+      const legs = Math.max(b.grab, b.held, b.fore);
+      b.claw.set(0, f.hip.y, f.hip.z).applyMatrix4(m4).setY(b.claw.y - 0.46 * S);
       if (b.state !== 'roost') for (let k = 0; k < 2; k++) {
         const ph = swing + k * Math.PI, raise = Math.max(0, -Math.cos(ph)) * amp2;
-        qa.setFromAxisAngle(AX, 0.38 * shut + THREE.MathUtils.lerp((1 - b.down) * 1.25, Math.asin(THREE.MathUtils.clamp(bz.y, -1, 1)), b.grab) + Math.sin(ph) * amp2).multiply(qb.setFromAxisAngle(AZ, -waddle * 0.8));
-        const len = (1 - raise * 0.35) * (1 + (b.reach * b.down) / (0.46 * S));
+        qa.setFromAxisAngle(AX, 0.38 * shut + THREE.MathUtils.lerp((1 - b.down) * 1.25, Math.asin(THREE.MathUtils.clamp(bz.y, -1, 1)), legs) - b.fore * FORE + Math.sin(ph) * amp2).multiply(qb.setFromAxisAngle(AZ, -waddle * 0.8));
+        const len = (1 - raise * 0.35) * (1 + (b.reach * b.down) / (0.46 * S)) * (1 + STRETCH * b.fore);
         this.leg.push(part.multiplyMatrices(m4, m5.compose(v.set((k ? -1 : 1) * f.hip.x, f.hip.y, f.hip.z), qa, one.set(1, len, 1))), b.tint);
       }
       one.set(1, 1, 1);
-      b.grip.copy(b.pos).setY(b.pos.y - GRIP);
+      b.grip.copy(b.claw).setY(b.claw.y + CLAW - GRIP);
       if (b.light) {
         b.glow = Math.min(1, b.glow + dt / 0.6);
-        b.light.position.copy(b.grip).setY(b.grip.y + 0.35);
-        b.light.scale.setScalar((1.1 + 0.08 * Math.sin(t * 5 + i)) * b.glow * (2 - b.glow));
+        const r = (1.1 + 0.08 * Math.sin(t * 5 + i)) * b.glow * (2 - b.glow);
+        Birds.clasp(b, r, b.light.position);
+        b.light.scale.setScalar(r);
       }
     }
     for (const b of all) b.end();

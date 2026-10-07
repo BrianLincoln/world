@@ -28,6 +28,12 @@ export const CHECKPOINTS: Checkpoint[] = [
   // The first dungeon done and the giant walked on: by the second ring, opened; and that one done too.
   { id: 'ring2', label: '5.1 ring (dungeon 2)', kind: 'ring', giantGone: true },
   { id: 'offer2', label: '5.2 offering (dungeon 2 done)', kind: 'ring', giantGone: true },
+  // Both done and the giant walked on again: by the third ring, opened; and that one done too.
+  { id: 'ring3', label: '6.1 ring (dungeon 3)', kind: 'ring', giantGone: true },
+  { id: 'offer3', label: '6.2 offering (dungeon 3 done)', kind: 'ring', giantGone: true },
+  // All three done and the giant walked on again: by the fourth ring, opened; and that one done too. (Nothing follows its offering yet.)
+  { id: 'ring4', label: '7.1 ring (dungeon 4)', kind: 'ring', giantGone: true },
+  { id: 'offer4', label: '7.2 offering (dungeon 4 done)', kind: 'ring', giantGone: true },
 ];
 
 const SHOW_KEY = 'ow.cp.show';

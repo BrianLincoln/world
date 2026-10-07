@@ -817,6 +817,78 @@ export function bubbleCanvas(name: IconName, count = 0): HTMLCanvasElement {
 }
 
 /**
+ * What the wurm can do, as four frames of one thought (twice the size, as the parachute's): she comes
+ * along the ground to a wall, and goes straight up it and over the top. No key in it: she crawls on by
+ * herself, and the wall is only to be pointed at.
+ */
+export function climbHintCanvas(step: number): HTMLCanvasElement {
+  const key = `w:${step}`;
+  let c = cache.get(key);
+  if (!c) {
+    c = document.createElement('canvas');
+    c.width = c.height = SIZE * 2;
+    const g = c.getContext('2d')!;
+    g.lineJoin = 'round';
+    g.lineCap = 'round';
+    g.scale(2, 2);
+    bubble(g);
+    g.translate(68, 53);
+    g.scale(0.78, 0.78);
+    // The wall, its top a ledge going off to the right, and the ground at its foot.
+    g.beginPath();
+    g.moveTo(-48, 20);
+    g.lineTo(14, 20);
+    g.lineTo(14, -24);
+    g.quadraticCurveTo(14, -29, 19, -29);
+    g.lineTo(46, -29);
+    g.lineTo(46, 26);
+    g.lineTo(-48, 26);
+    g.closePath();
+    g.fillStyle = '#9d94a8';
+    g.fill();
+    ink(g, 4);
+    // Her way: along the ground, up the wall, over the top. Where each part of her is, `d` along it.
+    const FLOOR = 12, WALL_X = 6, TOP = -37, L1 = 46, L2 = FLOOR - TOP;
+    const at = (d: number): [number, number, number] => d < L1 ? [-40 + d, FLOOR, 0] : d < L1 + L2 ? [WALL_X, FLOOR - (d - L1), -Math.PI / 2] : [WALL_X + (d - L1 - L2), TOP, 0];
+    const head = [30, 58, 80, 104][step & 3];
+    // (The way she's still to go, dotted.)
+    g.beginPath();
+    const h0 = at(head);
+    g.moveTo(h0[0], h0[1]);
+    for (let d = head + 4; d <= 112; d += 4) g.lineTo(at(d)[0], at(d)[1]);
+    g.setLineDash([2, 7]);
+    g.globalAlpha = 0.5;
+    ink(g, 3.5);
+    g.globalAlpha = 1;
+    g.setLineDash([]);
+    for (let k = 4; k >= 0; k--) {
+      const [x, y] = at(Math.max(0, head - k * 9.5));
+      g.beginPath();
+      g.arc(x, y, k === 0 ? 7.2 : 6.4 - k * 0.5, 0, Math.PI * 2);
+      g.fillStyle = k % 2 ? '#c9a57e' : '#f4e6cf';
+      g.fill();
+      ink(g, 3);
+    }
+    // Her face: two feelers and an eye, the way she's going.
+    const [hx, hy, ha] = at(head);
+    g.save();
+    g.translate(hx, hy);
+    g.rotate(ha);
+    g.beginPath();
+    g.moveTo(1, -6); g.lineTo(3, -13);
+    g.moveTo(-3, -6); g.lineTo(-3, -13);
+    ink(g, 2.6);
+    g.beginPath();
+    g.arc(3, -1.5, 1.7, 0, Math.PI * 2);
+    g.fillStyle = INK;
+    g.fill();
+    g.restore();
+    cache.set(key, c);
+  }
+  return c;
+}
+
+/**
  * How the parachute is opened, as four frames of one thought (drawn twice the size: it's read up
  * close): standing on a stone; a press, and she's jumped; falling; a second press, and the canopy is
  * open. What's pressed is the thing under your thumb: a blank space bar, or on a touch screen a finger.

@@ -491,7 +491,8 @@ export class Mobs {
     const U = TERRAIN_U.uMobShadow.value;
     for (let i = 0; i < U.length; i++) {
       const s = under ? null : shadows[i];
-      if (!s) { U[i].set(0, -1e4, 0, 0); continue; }
+      // (Not there to be seen, a glimmer mid-blink: no shadow either.)
+      if (!s || s.m.data?.hidden) { U[i].set(0, -1e4, 0, 0); continue; }
       const m = s.m;
       const g = this.gen.height(m.pos.x, m.pos.z);
       const lift = m.pos.y - g;

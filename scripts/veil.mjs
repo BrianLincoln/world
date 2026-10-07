@@ -323,6 +323,9 @@ if (kinds.includes('quest')) {
   await shot('q-12-lap2-peek');
   const last = await run(() => { const b = window.__bot; const a = b.chase({ stop: 3, max: 30, until: () => b.d.debug.peekN === 4 }); const r = b.chase({ sprint: true, stop: 16, max: 60, until: () => b.d.play === 'peek' && b.cell() === 'W3' && b.toHer() < 24 }); b.up(); b.tick(20); return { a: a.ok, ...r, play: b.d.play, round: b.d.round }; });
   check('and once more a room on (W3): her head out of the wall, not yet yours', last.a && last.ok && last.play === 'peek' && last.round === 2, JSON.stringify(last));
+  const end = await run(() => { const b = window.__bot; const a = b.chase({ stop: 3, max: 30, until: () => b.d.debug.last }); const r = b.chase({ sprint: true, stop: 14, max: 60, until: () => b.d.play === 'hide' && b.cell() === 'W2' && b.toHer() < 20 }); b.up(); const at = b.her(); b.tick(360); const now = b.her(); return { a: a.ok, ...r, play: b.d.play, round: b.d.round, her: b.herCell(), moved: +Math.hypot(now[0] - at[0], now[1] - at[1]).toFixed(2), mid: +Math.hypot(now[0] - b.L.at.W2[0], now[1] - b.L.at.W2[1]).toFixed(1), toHer: +b.toHer().toFixed(1) }; });
+  check('the last time she is out and through one more veil, and in the room beyond she is waiting in the middle of it and does not run', end.a && end.ok && end.play === 'hide' && end.round === 2 && end.her === 'W2' && end.moved < 0.1 && end.mid < 1, JSON.stringify(end));
+  await shot('q-12-waiting');
   const hearts = await run(() => { const b = window.__bot; let before = 0; b.chase({ stop: 3, max: 30, until: () => b.d.play === 'yours' && b.d.debug.glad > 0, each: () => { before = Math.max(before, b.d.debug.heart); } }); b.up(); let hop = 0, heart = 0; for (let f = 0; f < 70; f++) { b.tick(); hop = Math.max(hop, b.d.she.hop ?? 0); heart = Math.max(heart, b.d.debug.heart); } return { before, hop: +hop.toFixed(2), heart: +heart.toFixed(2), mountable: b.d.mountable }; });
   check('she comes out: then, and only then, a heart over her and she bounces about', hearts.before === 0 && hearts.hop > 0.4 && hearts.heart > 0.8 && !hearts.mountable, JSON.stringify(hearts));
   await shot('q-13-heart');
@@ -331,7 +334,7 @@ if (kinds.includes('quest')) {
   await until(() => window.__ow.cave().play === 'yours' && window.__ow.cave().mountable && window.__ow.cave().debug.pose.crouch > 0.93, 900);
   st = await state();
   const offered = await run(() => { const d = window.__ow.cave(); return { mountable: d.mountable, saddled: d.she.stabled, crouch: +d.debug.pose.crouch.toFixed(2) }; });
-  check('round 3: her head through the stone, then out, down on her legs, saddled: she offers her back', st.round === 3 && st.play === 'yours' && st.her === 'W3' && offered.mountable && offered.saddled && offered.crouch > 0.9, JSON.stringify({ ...st, ...offered }));
+  check('round 3: her head through the stone, then out, down on her legs, saddled: she offers her back', st.round === 3 && st.play === 'yours' && st.her === 'W2' && offered.mountable && offered.saddled && offered.crouch > 0.9, JSON.stringify({ ...st, ...offered }));
   await run(() => window.__bot.tick(30)); await shot('q-14-offer-0');
   await run(() => { const ow = window.__ow, m = ow.cave().she; ow.focusAt(m.pos.x, m.pos.y + 0.9, m.pos.z); ow.view(m.heading + 0.9, 0.12, 5); ow.advance(2); });
   await shot('q-14-offer-close');
@@ -395,13 +398,15 @@ if (kinds.includes('quest')) {
   await run(() => { const b = window.__bot; b.go('light', { stop: 1.2, max: 6, until: () => b.d.taken }); });
   st = await state();
   check('the light is taken', st.taken, JSON.stringify(st));
-  // The gladness, then the way out: a cut to the well, across it and through the veil in its wall.
+  // The gladness, then the cut; and the ring's arms lift you out on the surface, as from dungeon 1.
   const t0 = st.secs;
   for (let f = 0; f < 6; f++) { await run(() => window.__bot.tick(40)); await shot(`q-19-glad-${f}`); }
-  await until(() => window.__ow.cave().debug.exit >= 0.5, 300);
   let moved = 0;
   await run(() => window.__bot.key('KeyA', true));
-  for (let f = 0; f < 14 && (await run(() => window.__ow.cave().inside)); f++) { await run(() => { const b = window.__bot; for (let i = 0; i < 10 && b.d.inside; i++) b.tick(); }); await shot(`q-20-out-${String(f).padStart(2, '0')}`); }
+  for (let f = 0; f < 10 && (await run(() => window.__ow.cave().inside)); f++) await run(() => { const b = window.__bot; for (let i = 0; i < 10 && b.d.inside; i++) b.tick(); });
+  const lifted = await run(() => ({ inside: window.__ow.cave().inside, mode: window.__ow.mode(), ring: window.__ow.ring2().busy }));
+  check('taken up by the ring: carried, out of the ground', !lifted.inside && lifted.mode === 'carried' && lifted.ring, JSON.stringify(lifted));
+  for (let f = 0; f < 14 && (await run(() => window.__ow.ring2().busy)); f++) { await shot(`q-20-out-${String(f).padStart(2, '0')}`); await run(() => window.__bot.tick(10)); }
   await run(() => window.__bot.up());
   await run(() => window.__bot.tick(30));
   const out = await run(() => { const ow = window.__ow, g = ow.gen().dungeons[1], p = ow._body.pos, m = ow.riding(); return { inside: ow.cave().inside, mode: ow.mode(), on: m?.species.name, fromRing: +Math.hypot(p.x - g.x, p.z - g.z).toFixed(1), above: +(p.y - ow.height(p.x, p.z)).toFixed(1) }; });
@@ -417,7 +422,9 @@ if (kinds.includes('quest')) {
   for (; secs < 40; secs += 1.5) {
     await run(() => window.__bot.tick(90));
     o = await offer();
-    if (o.busy) far = Math.max(far, Math.hypot(o.p[0] - from[0], o.p[1] - from[2]));
+    // (You get down and walk to the shrine by yourself: from then on, nothing moves you.)
+    if (o.state === 'held') { from[0] = o.p[0]; from[2] = o.p[1]; }
+    else if (o.busy) far = Math.max(far, Math.hypot(o.p[0] - from[0], o.p[1] - from[2]));
     mouth = mouth || o.mouth > 0;
     await shot(`q-22-offer-${String(k++).padStart(2, '0')}`);
     if (o.state === 'given' && !o.busy) break;
@@ -427,7 +434,7 @@ if (kinds.includes('quest')) {
   check('hands off all through, and it took about 20 s', far < 0.4 && secs + 1.5 >= 16 && secs + 1.5 <= 25, `moved ${far.toFixed(2)} m with W held; ${secs + 1.5} s from coming up (in steps of 1.5)`);
   await run(() => window.__bot.tick(240));
   o = await offer();
-  check('the giant does not walk on; you have your hands back, still on the glimmer', !o.walking && !o.busy && o.mode === 'ride', JSON.stringify(o));
+  check('the giant does not walk on; you have your hands back, on foot by the shrine', !o.walking && !o.busy && o.mode === 'walk', JSON.stringify(o));
   await shot('q-23-after');
   // Ride off and back over what was the field: it doesn't take you; nor on foot.
   const shut = await run(() => { const ow = window.__ow, b = window.__bot, g = ow.gen().dungeons[1]; b.key('KeyE', true); b.tick(2); b.key('KeyE', false); b.tick(40); const p = ow._body.pos; ow.lockInput(Math.atan2(p.x - g.x, p.z - g.z) + 0.6); b.key('KeyW', true); b.tick(160); ow.lockInput(Math.atan2(p.x - g.x, p.z - g.z) - 2.4); b.tick(160); b.up(); b.tick(60); return { mode: ow.mode(), inside: ow.cave().inside, ring: ow.ring2().busy }; });
@@ -608,7 +615,7 @@ if (kinds.includes('home2')) {
   const sandbox = args.includes('sandbox');
   if (sandbox) { await load('fresh=1'); await run(() => { const ow = window.__ow; ow.manual(true); ow.winDungeon(2); ow.advance(30); }); }
   else { await page.goto(`${base()}&fresh=1&cp=offer2`); await ready(); await run(() => window.__ow.manual(true)); }
-  const st = () => run(() => { const ow = window.__ow, h = ow.homecoming2(), g = ow.giant(), d = ow.gen().dungeons, v = ow.village(), c = ow.visit()?.crows, p = ow._body.pos; return { state: h.state, phase: h.phase, clock: +h.clock.toFixed(1), left: h.left, settled: h.settled, veil: +h.veil.toFixed(2), offer: ow.offering2().state, mode: ow.mode(), at: [p.x, p.z], home: v ? v.taken.map((t) => (t ? 0 : 1)).join('') : null, lights: c ? c.birds.map((b) => (b.light ? 1 : 0)).join('') : null, giant: g && { walking: g.walking, dormant: g.dormant, awake: g.awake, sunk: +g.sunk.toFixed(2), by2: Math.round(Math.hypot(g.centre.x - d[1].x, g.centre.z - d[1].z)), by3: Math.round(Math.hypot(g.centre.x - d[2].x, g.centre.z - d[2].z)) } }; });
+  const st = () => run(() => { const ow = window.__ow, h = ow.homecoming2(), g = ow.giant(), d = ow.gen().dungeons, v = ow.village(), c = ow.visit()?.crows, p = ow._body.pos; return { state: h.state, phase: h.phase, clock: +h.clock.toFixed(1), left: h.left, settled: h.settled, veil: +h.veil.toFixed(2), offer: ow.offering2().state, mode: ow.mode(), at: [p.x, p.z], home: v ? v.taken.map((t) => (t ? 0 : 1)).join('') : null, lights: c ? c.birds.map((b) => (b.light ? 1 : 0)).join('') : null, gone: c ? c.birds.map((b) => (b.gone ? 1 : 0)).join('') : null, giant: g && { walking: g.walking, dormant: g.dormant, awake: g.awake, sunk: +g.sunk.toFixed(2), by2: Math.round(Math.hypot(g.centre.x - d[1].x, g.centre.z - d[1].z)), by3: Math.round(Math.hypot(g.centre.x - d[2].x, g.centre.z - d[2].z)) } }; });
   /** Step frames; under the homecoming's veil the workers need real time. */
   const go = async (n) => { while (n > 0) { const w = await run(() => window.__ow.homecoming2().waiting); const k = Math.min(n, w ? 3 : 20); await run((k) => window.__ow.advance(k), k); n -= k; if (w) await page.waitForTimeout(80); } };
   const end = await until(() => window.__ow.offering2().clock > window.__ow.offering2().cues.end - 1.2, 2400);
@@ -629,9 +636,10 @@ if (kinds.includes('home2')) {
   }
   await page.keyboard.up('KeyW');
   check('it carries on from the smile through every part and hands you back', s.state === 'done' && (sandbox ? seen.has('rise') : ['leave', 'village', 'rise'].every((k) => seen.has(k))), `${n} s; ${[...seen].join(' ')}`);
-  check('hands off throughout, and still on the glimmer', moved < 0.3 && s.mode === 'ride', `moved ${moved.toFixed(2)} m with W held; ${s.mode}`);
+  check('hands off throughout, and still on foot by the shrine', moved < 0.3 && s.mode === 'walk', `moved ${moved.toFixed(2)} m with W held; ${s.mode}`);
   check('the giant is up from the second ring and walking', s.left && s.giant.walking && !s.giant.dormant && s.giant.sunk < 0.05, JSON.stringify(s.giant));
   if (!sandbox) check('the second spirit is home too, and its crow carries nothing', s.home.startsWith('11') && s.home.split('1').length - 1 === 2 && s.lights.startsWith('00'), `${s.home} ${s.lights}`);
+  if (!sandbox) check('and both their crows are gone from the giant: the rest still roost with their lights', s.gone.startsWith('11') && s.gone.split('1').length - 1 === 2 && s.lights.slice(2) === '1'.repeat(s.lights.length - 2), `${s.gone} ${s.lights}`);
   await go(200);
   await shot('h2-back');
   // The walk to the third ring (game time, stepped), and lying down there.
@@ -651,7 +659,7 @@ if (kinds.includes('home2')) {
   await page.goto(sandbox ? `${base()}&story=0&t=10` : await run(() => location.href)); await ready();
   await run(() => { window.__ow.manual(true); window.__ow.advance(60); });
   s = await st();
-  check('a reload replays nothing and finds it asleep by the third ring', s.state === 'done' && s.settled && !s.veil && s.offer === 'given' && s.giant.dormant && s.giant.by3 < 140 && (sandbox || s.home.startsWith('11')), JSON.stringify(s));
+  check('a reload replays nothing and finds it asleep by the third ring', s.state === 'done' && s.settled && !s.veil && s.offer === 'given' && s.giant.dormant && s.giant.by3 < 140 && (sandbox || (s.home.startsWith('11') && s.gone.startsWith('11') && s.gone.split('1').length - 1 === 2)), JSON.stringify(s));
   await look3('h2-reload-ring3');
 }
 

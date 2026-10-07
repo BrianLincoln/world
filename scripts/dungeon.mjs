@@ -342,8 +342,8 @@ if (kinds.includes('quest')) {
   for (let f = 0; f < 4; f++) { await run(() => window.__bot.tick(55)); await shot(`q-21-shut-${f}`); }
   const offer = () => run(() => { const ow = window.__ow, o = ow.offering(), g = ow.giant(), p = ow._body.pos, c = o.shrineAt; return { state: o.state, busy: o.busy, clock: +o.clock.toFixed(1), mode: ow.mode(), sealed: ow.ring().sealed, sealK: ow.ring().sealK, off: +Math.hypot(p.x - c.x, p.z - c.z).toFixed(1), mouth: g?.mouth, grin: g ? +g.grin.toFixed(2) : -1, awake: g?.awake }; });
   let o = await offer();
-  check('the ring has shut into a shrine', o.sealed && o.sealK >= 1 && o.mode === 'ride' && (o.state === 'held' || o.state === 'placed'), JSON.stringify(o));
-  // It is a cutscene from here: with W held, the light leaves your shoulder for the bowl by itself.
+  check('the ring has shut into a shrine', o.sealed && o.sealK >= 1 && (o.state === 'held' || o.state === 'placed'), JSON.stringify(o));
+  // It is a cutscene from here: with W held, you get down, take the light to the shrine and it leaves your mittens for the bowl, all by itself.
   const rode = await run(() => {
     const ow = window.__ow, b = window.__bot, of = ow.offering();
     b.key('KeyW', true);
@@ -351,7 +351,7 @@ if (kinds.includes('quest')) {
     for (; f < 600 && of.state === 'held'; f++) b.tick();
     return { frames: f, state: of.state, mode: ow.mode() };
   });
-  check('the light goes to the bowl by itself', rode.state === 'placed' && rode.mode === 'ride', JSON.stringify(rode));
+  check('you get down and the light goes to the bowl, by itself', rode.state === 'placed' && rode.mode === 'walk', JSON.stringify(rode));
   // The crow, the giant's open mouth, the smile: hands off (W is held all through) until it's done.
   const cues = await run(() => window.__ow.offering().cues);
   const from = await run(() => window.__ow._body.pos.toArray());
@@ -367,7 +367,7 @@ if (kinds.includes('quest')) {
   await run(() => window.__bot.up());
   check('hands off while the crow and the giant have it', moved < 0.3, `moved ${moved.toFixed(2)} m with W held`);
   check('the giant opened its mouth', seen.mouth, JSON.stringify(seen));
-  check('the giant has the light: awake, mouth shut, smiling; you are still on the rockhopper', o.state === 'given' && !o.busy && o.mouth === 0 && o.grin > 0.4 && o.awake && o.mode === 'ride', JSON.stringify(o));
+  check('the giant has the light: awake, mouth shut, smiling; you are on foot by the shrine', o.state === 'given' && !o.busy && o.mouth === 0 && o.grin > 0.4 && o.awake && o.mode === 'walk', JSON.stringify(o));
   // And it carries straight on (giant/homecoming.ts; no village out here, so no crow): the giant gets up out of
   // the ground and walks off toward the second ring. Hands off (W held) until it has taken a few steps.
   await run(() => window.__bot.key('KeyW', true));
@@ -380,7 +380,7 @@ if (kinds.includes('quest')) {
     if (h.state === 'done') break;
   }
   await run(() => window.__bot.up());
-  check('the giant got up and walked off, not solid, and you were held until it had: still mounted', h.state === 'done' && h.left && h.sunk < 0.05 && h.walking && !h.solid && hmoved < 0.3 && h.mode === 'ride', JSON.stringify(h));
+  check('the giant got up and walked off, not solid, and you were held until it had: still on foot', h.state === 'done' && h.left && h.sunk < 0.05 && h.walking && !h.solid && hmoved < 0.3 && h.mode === 'walk', JSON.stringify(h));
   await run(() => window.__bot.tick(90));
   await shot('q-23-after');
   // The dungeon is shut: walking about on what was the field does nothing.

@@ -13,19 +13,47 @@ import type { Sfx } from '../story/audio';
 // once each, one into the next (`CUES`), over the same effects. What says
 // which is the visit itself (`Visit.music`); here they only cross-fade.
 // The loop is out while they sound, and for `REST` after the last.
+//
+// And the Moon Hall, the same way: four pieces, two of them loops, which
+// one being the hall's own say (`MoonHall.music`, from where you've got to
+// in it). Nothing else sounds under them.
 
 export interface AmbienceState {
   /** Fade the music out and hold it there (the giant's visit, the offering, the dungeon). */
   hush: boolean;
   /** The scene music that should be sounding (each piece plays once, as this changes), or null. */
   cue: Cue | null;
-  /** One may be asked for before long: fetch them. */
-  soon: boolean;
+  /** One of these may be asked for before long: fetch them. (And while one is asked for: keep them decoded between pieces.) */
+  soon: Group | null;
 }
 
-/** The pieces of the giant's visit: seconds each takes to come in, which is what the one before goes out over. */
-const CUES = { giant_emergence: 1, giant_village: 3, giant_aftermath: 5 };
+/** Whose a piece is: the giant's visit, the Moon Hall. Each has its own volume (`gains`), and they're fetched together. */
+type Group = 'scene' | 'hall';
+interface Piece {
+  of: Group;
+  /** Seconds it takes to come in. */
+  in: number;
+  /** Seconds the one before goes out over, if not the same. */
+  over?: number;
+  /** It goes round: the loop's exact length in seconds (what scripts/audio.mjs prints). Else it plays once. */
+  loop?: number;
+  /** It ends in its own silence. (The other once-played ones stop dead, so they go out over their last `tail` seconds, or `TAIL`.) */
+  ends?: boolean;
+  tail?: number;
+}
+const CUES = {
+  giant_emergence: { of: 'scene', in: 1 },
+  giant_village: { of: 'scene', in: 3 },
+  giant_aftermath: { of: 'scene', in: 5, ends: true },
+  // The Moon Hall. The way in and the lamp come in by themselves (the files do it), so they're only let in;
+  // the lamp takes the hall's loop out under it, and has ended before you can be on her back.
+  moonhall_way_in: { of: 'hall', in: 0.5, tail: 4 },
+  moonhall_dark_hall_loop: { of: 'hall', in: 4, loop: 72 },
+  moonhall_lamp_lights: { of: 'hall', in: 0.5, over: 3, ends: true },
+  moonhall_flying_loop: { of: 'hall', in: 3, over: 4, loop: 64 },
+} satisfies Record<string, Piece>;
 export type Cue = keyof typeof CUES;
+const piece = (c: Cue): Piece => CUES[c];
 /** A piece dropped with nothing after it goes out over this long (s). */
 const DROP = 4;
 /** Only the last piece ends in silence: the others go out over their last this long if nothing has taken over (s). */
@@ -49,8 +77,9 @@ export class Ambience {
   /**
    * The music's volume, apart from the effects'. 1 is the file as it was made.
    * `scene`: the giant's pieces, times that (they're mastered 3 dB or so under the loop).
+   * `hall`: the Moon Hall's, times that.
    */
-  readonly gains = { music: 0.35, scene: 1.4 };
+  readonly gains = { music: 0.35, scene: 1.4, hall: 1 };
   private bytes: ArrayBuffer | null = null;
   private buf: AudioBuffer | null = null;
   private decoding = false;
@@ -64,7 +93,8 @@ export class Ambience {
   private level = 0;
   private idle = 0;
   /** The scene pieces: their files, decoded, what's sounding, the one asked for, and the one not yet begun. */
-  private cueBytes: Partial<Record<Cue, ArrayBuffer>> | null = null;
+  private cueBytes: Partial<Record<Cue, ArrayBuffer>> = {};
+  private fetched = new Set<Group>();
   private cueBufs: Partial<Record<Cue, AudioBuffer>> | null = null;
   private decodingCue = new Set<Cue>();
   private voices: Voice[] = [];
@@ -95,12 +125,15 @@ export class Ambience {
 
   /** The scene pieces: begins the one asked for, fades the rest, and counts out the quiet after. */
   private score(dt: number, s: AmbienceState, ctx: AudioContext) {
-    if ((s.soon || s.cue) && !this.cueBytes) {
-      const bytes: Partial<Record<Cue, ArrayBuffer>> = (this.cueBytes = {});
-      for (const c of Object.keys(CUES) as Cue[]) {
+    const all = Object.keys(CUES) as Cue[];
+    const want = s.cue ? piece(s.cue).of : s.soon;
+    if (want && !this.fetched.has(want)) {
+      this.fetched.add(want);
+      for (const c of all) {
+        if (piece(c).of !== want) continue;
         fetch(`${import.meta.env.BASE_URL}audio/${c}.mp3`)
           .then((r) => (r.ok ? r.arrayBuffer() : Promise.reject(new Error(c))))
-          .then((b) => (bytes[c] = b), () => { /* that one stays silent */ });
+          .then((b) => (this.cueBytes[c] = b), () => { /* that one stays silent */ });
       }
     }
     if (s.cue !== this.asked) {
@@ -108,40 +141,44 @@ export class Ambience {
       if (!s.cue) for (const v of this.voices) v.out ||= DROP;
     }
     if (this.due) {
-      // All three are decoded at the first, so the later ones come in on their moment.
-      const bufs = (this.cueBufs ??= {});
-      for (const c of Object.keys(CUES) as Cue[]) {
-        const b = this.cueBytes?.[c];
-        if (!b || this.decodingCue.has(c) || bufs[c]) continue;
+      // All of its group are decoded at the first, so the later ones come in on their moment.
+      const bufs = (this.cueBufs ??= {}), of = piece(this.due).of;
+      for (const c of all) {
+        const b = this.cueBytes[c];
+        if (!b || piece(c).of !== of || this.decodingCue.has(c) || bufs[c]) continue;
         this.decodingCue.add(c);
         ctx.decodeAudioData(b.slice(0)).then((d) => { if (this.cueBufs === bufs) bufs[c] = d; }, () => { /* silent */ }).finally(() => this.decodingCue.delete(c));
       }
       const buf = this.cueBufs?.[this.due];
       if (buf) {
-        const cue = this.due, src = ctx.createBufferSource(), gain = ctx.createGain();
-        for (const v of this.voices) v.out ||= CUES[cue];
+        const cue = this.due, p = piece(cue), src = ctx.createBufferSource(), gain = ctx.createGain();
+        for (const v of this.voices) v.out ||= p.over ?? p.in;
         gain.gain.value = 0;
         src.buffer = buf;
         src.connect(gain).connect(this.gate);
-        const v: Voice = { cue, src, gain, level: 0, ends: ctx.currentTime + buf.duration, out: 0, done: false };
+        const v: Voice = { cue, src, gain, level: 0, ends: p.loop ? Infinity : ctx.currentTime + buf.duration, out: 0, done: false };
         src.onended = () => (v.done = true);
-        src.start();
+        // A loop never restarts while it's asked for: it goes round a window one period long inside its file.
+        if (p.loop) { src.loop = true; src.loopStart = PAD; src.loopEnd = PAD + p.loop; src.start(0, PAD); } else src.start();
         this.voices.push(v);
         this.due = null;
       }
     }
     const had = this.voices.length > 0;
     for (const v of this.voices) {
-      v.level = Math.min(1, Math.max(0, v.level + dt / (v.out ? -v.out : CUES[v.cue])));
+      const p = piece(v.cue);
+      v.level = Math.min(1, Math.max(0, v.level + dt / (v.out ? -v.out : p.in)));
       if (v.out && v.level <= 0) v.done = true;
-      const tail = v.cue === 'giant_aftermath' ? 1 : Math.min(1, Math.max(0, (v.ends - ctx.currentTime) / TAIL));
+      const tail = p.ends || p.loop ? 1 : Math.min(1, Math.max(0, (v.ends - ctx.currentTime) / (p.tail ?? TAIL)));
       // Equal power, so one piece into the next holds its level through the middle.
-      v.gain.gain.setTargetAtTime(this.gains.music * this.gains.scene * Math.sin(v.level * Math.PI / 2) * tail, ctx.currentTime, 0.05);
+      v.gain.gain.setTargetAtTime(this.gains.music * this.gains[p.of] * Math.sin(v.level * Math.PI / 2) * tail, ctx.currentTime, 0.05);
       if (v.done) { v.src.onended = null; try { v.src.stop(); } catch { /* already ended */ } v.gain.disconnect(); }
     }
     this.voices = this.voices.filter((v) => !v.done);
-    if (had && !this.voices.length) { this.rest = REST; this.cueBufs = null; }
+    if (had && !this.voices.length) this.rest = REST;
     else if (!had) this.rest = Math.max(0, this.rest - dt);
+    // (Kept between pieces only where more are to come: in the hall, between the lamp's and getting on her.)
+    if (!this.voices.length && !this.due && !(s.cue && s.soon)) this.cueBufs = null;
   }
 
   update(dt: number, s: AmbienceState) {

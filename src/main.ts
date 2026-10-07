@@ -4,14 +4,14 @@ import './style.css';
 import { seedFromString } from './core/rng';
 import { Environment } from './gfx/environment';
 import { GroundShadow, groundShadowSettings } from './gfx/groundShadow';
-import { initMaterials, TERRAIN_U, U } from './gfx/materials';
+import { initMaterials, TERRAIN_U, U, DUNGEON_U } from './gfx/materials';
 import { PostPipeline, postSettings } from './gfx/post';
 import { Puffs } from './gfx/puffs';
 import { Sky } from './gfx/sky';
 import { CharacterRig, type Mood } from './player/character';
 import { Input } from './player/input';
 import { TouchControls, isTouchDevice } from './ui/touch';
-import { BikeMode, BODY_RADIUS, CarriedMode, CHARGE_RUN, FlyMode, GlideMode, MovementController, RideMode, SwimMode, WalkMode, type MoveContext, type WorldQuery } from './player/movement';
+import { BikeMode, BODY_RADIUS, CarriedMode, CHARGE_RUN, PHASE_IN, FlyMode, GlideMode, MovementController, RideMode, SwimMode, WalkMode, type MoveContext, type WorldQuery } from './player/movement';
 import { Crow, crowStyle } from './mobs/crow';
 import { Mobs } from './mobs/manager';
 import type { Mob, MobCtx } from './mobs/types';
@@ -28,8 +28,12 @@ import { Ambience } from './audio/ambience';
 import { Harvest } from './world/harvest';
 import { Bikes, type Bike } from './vehicles/bikes';
 import { Dungeon, DUNGEON_LOOK } from './dungeon/dungeon';
+import { MoonHall, MOTH_LOOK } from './dungeon/mothCave';
+import { DropCave, DROP_LOOK } from './dungeon/dropCave';
 import { VeilCave } from './dungeon/veilCave';
-import { glimmerStatue } from './mobs/glimmer';
+import { BLINK_IN, blinkIn, glimmerStatue } from './mobs/glimmer';
+import { moonmothStatue } from './mobs/moonmoth';
+import { wurmStatue } from './mobs/wurm';
 import { Giant } from './giant/giant';
 import { Trail } from './giant/trail';
 import { Homecoming } from './giant/homecoming';
@@ -90,8 +94,9 @@ let gen = new WorldGen(seedFromString(seedText));
 function primeDungeon(g: WorldGen) {
   // (v7: a list. The first dungeon's site, and the one the giant walks on to after it.
   // v8: less water, 2026-10-02; every seed's land moved, and its sites with it.
-  // v9: a third site, where the giant walks on to after the second dungeon.)
-  const key = `embla.dungeon.v9.${g.seed}`;
+  // v9: a third site, where the giant walks on to after the second dungeon.
+  // v10: a fourth, after the third.)
+  const key = `embla.dungeon.v10.${g.seed}`;
   try {
     const raw = localStorage.getItem(key);
     if (raw) g.presetDungeons(JSON.parse(raw));
@@ -134,8 +139,18 @@ let cave: VeilCave | null = null;
 let offering2: Offering | null = null;
 // And what follows that: the second spirit's light flown home, and the giant up again and on to the third ring.
 let homecoming2: Homecoming | null = null;
+// The third dungeon, inside: the Moon Hall, under the third ring (built the first time that ring takes you down).
+let hall: MoonHall | null = null;
+// What becomes of its light: the offering told quickly again, with a moonmoth in stone for the shrine.
+let offering3: Offering | null = null;
+// And what follows that: the third spirit's light flown home, and the giant up again and on to the fourth ring (bare stones: nothing is under it yet).
+let homecoming3: Homecoming | null = null;
+// The fourth dungeon, inside: the Drop, under the fourth ring (built the first time that ring takes you down). Nothing follows its light yet.
+let chasm: DropCave | null = null;
+// What becomes of its light: the offering told quickly again, with a wurm in stone for the shrine. Nothing follows it yet.
+let offering4: Offering | null = null;
 /** Whichever dungeon you're down in (while you are, it is the world), or null. */
-const den = () => (dungeon?.inside ? dungeon : cave?.inside ? cave : null);
+const den = () => (dungeon?.inside ? dungeon : cave?.inside ? cave : hall?.inside ? hall : chasm?.inside ? chasm : null);
 // Stone hands standing about the world, on islands and summits (world/hands.ts). They do nothing yet.
 let hands: Hands | null = null;
 const world: WorldQuery = {
@@ -151,14 +166,18 @@ const world: WorldQuery = {
     giant?.push(pos, vel, r);
     offering?.collide(pos, vel, r);
     offering2?.collide(pos, vel, r);
+    offering3?.collide(pos, vel, r);
+    offering4?.collide(pos, vel, r);
     hands?.collide(pos, vel, r);
   },
   ramp: (x, z, r, maxRise) => (den() ? -Infinity : colliders.ramp(x, z, r, maxRise)),
-  climbTop: (x, z, r) => den() ? -Infinity : Math.max(colliders.cabinTop(x, z, r), storyHost?.story?.surface(x, z, Infinity, r, Infinity) ?? -Infinity),
+  climbTop: (x, z, r) => den() ? (chasm?.inside ? chasm.climbTop(x, z, r) : -Infinity) : Math.max(colliders.cabinTop(x, z, r), storyHost?.story?.surface(x, z, Infinity, r, Infinity) ?? -Infinity),
   wetland: (x, z) => (den() ? 0 : gen.bog(x, z)),
   forest: (x, z) => (den() ? 0 : gen.forestDensity(x, z, gen.height(x, z))),
   // (A glimmer phasing in the Veil Cave passes its veils, and nothing else of it: rock is rock.)
-  landmarks: (pos, vel, r) => { if (cave?.inside) { cave.collide(pos, vel, r, true); return; } if (dungeon?.inside) return; beacons?.collide(pos, vel, r); giant?.land(pos, vel, r); },
+  landmarks: (pos, vel, r) => { if (cave?.inside) { cave.collide(pos, vel, r, true); return; } if (dungeon?.inside || hall?.inside || chasm?.inside) return; beacons?.collide(pos, vel, r); giant?.land(pos, vel, r); },
+  // (The Drop's wind, when it has you.)
+  updraft: (pos) => (chasm?.inside ? chasm.updraft(pos) : null),
   waterLevel: SEA_LEVEL,
 };
 
@@ -246,6 +265,7 @@ function dismount() {
   if (burrowHid) { rig.root.visible = true; burrowHid = false; }
   const gs = rideMode.gallopState;
   gs.phase = gs.burrow = gs.charge = gs.rocket = gs.wall = 0;
+  blinkWork(null, 0);
   mobs.dismount(m);
   player.set('walk', ctx);
 }
@@ -408,7 +428,7 @@ function makeHerd() {
   // yours (saddled, and it comes home) once it's been brought to the stable.
   mobs.rules.stable = !!storyHost!.active;
 }
-if (params.has('fresh')) try { localStorage.removeItem(`embla.herd.${seedText}`); localStorage.removeItem(`embla.dungeon1.${seedText}`); localStorage.removeItem(`embla.offer1.${seedText}`); localStorage.removeItem(`embla.home1.${seedText}`); for (const k of ['dungeon2', 'offer2', 'home2']) localStorage.removeItem(`embla.${k}.${seedText}`); } catch { /* ignore */ }
+if (params.has('fresh')) try { localStorage.removeItem(`embla.herd.${seedText}`); localStorage.removeItem(`embla.dungeon1.${seedText}`); localStorage.removeItem(`embla.offer1.${seedText}`); localStorage.removeItem(`embla.home1.${seedText}`); for (const k of ['dungeon2', 'offer2', 'home2', 'dungeon3', 'offer3', 'home3', 'dungeon4', 'offer4']) localStorage.removeItem(`embla.${k}.${seedText}`); } catch { /* ignore */ }
 makeJourney();
 
 /** Dev: straight to a phase 3 step (the journey done, everything before it built), standing by the pasture gate. */
@@ -503,6 +523,10 @@ let grieving = false;
 let ring: Ring | null = null;
 // The second's: bare stones until the giant has walked there and lain down (giant/homecoming.ts), then open the same way.
 let ring2: Ring | null = null;
+// The third's: bare stones until the giant has walked there from the second and lain down, then open the same way.
+let ring3: Ring | null = null;
+// The fourth's: bare stones until the giant has walked there from the third and lain down, then open the same way. Under it is the Drop.
+let ring4: Ring | null = null;
 let visitWait = 0;
 let visitHud = false;
 /** The cut between the world and the dungeon: a flat violet veil, driven by whichever has hold of you. */
@@ -510,8 +534,8 @@ const dungeonVeil = document.createElement('div');
 dungeonVeil.style.cssText = 'position:fixed;inset:0;background:#2b2147;opacity:0;pointer-events:none;z-index:4';
 document.body.append(dungeonVeil);
 let dungeonVeilK = 0;
-/** Its colour: the first dungeon's violet, the second's teal. */
-let dungeonVeilTeal = false;
+/** Its colour: the first dungeon's violet, the second's teal, the third's dusk rose. */
+let dungeonVeilHex = '#2b2147';
 /** The saddle's height over the mount's feet, smoothed (down in the dungeon), or -1. */
 let rideSeatY = -1;
 /** The orbit camera's zoom as it was above ground. */
@@ -525,6 +549,14 @@ let dungeonCtx: MobCtx | null = null;
 /** The second dungeon is done: its ring won't take you again. Saved with the cave's own state. */
 let dungeon2Won = false;
 let caveCtx: MobCtx | null = null;
+/** The third is done: likewise. Saved with the hall's own state. */
+let dungeon3Won = false;
+let hallCtx: MobCtx | null = null;
+let chasmCtx: MobCtx | null = null;
+/** The fourth is done: its ring won't take you again. Saved with the Drop's own state. */
+let dungeon4Won = false;
+/** The hall's moth, as it is adopted: its coat. */
+const MOTH_COAT = new THREE.Color('#dbe9c9');
 /** The cave's glimmer, as it is adopted: its coat. */
 const GLIMMER_COAT = new THREE.Color('#4c6c80');
 
@@ -601,8 +633,18 @@ function theGiant() {
 /** The giant by the first ring, for as long as it's there: null once it has got up (it isn't the offering's any more). */
 function giantByRing() { return homecoming?.left ? null : theGiant(); }
 
+/** A dungeon's creature come up with you when you weren't on it: beside where you come up, a little behind (clear of the shrine), facing as you do. */
+function standBy(g: Mob, at: THREE.Vector3) {
+  const h = player.body.heading;
+  const x = at.x - Math.sin(h) * 1.5 + Math.cos(h) * 2.6, z = at.z - Math.cos(h) * 1.5 - Math.sin(h) * 2.6;
+  g.pos.set(x, trail.height(x, z), z);
+  g.stay.copy(g.pos);
+  g.heading = h;
+}
+
 /** Back up: the world is the world again, and the ring's arms lift you out on to the field. */
 function leaveDungeon(won = false) {
+  const rode = !!riding;
   if (riding) dismount();
   player.body.vel.set(0, 0, 0);
   const d = gen.dungeon, out = new THREE.Vector3(d.x, 0, d.z);
@@ -619,7 +661,7 @@ function leaveDungeon(won = false) {
       g.vel.set(0, 0, 0);
       g.stay.copy(g.pos);
       g.species.reset(g);
-      bringUp = g;
+      if (rode) bringUp = g; else standBy(g, out);
     }
   }
   world.waterLevel = SEA_LEVEL;
@@ -688,6 +730,7 @@ function enterCave(drop?: [number, number]) {
  * the ring, on her, in a burst of her light.
  */
 function leaveCave(won = false) {
+  const rode = !!riding;
   if (riding) dismount();
   player.body.vel.set(0, 0, 0);
   const d = gen.dungeons[1], out = new THREE.Vector3(d.x, 0, d.z);
@@ -702,11 +745,12 @@ function leaveCave(won = false) {
       g.ghost = 0;
       g.hop = 0;
       (g.data as BeastData).s.act = null;
-      g.pos.set(out.x, trail.height(out.x, out.z), out.z);
+      const x = out.x + 2.4, z = out.z + 1.2;
+      g.pos.set(x, trail.height(x, z), z);
       g.vel.set(0, 0, 0);
       g.stay.copy(g.pos);
       g.species.reset(g);
-      bringUp = g;
+      if (rode) bringUp = g; else standBy(g, out);
     }
   }
   world.waterLevel = SEA_LEVEL;
@@ -716,14 +760,184 @@ function leaveCave(won = false) {
   orbit.maxDistance = 80;
   orbit.targetDistance = zoomAbove;
   orbit.pitch = 0.22;
+  ring2?.emerge(trail.height(out.x, out.z), out.x, out.z);
+  if (won) { offering2?.begin(); orbit.yaw = player.body.heading + Math.PI; }
+  orbit.snap();
+  hadCine = false;
+  camBlend = 1;
+}
+
+/**
+ * Down into the Moon Hall, as into the other two. `drop` (dev) skips being
+ * let down and stands you at a point of its plan.
+ */
+function enterHall(drop?: [number, number]) {
+  if (!ring3 || den()) return;
+  if (riding) dismount();
+  if (cycling) dismountBike();
+  if (!hall) {
+    const at = (x: number, z: number) => hall!.floorAt(x, z);
+    const under: MobCtx = Object.assign(Object.create(mobCtx), {
+      gen: new Proxy(gen, { get: (g, k) => (k === 'height' ? at : k === 'bog' ? () => 0 : Reflect.get(g, k)) }),
+      surface: at,
+      collide: (pos: THREE.Vector3, vel: THREE.Vector3, r: number) => hall!.collide(pos, vel, r),
+    });
+    hall = new MoonHall(gen.dungeons[2], gen.seed, ring3.groundY, {
+      body: player.body, sfx: storyHost!.sfx, setMode: (m) => player.set(m, ctx), saveKey: seedText,
+      puff: (p, n, size, spread) => puffs.emit(p, n, size, spread),
+      glow: (p, n, size, spread) => glowPuffs.emit(p, n, size, spread),
+      mount: (m) => mount(m),
+      adopt: (p) => {
+        const m = mobs.adopt('moonmoth', 'cave:moonmoth', p, MOTH_COAT, under);
+        if (m) { m.below = true; m.puppet = true; m.stabled = false; }
+        return m;
+      },
+    });
+    hall.onLeft = () => leaveHall();
+    hall.onWon = () => leaveHall(true);
+    hallCtx = under;
+  }
+  mobs.under = hallCtx;
+  world.waterLevel = -1e9;
+  hall.scene.add(mobs.group, rig.root, puffs.group, glowPuffs.group);
+  rig.root.visible = true;
+  if (drop) hall.drop(drop[0], drop[1]); else hall.enter();
+  zoomAbove = orbit.targetDistance;
+  // (A little further back than in the other two: it's a big room, and you fly in it.)
+  orbit.maxDistance = 30;
+  orbit.targetDistance = 9;
+  orbit.yaw = hall.startYaw;
+  orbit.pitch = 0.14;
+  orbit.snap();
+  hadCine = !!hall.cinematic();
+  camBlend = 1;
+}
+
+/**
+ * Back up from the Moon Hall. Lifted out by the ring's arms, as from the
+ * others, the light taken (`won`) or not; with it the moth comes up too
+ * (you're on her if you were below, or she's beside you).
+ */
+function leaveHall(won = false) {
+  const rode = !!riding;
+  if (riding) dismount();
+  player.body.vel.set(0, 0, 0);
+  const d = gen.dungeons[2], out = new THREE.Vector3(d.x, 0, d.z);
   if (won) {
-    player.set('walk', ctx);
-    player.body.pos.set(out.x, trail.height(out.x, out.z), out.z);
-    player.body.grounded = true;
-    glowPuffs.emit(new THREE.Vector3(out.x, player.body.pos.y + 1.2, out.z), 16, 0.18, 4);
-    offering2?.begin();
-    orbit.yaw = player.body.heading + Math.PI;
-  } else ring2?.emerge(trail.height(out.x, out.z), out.x, out.z);
+    dungeon3Won = true;
+    if (offering3) { offering3.arrival(out); player.body.heading = offering3.arrivalHeading; }
+    const g = hall?.she ?? mobs.adopt('moonmoth', 'cave:moonmoth', out.clone(), MOTH_COAT, mobCtx);
+    if (g) {
+      g.below = false;
+      g.puppet = false;
+      g.stabled = true;
+      const x = out.x + 2.4, z = out.z + 1.2;
+      g.pos.set(x, trail.height(x, z), z);
+      g.vel.set(0, 0, 0);
+      g.grounded = true;
+      g.stay.copy(g.pos);
+      g.species.reset(g);
+      // (Once you're off her for the offering she stays down where she is, as the other two's creatures stand: a flier left alone drifts in loops, and hers went round the shrine.)
+      g.settle = true;
+      if (rode) bringUp = g; else standBy(g, out);
+    }
+  }
+  world.waterLevel = SEA_LEVEL;
+  mobs.under = null;
+  scene.add(rig.root, puffs.group, glowPuffs.group, mobs.group);
+  rig.root.visible = true;
+  orbit.maxDistance = 80;
+  orbit.targetDistance = zoomAbove;
+  orbit.pitch = 0.22;
+  ring3?.emerge(trail.height(out.x, out.z), out.x, out.z);
+  if (won) { offering3?.begin(); orbit.yaw = player.body.heading + Math.PI; }
+  orbit.snap();
+  hadCine = false;
+  camBlend = 1;
+}
+
+/**
+ * Down into the Drop, the fourth dungeon, as into the other three. `at`
+ * (dev) skips being let down and stands you at a point of its plan.
+ */
+function enterChasm(at?: [number, number]) {
+  if (den() || !storyHost) return;
+  if (riding) dismount();
+  if (cycling) dismountBike();
+  if (!chasm) {
+    const site = gen.dungeons[3];
+    const floor = (x: number, z: number) => chasm!.floorAt(x, z);
+    const under: MobCtx = Object.assign(Object.create(mobCtx), {
+      gen: new Proxy(gen, { get: (g, k) => (k === 'height' ? floor : k === 'bog' ? () => 0 : Reflect.get(g, k)) }),
+      surface: floor,
+      collide: (pos: THREE.Vector3, vel: THREE.Vector3, r: number) => chasm!.collide(pos, vel, r),
+    });
+    chasm = new DropCave(site, gen.seed, ring4?.groundY ?? gen.height(site.x, site.z), {
+      body: player.body, sfx: storyHost.sfx, setMode: (m) => player.set(m, ctx), saveKey: seedText, touch: () => !!touch,
+      puff: (p, n, size, spread) => puffs.emit(p, n, size, spread),
+      adopt: (p) => {
+        const m = mobs.adopt('wurm', 'cave:wurm', p, null, under);
+        if (m) { m.below = true; m.puppet = true; m.stabled = false; }
+        return m;
+      },
+    });
+    chasm.onLeft = () => leaveChasm();
+    chasm.onWon = () => leaveChasm(true);
+    chasmCtx = under;
+  }
+  mobs.under = chasmCtx;
+  world.waterLevel = -1e9;
+  chasm.scene.add(mobs.group, rig.root, puffs.group, glowPuffs.group);
+  rig.root.visible = true;
+  if (at) chasm.drop(at[0], at[1]); else chasm.enter();
+  zoomAbove = orbit.targetDistance;
+  orbit.maxDistance = 30;
+  orbit.targetDistance = 9;
+  orbit.yaw = chasm.startYaw;
+  orbit.pitch = 0.14;
+  orbit.snap();
+  hadCine = !!chasm.cinematic();
+  camBlend = 1;
+}
+
+/**
+ * Back up from the Drop. Lifted out by the ring's arms, as from the others,
+ * the light taken (`won`) or not; with it the wurm comes up too (you're on
+ * her if you were below, or she's beside you), and its offering begins.
+ * Nothing follows that yet: the giant stays where it lies.
+ */
+function leaveChasm(won = false) {
+  const rode = !!riding;
+  if (riding) dismount();
+  storyHost?.sfx.wind(0);
+  player.body.vel.set(0, 0, 0);
+  const d = gen.dungeons[3], out = new THREE.Vector3(d.x, 0, d.z);
+  if (won) {
+    dungeon4Won = true;
+    if (offering4) { offering4.arrival(out); player.body.heading = offering4.arrivalHeading; }
+    const g = chasm?.she ?? wonWurm ?? mobs.adopt('wurm', 'cave:wurm', out.clone(), null, mobCtx);
+    if (g) {
+      g.below = false;
+      g.puppet = false;
+      g.stabled = true;
+      const x = out.x + 2.6, z = out.z + 1.2;
+      g.pos.set(x, trail.height(x, z), z);
+      g.vel.set(0, 0, 0);
+      g.grounded = true;
+      g.stay.copy(g.pos);
+      g.species.reset(g);
+      if (rode) bringUp = g; else standBy(g, out);
+    }
+  }
+  world.waterLevel = SEA_LEVEL;
+  mobs.under = null;
+  scene.add(rig.root, puffs.group, glowPuffs.group, mobs.group);
+  rig.root.visible = true;
+  orbit.maxDistance = 80;
+  orbit.targetDistance = zoomAbove;
+  orbit.pitch = 0.22;
+  ring4?.emerge(trail.height(out.x, out.z), out.x, out.z);
+  if (won) { offering4?.begin(); orbit.yaw = player.body.heading + Math.PI; }
   orbit.snap();
   hadCine = false;
   camBlend = 1;
@@ -733,6 +947,10 @@ function leaveCave(won = false) {
 let wonGoat: Mob | null = null;
 /** And the glimmer, by the second. */
 let wonGlimmer: Mob | null = null;
+/** And the moth, by the third. */
+let wonMoth: Mob | null = null;
+/** And the wurm, by the fourth. */
+let wonWurm: Mob | null = null;
 function makeVisit() {
   hands?.dispose();
   hands = new Hands(gen);
@@ -740,12 +958,30 @@ function makeVisit() {
   visit?.dispose();
   ring?.dispose();
   ring2?.dispose();
+  ring3?.dispose();
+  ring4?.dispose();
   offering?.dispose();
   offering2?.dispose();
+  offering3?.dispose();
+  offering4?.dispose();
   homecoming?.dispose();
   homecoming = null;
   homecoming2?.dispose();
   homecoming2 = null;
+  homecoming3?.dispose();
+  homecoming3 = null;
+  if (chasm) {
+    if (chasm.inside) { chasm.inside = false; world.waterLevel = SEA_LEVEL; mobs.under = null; scene.add(rig.root, puffs.group, glowPuffs.group, mobs.group); orbit.maxDistance = 80; player.set('walk', ctx); }
+    chasm.dispose();
+    chasm = null;
+    chasmCtx = null;
+  }
+  if (hall) {
+    if (hall.inside) { hall.inside = false; world.waterLevel = SEA_LEVEL; mobs.under = null; scene.add(rig.root, puffs.group, glowPuffs.group, mobs.group); orbit.maxDistance = 80; player.set('walk', ctx); }
+    hall.dispose();
+    hall = null;
+    hallCtx = null;
+  }
   if (cave) {
     if (cave.inside) { cave.inside = false; world.waterLevel = SEA_LEVEL; mobs.under = null; scene.add(rig.root, puffs.group, glowPuffs.group, mobs.group); orbit.maxDistance = 80; player.set('walk', ctx); }
     cave.dispose();
@@ -769,14 +1005,24 @@ function makeVisit() {
   }
   ring.onTaken = () => enterDungeon();
   scene.add(ring.group);
-  storyHost?.overlay.add(ring.overlay);
   const site2 = gen.dungeons[1];
   ring2 = new Ring(site2, (x, z) => gen.height(x, z), { body: player.body, sfx: storyHost!.sfx, setMode: (m) => player.set(m, ctx) });
   ring2.onTaken = () => enterCave();
   scene.add(ring2.group);
-  storyHost?.overlay.add(ring2.overlay);
   try { dungeon2Won = !!JSON.parse(localStorage.getItem(`embla.dungeon2.${seedText}`) ?? '{}').taken; } catch { dungeon2Won = false; }
   wonGlimmer = null;
+  const site3 = gen.dungeons[2];
+  ring3 = new Ring(site3, (x, z) => gen.height(x, z), { body: player.body, sfx: storyHost!.sfx, setMode: (m) => player.set(m, ctx) });
+  ring3.onTaken = () => enterHall();
+  scene.add(ring3.group);
+  try { dungeon3Won = !!JSON.parse(localStorage.getItem(`embla.dungeon3.${seedText}`) ?? '{}').taken; } catch { dungeon3Won = false; }
+  const site4 = gen.dungeons[3];
+  ring4 = new Ring(site4, (x, z) => gen.height(x, z), { body: player.body, sfx: storyHost!.sfx, setMode: (m) => player.set(m, ctx) });
+  ring4.onTaken = () => enterChasm();
+  scene.add(ring4.group);
+  try { dungeon4Won = !!JSON.parse(localStorage.getItem(`embla.dungeon4.${seedText}`) ?? '{}').taken; } catch { dungeon4Won = false; }
+  wonWurm = null;
+  wonMoth = null;
   const story = storyHost?.story;
   visit = story && story.village ? new Visit({
     story, trail, summon: summonGiant, gen, ground: (x, z) => gen.height(x, z),
@@ -792,8 +1038,10 @@ function makeVisit() {
   visitWait = 0;
   if (visit && storyHost!.active && story!.giantGone) visit.restore();
   const host = storyHost!;
+  // (Whoever makes an offering gets down to make it, and carries the light in her mittens.)
+  const bearer = { hands: (out: THREE.Vector3) => rig.hands(out), dismount: () => { if (riding) dismount(); } };
   offering = new Offering({
-    site: gen.dungeon, ground: (x, z) => trail.height(x, z), body: player.body, sfx: host.sfx, ring, giant: giantByRing, saveKey: seedText,
+    site: gen.dungeon, ground: (x, z) => trail.height(x, z), body: player.body, ...bearer, sfx: host.sfx, ring, giant: giantByRing, saveKey: seedText,
     puff: (p, n, size, spread) => puffs.emit(p, n, size, spread),
     halt: () => { player.body.vel.x = player.body.vel.z = 0; rideMode.gallopState.speed = 0; },
     tree: (x, z, max) => colliders.nearestTree(x, z, max)?.d ?? Infinity,
@@ -823,17 +1071,51 @@ function makeVisit() {
     halt: () => { player.body.vel.x = player.body.vel.z = 0; rideMode.gallopState.speed = 0; },
     tree: (x, z, max) => colliders.nearestTree(x, z, max)?.d ?? Infinity,
     loading: () => terrain.busy,
+    // At the third ring, the same again: a dark spirit let go into it, and it opens.
+    settledAt: (g) => { if (!dungeon3Won) ring3?.free(g.centre.clone().setY(g.centre.y - 6)); },
   });
   scene.add(homecoming2.group);
+  // And after the third: the third spirit taken comes home, and the giant gets up from the third ring and
+  // walks to the fourth (bare stones: nothing is under it yet, so it only lies down there).
+  const second = homecoming2;
+  homecoming3 = new Homecoming({
+    gen, ground: (x, z) => trail.height(x, z), body: player.body, sfx: host.sfx, story: host.active ? story ?? null : null, saveKey: seedText,
+    who: 2, leg: 3, name: 'home3',
+    giant: theGiant, rest: () => (second.route.length > 1 ? restOf(second.route) : first.route.length > 1 ? restOf(first.route) : giantRest()), before: () => second.route, crows: () => (visit?.state === 'gone' ? visit.crows : null), summon: summonGiant,
+    stamp: (at, yaw) => { trail.stamp(at, yaw); },
+    puff: (p, n, size, spread) => puffs.emit(p, n, size, spread),
+    halt: () => { player.body.vel.x = player.body.vel.z = 0; rideMode.gallopState.speed = 0; },
+    tree: (x, z, max) => colliders.nearestTree(x, z, max)?.d ?? Infinity,
+    loading: () => terrain.busy,
+    // At the fourth ring, the same again: a dark spirit let go into it, and it opens.
+    settledAt: (g) => { if (!dungeon4Won) ring4?.free(g.centre.clone().setY(g.centre.y - 6)); },
+  });
+  scene.add(homecoming3.group);
   // The second dungeon's offering: the first's, told quickly (the owner found the first at risk of wearing
   // thin), the shrine a glimmer in stone. The giant is the one lying by the second ring, until it gets up from there.
   offering2 = new Offering({
-    site: site2, ground: (x, z) => trail.height(x, z), body: player.body, sfx: host.sfx, ring: ring2, giant: () => (homecoming?.settled && !homecoming2?.left ? giant : null), saveKey: seedText,
+    site: site2, ground: (x, z) => trail.height(x, z), body: player.body, ...bearer, sfx: host.sfx, ring: ring2, giant: () => (homecoming?.settled && !homecoming2?.left ? giant : null), saveKey: seedText,
     puff: (p, n, size, spread) => puffs.emit(p, n, size, spread),
     halt: () => { player.body.vel.x = player.body.vel.z = 0; rideMode.gallopState.speed = 0; },
     tree: (x, z, max) => colliders.nearestTree(x, z, max)?.d ?? Infinity,
   }, gen.seed ^ 0x3c6ef, { name: 'offer2', statue: glimmerStatue(), timing: OFFER_SHORT });
   scene.add(offering2.group);
+  // The third's: the same short telling, the shrine a moonmoth in stone. The giant is the one lying by the third ring, until it gets up from there.
+  offering3 = new Offering({
+    site: site3, ground: (x, z) => trail.height(x, z), body: player.body, ...bearer, sfx: host.sfx, ring: ring3, giant: () => (homecoming2?.settled && !homecoming3?.left ? giant : null), saveKey: seedText,
+    puff: (p, n, size, spread) => puffs.emit(p, n, size, spread),
+    halt: () => { player.body.vel.x = player.body.vel.z = 0; rideMode.gallopState.speed = 0; },
+    tree: (x, z, max) => colliders.nearestTree(x, z, max)?.d ?? Infinity,
+  }, gen.seed ^ 0x51f15, { name: 'offer3', statue: moonmothStatue(), timing: OFFER_SHORT });
+  scene.add(offering3.group);
+  // The fourth's: the same short telling, the shrine a wurm in stone. The giant is the one lying by the fourth ring.
+  offering4 = new Offering({
+    site: site4, ground: (x, z) => trail.height(x, z), body: player.body, ...bearer, sfx: host.sfx, ring: ring4, giant: () => (homecoming3?.settled ? giant : null), saveKey: seedText,
+    puff: (p, n, size, spread) => puffs.emit(p, n, size, spread),
+    halt: () => { player.body.vel.x = player.body.vel.z = 0; rideMode.gallopState.speed = 0; },
+    tree: (x, z, max) => colliders.nearestTree(x, z, max)?.d ?? Infinity,
+  }, gen.seed ^ 0x6a3b7, { name: 'offer4', statue: wurmStatue(), timing: OFFER_SHORT });
+  scene.add(offering4.group);
   // (The giant's whereabouts first: the offering asks for it.)
   if (dungeonWon) { homecoming.restore(); offering.restore(); }
   // A save from after the giant lay down by the second ring: that ring is open; or, its light taken, shut,
@@ -846,6 +1128,25 @@ function makeVisit() {
       const x = site2.x + site2.r + 3, z = site2.z;
       wonGlimmer = mobs.adopt('glimmer', 'cave:glimmer', new THREE.Vector3(x, gen.height(x, z), z), GLIMMER_COAT, mobCtx);
     } else ring2.setOpen();
+  }
+  // And from after it lay down by the third: that ring open; or shut, with the moth waiting by it.
+  if (homecoming2.settled) {
+    if (dungeon3Won) {
+      // (Where the giant is first, again. A save from after the third spirit was home finds it by the fourth ring.)
+      homecoming3.restore();
+      offering3.restore();
+      const x = site3.x + site3.r + 3, z = site3.z;
+      wonMoth = mobs.adopt('moonmoth', 'cave:moonmoth', new THREE.Vector3(x, gen.height(x, z), z), MOTH_COAT, mobCtx);
+      if (wonMoth) { wonMoth.settle = true; wonMoth.grounded = true; }
+    } else ring3.setOpen();
+  }
+  // And from after it lay down by the fourth: that ring open; or shut, with the wurm waiting by it.
+  if (homecoming3.settled) {
+    if (dungeon4Won) {
+      offering4.restore();
+      const x = site4.x + site4.r + 3, z = site4.z;
+      wonWurm = mobs.adopt('wurm', 'cave:wurm', new THREE.Vector3(x, gen.height(x, z), z), null, mobCtx);
+    } else ring4.setOpen();
   }
 }
 makeVisit();
@@ -925,6 +1226,10 @@ if (params.get('stable')) stableJump(params.get('stable')!);
 if (dungeonWon && (offering as Offering | null) && ((offering as Offering | null)!.state !== 'given' || (homecoming as Homecoming | null)?.state === 'idle') && wonGoat && !params.has('x') && !params.has('cp')) atShrine();
 // Likewise the second's: by its shrine with its light, on the glimmer.
 if (dungeon2Won && (offering2 as Offering | null) && ((offering2 as Offering | null)!.state !== 'given' || (homecoming2 as Homecoming | null)?.state === 'idle') && wonGlimmer && !params.has('x') && !params.has('cp')) atShrine(offering2, wonGlimmer);
+// And the third's, on the moth.
+if (dungeon3Won && (offering3 as Offering | null) && ((offering3 as Offering | null)!.state !== 'given' || (homecoming3 as Homecoming | null)?.state === 'idle') && wonMoth && !params.has('x') && !params.has('cp')) atShrine(offering3, wonMoth);
+// And the fourth's, on the wurm. (Nothing follows its offering, so only until it's given.)
+if (dungeon4Won && (offering4 as Offering | null) && (offering4 as Offering | null)!.state !== 'given' && wonWurm && !params.has('x') && !params.has('cp')) atShrine(offering4, wonWurm);
 
 /** Dev: set the story up as it stands at a checkpoint (`?fresh=1&cp=<id>`; see ui/checkpoints.ts). Expects a fresh save. */
 function checkpoint(id: string) {
@@ -939,12 +1244,16 @@ function checkpoint(id: string) {
   // Past the home tower's head the giant has been: its prints and the wrecked lane, as a save from there has them.
   if (c.giantGone) { story.giantGone = true; visit?.restore(); }
   // The second dungeon's: the first done and the giant walked on, as a save from there has it.
-  const second = id === 'ring2' || id === 'offer2';
+  const second = id === 'ring2' || id === 'offer2', third = id === 'ring3' || id === 'offer3', fourth = id === 'ring4' || id === 'offer4';
   if (second) firstDone();
-  if (c.kind === 'ring') goToRing(second ? 1 : 0);
+  if (third) secondDone();
+  if (fourth) thirdDone();
+  if (c.kind === 'ring') goToRing(fourth ? 3 : third ? 2 : second ? 1 : 0);
   // The dungeon done: up you come with its light, on the rockhopper.
   if (id === 'offer') winDungeon();
   if (id === 'offer2') winDungeon(2);
+  if (id === 'offer3') winDungeon(3);
+  if (id === 'offer4') winDungeon(4);
   story.save();
   return true;
 }
@@ -984,6 +1293,20 @@ function atShrine(of: Offering | null = offering, g: Mob | null = wonGoat) {
 }
 /** Dev: as if you'd just taken the light: the dungeon marked done, and up you come on the rockhopper. (`which` 2: the second's, on the glimmer; the first is made done if it isn't.) */
 function winDungeon(which = 1) {
+  if (which === 4) {
+    if (!homecoming3?.settled) thirdDone();
+    try { localStorage.setItem(`embla.dungeon4.${seedText}`, JSON.stringify({ down: true, yours: true, hinted: true, taken: true, lit: [] })); } catch { /* ignore */ }
+    if (chasm) chasm.inside = false;
+    leaveChasm(true);
+    return;
+  }
+  if (which === 3) {
+    if (!homecoming2?.settled) secondDone();
+    try { localStorage.setItem(`embla.dungeon3.${seedText}`, JSON.stringify({ solved: true, yours: true, seen: true, taken: true, lit: [] })); } catch { /* ignore */ }
+    if (hall) hall.inside = false;
+    leaveHall(true);
+    return;
+  }
   if (which === 2) {
     if (!homecoming?.settled) firstDone();
     try { localStorage.setItem(`embla.dungeon2.${seedText}`, JSON.stringify({ round: 3, taken: true, lit: [] })); } catch { /* ignore */ }
@@ -1008,7 +1331,34 @@ function firstDone() {
   } catch { /* ignore */ }
   makeVisit();
 }
-/** Dev: stand on the giant's way just outside a dungeon's ring (0: the first, 1: the second), facing it. */
+/** Dev: the second dungeon behind you too: its ring a shrine, a second spirit home, the giant asleep by the third ring, that ring open. */
+function secondDone() {
+  try {
+    localStorage.setItem(`embla.dungeon1.${seedText}`, JSON.stringify({ freed: true, taken: true, crossed: true, lit: [] }));
+    localStorage.setItem(`embla.offer1.${seedText}`, 'given');
+    localStorage.setItem(`embla.home1.${seedText}`, '1');
+    localStorage.setItem(`embla.dungeon2.${seedText}`, JSON.stringify({ round: 3, taken: true, lit: [] }));
+    localStorage.setItem(`embla.offer2.${seedText}`, 'given');
+    localStorage.setItem(`embla.home2.${seedText}`, '1');
+  } catch { /* ignore */ }
+  makeVisit();
+}
+/** Dev: the third behind you too: its ring a shrine, a third spirit home, the giant asleep by the fourth ring, that ring open. */
+function thirdDone() {
+  try {
+    localStorage.setItem(`embla.dungeon1.${seedText}`, JSON.stringify({ freed: true, taken: true, crossed: true, lit: [] }));
+    localStorage.setItem(`embla.offer1.${seedText}`, 'given');
+    localStorage.setItem(`embla.home1.${seedText}`, '1');
+    localStorage.setItem(`embla.dungeon2.${seedText}`, JSON.stringify({ round: 3, taken: true, lit: [] }));
+    localStorage.setItem(`embla.offer2.${seedText}`, 'given');
+    localStorage.setItem(`embla.home2.${seedText}`, '1');
+    localStorage.setItem(`embla.dungeon3.${seedText}`, JSON.stringify({ solved: true, yours: true, seen: true, taken: true, lit: [] }));
+    localStorage.setItem(`embla.offer3.${seedText}`, 'given');
+    localStorage.setItem(`embla.home3.${seedText}`, '1');
+  } catch { /* ignore */ }
+  makeVisit();
+}
+/** Dev: stand on the giant's way just outside a dungeon's ring (0: the first, 1: the second, 2: the third, 3: the fourth), facing it. */
 function goToRing(which = 0) {
   const d = gen.dungeons[which], w = d.way[d.way.length - 1] ?? [d.x + 1, d.z];
   const l = Math.hypot(w[0] - d.x, w[1] - d.z) || 1, ux = (w[0] - d.x) / l, uz = (w[1] - d.z) / l;
@@ -1022,8 +1372,20 @@ function goToRing(which = 0) {
   orbit.targetDistance = 11;
   orbit.snap();
 }
+// ?dungeon=3: straight into the third, the Moon Hall, in its well (the first two done, the giant by its ring); ?dungeon=3,x,z: at a point of its plan.
+// ?dungeon=4: straight into the fourth, the Drop, in its well; ?dungeon=4,x,z: at a point of its plan.
+if (params.get('dungeon')?.split(',')[0] === '4') {
+  const [, dx, dz] = params.get('dungeon')!.split(',').map(parseFloat);
+  enterChasm([Number.isFinite(dx) && Number.isFinite(dz) ? dx : 0, Number.isFinite(dz) ? dz : 0]);
+}
+else if (params.get('dungeon')?.split(',')[0] === '3') {
+  const [, dx, dz] = params.get('dungeon')!.split(',').map(parseFloat);
+  secondDone();
+  (ring3 as Ring | null)?.setOpen();
+  enterHall([Number.isFinite(dx) && Number.isFinite(dz) ? dx : 0, Number.isFinite(dz) ? dz : 0]);
+}
 // ?dungeon=2: straight into the second, the Veil Cave, in its well (the first done, the giant by its ring); ?dungeon=2,x,z: at a point of its plan.
-if (params.get('dungeon')?.split(',')[0] === '2') {
+else if (params.get('dungeon')?.split(',')[0] === '2') {
   const [, dx, dz] = params.get('dungeon')!.split(',').map(parseFloat);
   firstDone();
   enterCave([Number.isFinite(dx) && Number.isFinite(dz) ? dx : 0, Number.isFinite(dz) ? dz : 0]);
@@ -1268,14 +1630,15 @@ function frame(ts?: number) {
     resize();
   }
 
-  const storyBusy = !!storyHost?.story?.busy || !!visit?.busy || !!offering?.busy || !!homecoming?.busy || !!offering2?.busy || !!homecoming2?.busy;
+  const storyBusy = !!storyHost?.story?.busy || !!visit?.busy || !!offering?.busy || !!homecoming?.busy || !!offering2?.busy || !!homecoming2?.busy || !!offering3?.busy || !!homecoming3?.busy || !!offering4?.busy;
   /** In a ring's arms (either way), and down in a dungeon. */
-  const held = !!ring?.busy || !!ring2?.busy || !!dungeon?.busy || !!cave?.busy, below = !!den();
+  const held = !!ring?.busy || !!ring2?.busy || !!ring3?.busy || !!ring4?.busy || !!dungeon?.busy || !!cave?.busy || !!hall?.busy || !!chasm?.busy, below = !!den();
   if (devFly.on && input.pressed('KeyF') && !riding && !cycling && !beacons.busy && !journey?.busy && !storyBusy && !held && !below) player.set(player.current.name === 'fly' ? 'walk' : 'fly', ctx);
   // Only take the press (pressed() consumes it) when a tower is on offer.
   const beaconUsed = !!beacons.action(player.current.name) && (input.pressed('KeyE') || input.pressed('Mouse0')) && beacons.act(player.current.name);
   // Likewise the dungeon's (the pick, at its rockfall).
-  const dungeonUsed = !!dungeon?.inside && !!dungeon!.action(player.current.name) && (input.pressed('KeyE') || input.pressed('Mouse0')) && dungeon!.act(player.current.name);
+  const inner = dungeon?.inside ? dungeon : hall?.inside ? hall : null;
+  const dungeonUsed = !!inner && !!inner.action(player.current.name) && (input.pressed('KeyE') || input.pressed('Mouse0')) && inner.act(player.current.name);
   if (!beaconUsed && !dungeonUsed) storyHost?.story?.handleAction(input);
   if (input.pressed('KeyE') && !beaconUsed && !dungeonUsed && !journey?.busy && !storyBusy && !held) {
     // Something else in reach? Climb straight across; otherwise E hops off.
@@ -1318,20 +1681,28 @@ function frame(ts?: number) {
   // The ring takes you down (on your own feet only); the dungeon lets you down, and takes you back up.
   ring?.update(dt, camera.position, player.current.name, body.grounded, !storyBusy && !beacons.busy && !journey?.busy && !riding && !cycling && !den() && !dungeonWon);
   ring2?.update(dt, camera.position, player.current.name, body.grounded, !storyBusy && !beacons.busy && !journey?.busy && !riding && !cycling && !den() && !dungeon2Won);
+  ring3?.update(dt, camera.position, player.current.name, body.grounded, !storyBusy && !beacons.busy && !journey?.busy && !riding && !cycling && !den() && !dungeon3Won);
   // Out of the dungeon with its creature: up on to it as soon as the arms have let go.
-  if (bringUp && !den() && !ring?.busy && !ring2?.busy) { const g = bringUp; bringUp = null; g.pos.copy(body.pos); g.heading = body.heading; mount(g); }
+  ring4?.update(dt, camera.position, player.current.name, body.grounded, !storyBusy && !beacons.busy && !journey?.busy && !riding && !cycling && !den() && !dungeon4Won);
+  if (bringUp && !den() && !ring?.busy && !ring2?.busy && !ring3?.busy && !ring4?.busy) { const g = bringUp; bringUp = null; g.pos.copy(body.pos); g.heading = body.heading; mount(g); }
   // And the ring shuts behind you: the field closes over, and the shrine comes up in the middle of it.
   if (dungeonWon && ring && !ring.sealed && !ring.busy && !den()) ring.seal();
   if (dungeon2Won && ring2 && !ring2.sealed && !ring2.busy && !den()) ring2.seal();
+  if (dungeon3Won && ring3 && !ring3.sealed && !ring3.busy && !den()) ring3.seal();
+  if (dungeon4Won && ring4 && !ring4.sealed && !ring4.busy && !den()) ring4.seal();
   if (dungeon?.inside) dungeon.update(dt, player.current.name, body.grounded, input.held('KeyE') || input.held('Mouse0'));
-  else if (cave?.inside) {
-    cave.update(dt, player.current.name, body.grounded);
-    // (Put somewhere under the cut: the camera goes with you at once.)
-    if (cave.snapYaw !== null) { orbit.yaw = cave.snapYaw; orbit.pitch = 0.16; orbit.targetDistance = 9; orbit.snap(); cave.snapYaw = null; }
+  else if (cave?.inside) cave.update(dt, player.current.name, body.grounded);
+  else if (hall?.inside) {
+    hall.update(dt, player.current.name, body.grounded);
+    // (Put in the well under the cut, for the way out: the camera goes with you at once.)
+    if (hall.snapYaw !== null) { orbit.yaw = hall.snapYaw; orbit.pitch = 0.3; orbit.targetDistance = 11; orbit.snap(); hall.snapYaw = null; }
   }
-  const tealK = Math.max(ring2?.veil ?? 0, cave?.veil ?? 0, homecoming2?.veil ?? 0);
-  const veilK = Math.max(ring?.veil ?? 0, dungeon?.veil ?? 0, homecoming?.veil ?? 0, tealK);
-  if (veilK > 0 && tealK > 0 !== dungeonVeilTeal) { dungeonVeilTeal = tealK > 0; dungeonVeil.style.background = dungeonVeilTeal ? cave?.look.cut ?? '#17343c' : '#2b2147'; }
+  if (chasm?.inside) chasm.update(dt, player.current.name, body.grounded);
+  const mossK = Math.max(ring4?.veil ?? 0, chasm?.veil ?? 0);
+  const tealK = Math.max(ring2?.veil ?? 0, cave?.veil ?? 0, homecoming2?.veil ?? 0), roseK = Math.max(ring3?.veil ?? 0, hall?.veil ?? 0, homecoming3?.veil ?? 0);
+  const veilK = Math.max(ring?.veil ?? 0, dungeon?.veil ?? 0, homecoming?.veil ?? 0, tealK, roseK, mossK);
+  const veilHex = mossK > 0 ? DROP_LOOK.cut : roseK > 0 ? MOTH_LOOK.cut : tealK > 0 ? cave?.look.cut ?? '#17343c' : '#2b2147';
+  if (veilK > 0 && veilHex !== dungeonVeilHex) dungeonVeil.style.background = dungeonVeilHex = veilHex;
   if (veilK !== dungeonVeilK) dungeonVeil.style.opacity = String((dungeonVeilK = veilK));
   if (sandboxPickT > 0) {
     sandboxPickT -= dt;
@@ -1397,7 +1768,7 @@ function frame(ts?: number) {
     }
     // A gallop kicks up dust behind.
     const gs = rideMode.gallopState;
-    if ((riding.species.name === 'stelk' || (riding.species.verb && !riding.species.mount.fly)) && body.grounded && gs.wet < 0.5 && gs.speed > 12 && gs.burrow <= 0) {
+    if ((riding.species.name === 'stelk' || (riding.species.verb && !riding.species.mount.fly)) && body.grounded && gs.wet < 0.5 && gs.speed > 12 && gs.burrow <= 0 && !blinkGone) {
       hoofT -= dt;
       if (hoofT <= 0) {
         hoofT = 0.11 - Math.min(0.06, (gs.speed - 12) * 0.003);
@@ -1406,6 +1777,7 @@ function frame(ts?: number) {
       }
     }
   }
+  blinkWork(riding, dt);
   if (storyHost?.story) storyHost.story.packLift = riding ? riding.species.seat(riding).pos.y - body.pos.y : 0;
   mobCtx.dt = dt;
   mobCtx.time = elapsed;
@@ -1426,7 +1798,11 @@ function frame(ts?: number) {
     d.normalize().lerp(new THREE.Vector3(0, -1, 0.35), 1 - slack);
     rig.ropeAim = d;
   }
+  // A dungeon's light, once it's yours, is in your mittens: below, and up at the shrine until it's given.
+  const lightOf = dungeon?.inside ? dungeon : cave?.inside ? cave : null;
+  rig.carry = lightOf ? lightOf.carrying : den() ? 0 : offering?.carrying || offering2?.carrying || offering3?.carrying || offering4?.carrying || 0;
   rig.update(body, mode, dt, cycling ? bikes.seat : riding ? riding.species.seat(riding) : undefined);
+  if (lightOf?.carrying) lightOf.carryAt(rig.hands(hand));
   rig.hand(hand);
   mobs.updateRopes(mobCtx, hand);
   puffs.update(dt);
@@ -1441,13 +1817,13 @@ function frame(ts?: number) {
   trail.update(dt, body.pos, !!giant?.walking);
   post.giant = giant ? { dist: giant.centre.distanceTo(camera.position), y: giant.centre.y } : null;
   if (storyHost?.story) {
-    storyHost.story.external = beacons.action(mode) ?? (dungeon?.inside ? dungeon.action(mode) : null);
+    storyHost.story.external = beacons.action(mode) ?? (dungeon?.inside ? dungeon.action(mode) : hall?.inside ? hall.action(mode) : null);
     // No pats in the middle of a cutscene.
     storyHost.story.noPat = beacons.busy || !!journey?.busy || storyBusy;
   }
   storyHost?.story?.update(dt, input, mode);
   // (While the homecoming has the guide, the journey leaves it be.)
-  if (!homecoming?.busy && !homecoming2?.busy) journey?.update(dt);
+  if (!homecoming?.busy && !homecoming2?.busy && !homecoming3?.busy) journey?.update(dt);
   // The giant comes the first time you look out of the home tower's head:
   // you see it from up there, then the village, then you're back in the
   // head as it walks off. (A save from before this order, already past the
@@ -1467,10 +1843,13 @@ function frame(ts?: number) {
   visit?.update(dt);
   if (!den()) offering?.update(dt, mode);
   if (!den()) offering2?.update(dt, mode);
+  if (!den()) offering3?.update(dt, mode);
+  if (!den()) offering4?.update(dt, mode);
   // And on from its last frame: a spirit's light flown home, and the giant getting up.
   if (!den() && offering) homecoming?.update(dt, offering.state === 'given' && offering.clock < 0 && !veil);
   // The same from the second's: the second spirit home, and the giant on to the third ring.
   if (!den() && offering2 && homecoming?.settled) homecoming2?.update(dt, offering2.state === 'given' && offering2.clock < 0 && !veil);
+  if (!den() && offering3 && homecoming2?.settled) homecoming3?.update(dt, offering3.state === 'given' && offering3.clock < 0 && !veil);
   // How the two of you take it. While it's here, she feels what the guide
   // does. Afterwards the guide stays downcast, and so does she among the
   // wreckage; away from it her grin is gone and her face is set.
@@ -1491,7 +1870,7 @@ function frame(ts?: number) {
     if (moodHeld) rig.mood = was;
   } else if (!moodHeld) rig.mood = null;
   // No buttons or tallies over the cutscene.
-  if (visitHud !== (!!visit?.busy || !!offering?.busy || !!homecoming?.busy || !!offering2?.busy || !!homecoming2?.busy)) { visitHud = !!visit?.busy || !!offering?.busy || !!homecoming?.busy || !!offering2?.busy || !!homecoming2?.busy; for (const id of ['story-inv', 'story-act']) { const el = document.getElementById(id); if (el) el.style.visibility = visitHud ? 'hidden' : ''; } }
+  if (visitHud !== (!!visit?.busy || !!offering?.busy || !!homecoming?.busy || !!offering2?.busy || !!homecoming2?.busy || !!offering3?.busy || !!homecoming3?.busy || !!offering4?.busy)) { visitHud = !!visit?.busy || !!offering?.busy || !!homecoming?.busy || !!offering2?.busy || !!homecoming2?.busy || !!offering3?.busy || !!homecoming3?.busy || !!offering4?.busy; for (const id of ['story-inv', 'story-act']) { const el = document.getElementById(id); if (el) el.style.visibility = visitHud ? 'hidden' : ''; } }
   // Handed back to the tower's eyes, looking after it.
   if (visitWas && visit && !visit.busy && beacons.inside && giant) beacons.lookToward(giant.centre.x, giant.centre.z, giant.centre.y - 10);
   // Far from the task: a small arrowhead shows the way.
@@ -1520,6 +1899,8 @@ function frame(ts?: number) {
   // In the ring's arms the camera stays up where you stood.
   if (ring?.busy) focus.y = Math.max(focus.y, ring.heldY + 1.4);
   if (ring2?.busy) focus.y = Math.max(focus.y, ring2.heldY + 1.4);
+  if (ring3?.busy) focus.y = Math.max(focus.y, ring3.heldY + 1.4);
+  if (ring4?.busy) focus.y = Math.max(focus.y, ring4.heldY + 1.4);
   // Speed feel: FOV kick + pull-back when sprinting, diving, gliding.
   const hs = Math.hypot(body.vel.x, body.vel.z);
   const sprint = mode === 'walk' ? THREE.MathUtils.clamp((hs - 6.5) / 4, 0, 1) : 0;
@@ -1557,7 +1938,7 @@ function frame(ts?: number) {
   // A tower's spirit being freed: the camera watches it, not you, easing
   // in from where it was and back to you after (never a cut).
   // Or the hearth spirit pulling your bike out of its heart.
-  const cine = beacons.cinematic() ?? den()?.cinematic() ?? visit?.cinematic() ?? offering?.cinematic() ?? homecoming?.cinematic() ?? offering2?.cinematic() ?? homecoming2?.cinematic() ?? journey?.cinematic() ?? storyHost?.story?.cinematic() ?? null;
+  const cine = beacons.cinematic() ?? den()?.cinematic() ?? visit?.cinematic() ?? offering?.cinematic() ?? homecoming?.cinematic() ?? offering2?.cinematic() ?? homecoming2?.cinematic() ?? offering3?.cinematic() ?? homecoming3?.cinematic() ?? offering4?.cinematic() ?? journey?.cinematic() ?? storyHost?.story?.cinematic() ?? null;
   if (cine) {
     if (!hadCine) {
       // From a tower's head the turn starts from the head's own view (last frame's camera), and takes its time.
@@ -1571,12 +1952,15 @@ function frame(ts?: number) {
     camLastPos.copy(camera.position); camLastQ.copy(camera.quaternion);
   } else if (hadCine) {
     // (From the homecoming's far-off camera it's a cut: easing 200 m back to you goes through whatever's between.)
-    const cut = homecoming?.afterYaw != null || homecoming2?.afterYaw != null;
-    orbit.yaw = homecoming?.afterYaw ?? homecoming2?.afterYaw ?? offering?.afterYaw ?? offering2?.afterYaw ?? body.heading + Math.PI;
+    const cut = homecoming?.afterYaw != null || homecoming2?.afterYaw != null || homecoming3?.afterYaw != null;
+    orbit.yaw = homecoming?.afterYaw ?? homecoming2?.afterYaw ?? homecoming3?.afterYaw ?? offering?.afterYaw ?? offering2?.afterYaw ?? offering3?.afterYaw ?? offering4?.afterYaw ?? body.heading + Math.PI;
+    if (offering3) offering3.afterYaw = null;
+    if (offering4) offering4.afterYaw = null;
     if (offering) offering.afterYaw = null;
     if (offering2) offering2.afterYaw = null;
     if (homecoming) homecoming.afterYaw = null;
     if (homecoming2) homecoming2.afterYaw = null;
+    if (homecoming3) homecoming3.afterYaw = null;
     orbit.pitch = cut ? 0.06 : 0.18;
     orbit.targetDistance = 10;
     if (cut) { orbit.snap(); camBlend = 1; } else { camBlendPos.copy(camLastPos); camBlendQ.copy(camLastQ); camBlend = 0; camBlendDur = 1.1; }
@@ -1602,7 +1986,7 @@ function frame(ts?: number) {
   camPrevPos.copy(camera.position); camPrevQ.copy(camera.quaternion);
   // Backed against the rock down there, the camera is pushed in on top of you: you're not drawn, rather than seen from inside your hat.
   // (With a margin either way, or at that distance you'd flicker.)
-  if (den()) rig.root.visible = camera.position.distanceTo(focus) > (rig.root.visible ? 1.2 : 1.7);
+  if (den()) { nearHid = camera.position.distanceTo(focus) < (nearHid ? 1.7 : 1.2); rig.root.visible = !nearHid && !blinkGone; }
   U.uFocus.value.copy(focus);
   // Contact shadow sits on the ground under the explorer and shrinks with height.
   // Floor, not bare terrain: on a rock or roof the terrain-only shadow hides.
@@ -1615,8 +1999,10 @@ function frame(ts?: number) {
 
   env.update(dt);
   // Down there the light is the cave's own, whatever the hour is above.
+  // (The Drop's dark below its lip: nowhere else.)
+  DUNGEON_U.uDarkY.value = chasm?.inside ? chasm.darkY : -1e9;
   den()?.applyLight(camera.position);
-  ambience.update(dt, { hush: !!visit?.busy || !!offering?.busy || !!homecoming?.busy || !!offering2?.busy || !!homecoming2?.busy || !!den(), cue: visit?.music ?? null, soon: visit?.state === 'idle' && !!visit.route });
+  ambience.update(dt, { hush: !!visit?.busy || !!offering?.busy || !!homecoming?.busy || !!offering2?.busy || !!homecoming2?.busy || !!offering3?.busy || !!homecoming3?.busy || !!offering4?.busy || !!den(), cue: visit?.music ?? hall?.music ?? null, soon: visit?.state === 'idle' && !!visit.route ? 'scene' : hall?.inside || (ring3 && homecoming2?.settled && !dungeon3Won) ? 'hall' : null });
   U.uTime.value = elapsed;
   sky.update(camera, elapsed);
   terrain.update(camera.position);
@@ -1626,7 +2012,7 @@ function frame(ts?: number) {
   const inDen = den();
   if (!skipRender && inDen) {
     // Its own scene, its own air; nothing of the world's overlay (the field, the pointer) shows through.
-    const k = inDen === cave ? cave.look : DUNGEON_LOOK, ov = post.overlay;
+    const k = inDen === cave ? cave.look : inDen === hall ? hall.look : inDen === chasm ? chasm.look : DUNGEON_LOOK, ov = post.overlay;
     // (But its own: the explorer's thought bubble.)
     post.overlay = ov && { ...ov, scene: inDen.overlay };
     post.render(inDen.scene, camera, k.fog, k.outline, k.tint, k.tintAmt, k.lift, k.air);
@@ -1700,6 +2086,33 @@ function stelkWork(dt: number) {
 }
 /** The explorer is hidden because their mount has gone underground. */
 let burrowHid = false;
+/** A glimmer's blink: the two of you are gone (most of her phase), then seconds since you came back, while you fill out again (-1: not). */
+let blinkGone = false;
+let blinkBack = -1;
+/** In a den with the camera pushed in on top of you: not drawn. */
+let nearHid = false;
+/** The rider's side of a blink: out of sight with her, and back out of the same sliver of light. */
+function blinkWork(m: Mob | null, dt: number) {
+  const gs = rideMode.gallopState, b = player.body;
+  const gone = !!m && gs.phase > PHASE_IN;
+  if (gone !== blinkGone) {
+    blinkGone = gone;
+    rig.root.visible = !gone;
+    if (!gone && m) {
+      // Back: a ring of her light thrown out round her (it goes along with her a way), and the dust jumps where she lands.
+      blinkBack = 0;
+      const on = -Math.abs(gs.speed) * 2.2;
+      glowPuffs.emit(v3.set(b.pos.x, b.pos.y + 1.1, b.pos.z), 12, 0.13, 4.2, v3b.set(Math.sin(b.heading) * on, 0, Math.cos(b.heading) * on), { life: 0.3, up: 0.3, drag: 7 });
+      if (b.grounded) puffs.emit(v3.set(b.pos.x, b.pos.y + 0.05, b.pos.z), 7, 0.17, 2.6, undefined, { up: 0.4 });
+      orbit.bump(0.3);
+    }
+  }
+  if (blinkBack >= 0) {
+    blinkBack = m ? blinkBack + dt : BLINK_IN;
+    if (blinkBack >= BLINK_IN) { blinkBack = -1; rig.root.scale.setScalar(1); }
+    else { const [w, tall] = blinkIn(blinkBack / BLINK_IN); rig.root.scale.set(w, tall, w); }
+  }
+}
 let trickT = 0;
 const trickDir = new THREE.Vector3();
 
@@ -1720,7 +2133,12 @@ function beastWork(m: Mob, dt: number) {
   switch (gs.fx) {
     case 'burrow': mudPuffs.emit(behind.setY(b.pos.y + 0.3), 10, 0.28, 2.4); orbit.bump(0.5); break;
     case 'emerge': mudPuffs.emit(v3.set(b.pos.x, b.pos.y + 0.2, b.pos.z), 12, 0.3, 2.8); orbit.bump(0.6); break;
-    case 'phase': glowPuffs.emit(v3.set(b.pos.x, b.pos.y + 1, b.pos.z), 8, 0.12, 1.4); break;
+    case 'phase':
+      // Gone: the dust she stood in is thrown back the way she came, a few motes of her light left hanging in it.
+      puffs.emit(behind, 9, 0.26, 1.6, v3b.copy(trickDir).multiplyScalar(16), { life: 0.5, up: 0.5, drag: 3.2 });
+      puffs.emit(behind.setY(b.pos.y + 0.7), 6, 0.16, 2.4, v3b.copy(trickDir).multiplyScalar(22), { life: 0.4, up: 1.2, drag: 3.6 });
+      glowPuffs.emit(v3.set(b.pos.x, b.pos.y + 1, b.pos.z), 7, 0.11, 1.8, v3b.copy(trickDir).multiplyScalar(9), { life: 0.45 });
+      break;
     case 'charge': sparkPuffs.emit(v3.set(b.pos.x, b.pos.y + 1.6, b.pos.z), 10, 0.1, 2.2); orbit.bump(1.0); break;
     case 'dive': case 'surface': puffs.emit(v3.set(b.pos.x, SEA_LEVEL + 0.1, b.pos.z), 7, 0.2, 2.2); break;
   }
@@ -1731,7 +2149,8 @@ function beastWork(m: Mob, dt: number) {
   if (trickT <= 0) {
     trickT = 0.06;
     if (under) mudPuffs.emit(v3.set(b.pos.x + (Math.random() - 0.5) * 0.6, b.pos.y + 0.05, b.pos.z + (Math.random() - 0.5) * 0.6), 1, 0.24, 0.9);
-    if (gs.phase > 0) glowPuffs.emit(v3.set(b.pos.x, b.pos.y + 0.9, b.pos.z), 2, 0.09, 0.6);
+    // (Gone, all there is of her is a thin line of motes: where she went.)
+    if (gs.phase > 0) glowPuffs.emit(v3.set(b.pos.x, b.pos.y + 0.9, b.pos.z), 1, 0.09, 0.25, undefined, { life: 0.25, up: 0.1 });
     if (gs.charge > 0) sparkPuffs.emit(v3.set(b.pos.x + (Math.random() - 0.5) * 2, b.pos.y + 1.2 + Math.random(), b.pos.z + (Math.random() - 0.5) * 2), 1, 0.07, 1.2);
     else if (gs.static > 0.6 && Math.random() < gs.static * 0.35) sparkPuffs.emit(v3.set(b.pos.x + (Math.random() - 0.5) * 1.6, b.pos.y + 2.2, b.pos.z + (Math.random() - 0.5) * 1.6), 1, 0.05, 0.5);
   }
@@ -1768,6 +2187,7 @@ function rocketWork(m: Mob, dt: number) {
 let trailT = 0;
 let trailEmit = 0;
 const v3 = new THREE.Vector3();
+const v3b = new THREE.Vector3();
 
 /**
  * Touch: with no finger on the camera, it swings round behind the way you're
@@ -1978,8 +2398,10 @@ window.__ow = {
   homecoming: () => homecoming,
   /** The same after the second dungeon (`who` 1, on to the third ring; saved as `home2`). */
   homecoming2: () => homecoming2,
+  /** And after the third (`who` 2, on to the fourth ring, bare stones; saved as `home3`). */
+  homecoming3: () => homecoming3,
   /** The giant's footfalls on to the second ring (`onward(2)`: from there to the third), and how long the search for the dungeon sites took this load (ms; 0: cached). */
-  onward: (leg = 1) => (leg === 2 ? homecoming2 : homecoming)?.route ?? [],
+  onward: (leg = 1) => (leg === 3 ? homecoming3 : leg === 2 ? homecoming2 : homecoming)?.route ?? [],
   siteSearchMs: () => siteSearchMs,
   siteSearchEach: () => gen.searchMs,
   /** The stone hands about the world: `hands().list` so far, `hands().survey(x, z, cells)` looks further at once. */
@@ -1988,6 +2410,20 @@ window.__ow = {
   winDungeon,
   /** The second dungeon, the Veil Cave (null until you've been down): `.round`, `.play`, `.she`, `.layout.at`, `.goTo(name)`, `.debugRound(n)`, `.debugYours()`. `enterCave()` is its ring taking you; `enterCave(x, z)` stands you at a point of its plan; `leaveCave()` brings you up. */
   cave: () => cave,
+  /** The third dungeon, the Moon Hall (null until you've been down): `.debug`, `.dials`, `.she`, `.layout.at`, `.goTo(name)`, `.debugSolve(all)`, `.debugYours()`. `enterHall()` is its ring taking you; `enterHall(x, z)` stands you at a point of its plan. */
+  hall: () => hall,
+  /** The fourth dungeon, the Drop (null until you've been down; dev only so far): `.debug`, `.target`, `.she`, `.layout.at`, `.goTo(name)`, `.debugDown(n)`, `.debugYours()`. `enterChasm()` lets you down into it; `enterChasm(x, z)` stands you at a point of its plan; `leaveChasm()` brings you up. */
+  chasm: () => chasm,
+  ring4: () => ring4,
+  offering4: () => offering4,
+  thirdDone,
+  enterChasm: (x?: number, z?: number) => enterChasm(x === undefined ? undefined : [x, z ?? 0]),
+  leaveChasm: () => { if (chasm?.inside) { chasm.inside = false; leaveChasm(); } },
+  ring3: () => ring3,
+  offering3: () => offering3,
+  enterHall: (x?: number, z?: number) => { if (!homecoming2?.settled) secondDone(); ring3?.setOpen(); enterHall(x === undefined ? undefined : [x, z ?? 0]); },
+  leaveHall: () => { if (hall?.inside) { hall.inside = false; leaveHall(); } },
+  secondDone,
   ring2: () => ring2,
   offering2: () => offering2,
   enterCave: (x?: number, z?: number) => { if (!homecoming?.settled) firstDone(); ring2?.setOpen(); enterCave(x === undefined ? undefined : [x, z ?? 0]); },

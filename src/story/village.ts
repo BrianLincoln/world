@@ -226,6 +226,8 @@ export class Village {
   private way: (THREE.Vector3[] | null)[] = [];
   /** Nothing's wrong, and they're milling about (until the first `flinch`). */
   private calm = true;
+  /** Stood somewhere by someone else for now (`attend`): `mill` leaves them be. */
+  private held = new Set<number>();
   private life: Life[] = [];
   private eyes: THREE.Vector3[] = [];
   private mid = new THREE.Vector3();
@@ -417,6 +419,40 @@ export class Village {
     l.face = this.mid;
     s.want = { at: p, face: this.mid, pose: 'stand', icon: null, lead: false, settled: true };
     this.calm = true;
+  }
+
+  /** Is `k` here (not carried off)? */
+  here(k: number) { return !this.taken[k]; }
+
+  /**
+   * `k` drops what it's at and is stood at `at`, looking at `face`, until
+   * it's let go (`dismiss`): the crowd when one of them comes home.
+   */
+  attend(k: number, at: THREE.Vector3, face: THREE.Vector3) {
+    if (this.taken[k]) return;
+    const s = this.spirits[k], l = this.life[k];
+    this.held.add(k);
+    s.group.visible = true;
+    s.gesture = null;
+    s.pointing = null;
+    s.mood = null;
+    this.way[k] = null;
+    l.doing = 'home';
+    l.mate = -1;
+    l.gt = 0;
+    l.due = null;
+    const p = at.clone();
+    p.y = this.gy(p.x, p.z);
+    s.teleport(p);
+    s.heading = Math.atan2(face.x - p.x, face.z - p.z);
+    s.want = { at: p, face, pose: 'stand', icon: null, lead: false, settled: true };
+  }
+
+  /** And off home again, down the lane, to get on with its day. */
+  dismiss(k: number) {
+    if (!this.held.delete(k) || this.taken[k]) return;
+    this.spirits[k].gesture = null;
+    this.goHome(k);
   }
 
   /** Houses part built (step 1 to 4). */
@@ -736,7 +772,7 @@ export class Village {
   /** An ordinary day: each of them at something, and on to the next thing when it's done. */
   private mill(dt: number, player: THREE.Vector3) {
     for (const [k, s] of this.spirits.entries()) {
-      if (this.taken[k]) continue;
+      if (this.taken[k] || this.held.has(k)) continue;
       const l = this.life[k], h = this.houses[this.home[k]];
       if (l.due && (l.due.t -= dt) <= 0) { this.say(k, l.due.g, l.due.secs, l.due.face); l.due = null; }
       if (l.gt > 0 && (l.gt -= dt) <= 0) { s.gesture = null; s.want.face = l.face; }
@@ -753,7 +789,7 @@ export class Village {
           // Now and then, a wave across the way to whoever else is out on their step (who waves back).
           if (idle && (l.hailT -= dt) <= 0) {
             l.hailT = 9 + Math.random() * 14;
-            const out = this.spirits.map((_q, m) => m).filter((m) => m !== k && !this.taken[m] && this.life[m].doing === 'home' && this.life[m].gt <= 0 && this.eyes[m].distanceTo(s.pos) < 32);
+            const out = this.spirits.map((_q, m) => m).filter((m) => m !== k && !this.taken[m] && !this.held.has(m) && this.life[m].doing === 'home' && this.life[m].gt <= 0 && this.eyes[m].distanceTo(s.pos) < 32);
             if (out.length) {
               const m = out[Math.floor(Math.random() * out.length)];
               this.say(k, 'wave', 1.5, this.eyes[m]);
@@ -769,7 +805,7 @@ export class Village {
             const inside = this.world(h, h.doorX, h.hd - 0.85, new THREE.Vector3());
             this.go(k, inside, 'in', [h.door.clone(), inside]);
           } else if (r < 0.72) {
-            const free = this.spirits.map((_q, m) => m).filter((m) => m !== k && !this.taken[m] && this.life[m].doing === 'home' && this.life[m].spot.distanceTo(l.spot) < 70);
+            const free = this.spirits.map((_q, m) => m).filter((m) => m !== k && !this.taken[m] && !this.held.has(m) && this.life[m].doing === 'home' && this.life[m].spot.distanceTo(l.spot) < 70);
             if (free.length) this.meet(k, free[Math.floor(Math.random() * free.length)]);
             else this.stroll(k);
           } else this.stroll(k);

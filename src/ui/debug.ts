@@ -9,7 +9,7 @@ import type { Terrain } from '../world/terrain';
 
 export interface DebugHooks {
   env: Environment;
-  ambience: { gains: { music: number; scene: number } };
+  ambience: { gains: { music: number; scene: number; hall: number } };
   terrain: Terrain;
   getSeed(): string;
   setSeed(s: string): void;
@@ -64,6 +64,7 @@ export class DebugUI {
     const fs = this.gui.addFolder('Music');
     fs.add(h.ambience.gains, 'music', 0, 1, 0.01).name('volume');
     fs.add(h.ambience.gains, 'scene', 0, 3, 0.05).name('giant scene ×');
+    fs.add(h.ambience.gains, 'hall', 0, 3, 0.05).name('moon hall ×');
     fs.close();
 
     const fp = this.gui.addFolder('Palette');

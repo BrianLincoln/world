@@ -151,6 +151,8 @@ export class Dungeon {
   /** The shut-in rockhopper. */
   goat: Mob | null = null;
   private emberAt = new THREE.Vector3();
+  /** How far the light has come to your mittens since you took it (0..1). */
+  private grip = 0;
   /** Which lanterns are awake (saved), how far each has woken (0..1), and their mesh. */
   readonly lit: boolean[];
   private litK: Float32Array;
@@ -569,6 +571,17 @@ export class Dungeon {
 
   get busy() { return !!this.seq || this.win >= 0; }
 
+  /** The light is yours to carry: in both mittens (1), or held up in them while you're glad of it (2). */
+  get carrying(): 0 | 1 | 2 { return !this.taken ? 0 : this.win >= 0 ? 2 : 1; }
+  /** Where your mittens are this frame (main, once the rig has moved): the light goes to them and stays. */
+  carryAt(p: THREE.Vector3) {
+    if (!this.taken) return;
+    // (Flaring, it's bigger: up on your mittens by as much, not down over your face.)
+    p.y += 0.2 * this.cheer;
+    this.emberAt.lerp(p, this.grip * this.grip);
+    this.root.worldToLocal(this.ember.position.copy(this.emberAt));
+  }
+
   /** How much of the frame the violet veil covers (0..1): the cut between above and below. */
   get veil() {
     const s = this.seq;
@@ -607,7 +620,7 @@ export class Dungeon {
       p.mesh.visible = p.gone < 1;
       p.mesh.scale.setScalar((1 - Math.max(0, p.gone)) * (1 + 0.05 * p.jolt * Math.sin(p.jolt * 18)));
     }
-    // The warm light: on its stone until you come to it, then at your shoulder.
+    // The warm light: on its stone until you come to it, then in your mittens.
     const rest = this.world(L.ember.x, L.ember.y + 0.06 * Math.sin(this.time * 1.7), L.ember.z);
     if (!this.taken && !this.seq && Math.hypot(b.pos.x - rest.x, b.pos.z - rest.z) < TAKE_R && Math.abs(b.pos.y + 1 - rest.y) < 3) {
       this.taken = true;
@@ -647,11 +660,9 @@ export class Dungeon {
         return;
       }
     }
-    if (this.taken) {
-      const up = mode === 'ride' ? 2.9 : 2.0;
-      rest.set(b.pos.x - Math.sin(b.heading) * 0.55 + Math.cos(b.heading) * 0.5, b.pos.y + up + 0.08 * Math.sin(this.time * 2.1), b.pos.z - Math.cos(b.heading) * 0.55 - Math.sin(b.heading) * 0.5);
-      this.emberAt.lerp(rest, 1 - Math.exp(-(this.seq ? 30 : 5) * dt));
-    } else this.emberAt.copy(rest);
+    // (Taken, it's in your mittens: `carryAt`, once the rig has moved.)
+    if (this.taken) this.grip = Math.min(1, this.grip + dt / 0.4);
+    else { this.grip = 0; this.emberAt.copy(rest); }
     this.root.worldToLocal(this.ember.position.copy(this.emberAt));
     this.ember.scale.setScalar((this.taken ? 0.6 : 1) * (1 + 0.07 * Math.sin(this.time * 4.1)) * (1 + 0.9 * this.cheer));
     // The lanterns: each wakes as you come near, and stays awake.

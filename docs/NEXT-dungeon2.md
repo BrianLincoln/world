@@ -156,7 +156,7 @@ Veil Cave"). In short:
   the light's room and the way out are behind veils.
 - The glimmer plays hide and seek with you three times, then offers her
   back. Riding her, Space takes you through veils: into the pocket, down
-  the middle, to the light. She carries you out through the well's wall.
+  the middle, to the light. Taking the light ends it as dungeon 1 ends (owner, 2026-10-06, and so for every dungeon unless decided otherwise): the success beat, the cut, the ring's arms lift you out.
 - Above: the ring shuts into a shrine (a glimmer in stone), a crow takes
   the light to the giant, it smiles; a second spirit is home, unseen.
 - To play it: `?fresh=1&cp=ring2` stands you by the open ring in the story;

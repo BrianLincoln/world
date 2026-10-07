@@ -118,6 +118,7 @@ type Tool = (typeof TOOLS)[number];
 
 const sat = (x: number) => Math.min(1, Math.max(0, x));
 const lerp = THREE.MathUtils.lerp;
+const handV = new THREE.Vector3();
 
 /** Limb lengths (pivot to next pivot) and where the pivots sit, for IK. */
 const THIGH = 0.27;
@@ -376,6 +377,22 @@ export class CharacterRig {
   /** Both hands forward: handing something over. */
   give() {
     if (this.giveT > 0.3) this.giveT = 0;
+  }
+
+  /**
+   * A dungeon's light on her two mittens: 1, carried before her belly; 2,
+   * lifted a little, to her chest (it's hers; or she's offering it).
+   */
+  carry: 0 | 1 | 2 = 0;
+  private carryW = 0;
+  private raiseW = 0;
+
+  /** Where what she carries sits, world space: on her two mittens. */
+  hands(out: THREE.Vector3): THREE.Vector3 {
+    this.elL.localToWorld(out.set(0, -0.27, 0.02));
+    out.lerp(this.elR.localToWorld(handV.set(0, -0.27, 0.02)), 0.5);
+    out.y += 0.22;
+    return out;
   }
 
   /** The right mitten, world space (where ropes start). */
@@ -1064,6 +1081,20 @@ export class CharacterRig {
       P.shLx = lerp(P.shLx, -1.25, w);
       P.elR = lerp(P.elR, -0.2, w);
       P.elL = lerp(P.elL, -0.2, w);
+    }
+    // Carrying a light: on both mittens, together before her belly (the owner's wish: held close, solemnly);
+    // lifted a little, to her chest, when it's offered.
+    this.carryW += ((this.carry ? 1 : 0) - this.carryW) * e(9);
+    this.raiseW += ((this.carry === 2 ? 1 : 0) - this.raiseW) * e(5);
+    if (this.carryW > 1e-3) {
+      const w = THREE.MathUtils.smoothstep(this.carryW, 0, 1), r = THREE.MathUtils.smoothstep(this.raiseW, 0, 1);
+      const sx = lerp(-0.75, -1.25, r), sz = 0.34, el = lerp(-0.95, -0.8, r);
+      P.shLx = lerp(P.shLx, sx, w);
+      P.shRx = lerp(P.shRx, sx, w);
+      P.shLz = lerp(P.shLz, -sz, w);
+      P.shRz = lerp(P.shRz, sz, w);
+      P.elL = lerp(P.elL, el, w);
+      P.elR = lerp(P.elR, el, w);
     }
 
     // Patting: a crouch and a lean in, head down, the left mitten on the

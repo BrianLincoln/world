@@ -92,6 +92,10 @@ ${GBUF_OUT}
 ${PRINT_GLSL}
 uniform vec3 cPrintWarm;
 uniform vec3 cPrintEarth;
+// A dungeon ring's forcefield: x, z, radius, how far open. Painted here, as
+// the ground's own colour, so no ground can ever stand above it.
+uniform vec4 uField;
+uniform vec2 uFieldStir;
 in vec3 vWorld;
 in vec3 vN;
 in vec4 vBiome;
@@ -250,6 +254,23 @@ void main() {
     float s = strokes(vWorld.xz, dist);
     col = mix(col, cStroke * lightBand, s * 0.8);
   }
+  if (uField.w > 0.0) {
+    vec2 fp = vWorld.xz - uField.xy;
+    float fr = length(fp) / uField.z;
+    if (fr < uField.w) {
+      float fa = atan(fp.y, fp.x);
+      // Slow flat bands winding in to the middle, and a hard pale lip.
+      float swirl = step(0.5, fract(fa * 0.477 + fr * 2.2 - uTime * 0.07));
+      float ring = step(0.5, fract(fr * 3.0 - uTime * 0.11));
+      col = mix(vec3(0.085, 0.06, 0.15), vec3(0.16, 0.11, 0.27), 0.55 * swirl + 0.25 * ring);
+      col = mix(col, vec3(0.62, 0.55, 0.86), smoothstep(uField.w - 0.07, uField.w - 0.03, fr));
+      // Where something stands on it, it pales in a ring round the feet.
+      float fd = length(vWorld.xz - uFieldStir);
+      col = mix(col, vec3(0.45, 0.38, 0.7), (1.0 - smoothstep(0.0, 0.5, abs(fd - 1.6 - 0.25 * sin(uTime * 3.0)))) * 0.6);
+      // Its own colour whatever the light or the hour (the grade leaves it be).
+      em = -1.0;
+    }
+  }
   // Snow caps resist the monochrome grade: they stay the brightest thing.
   writeG(col, em, n, vView);
 }
@@ -278,8 +299,11 @@ uniform float uHarvestChan;
 // World props (uPrintHide = 1) that stood where the giant has trodden are gone.
 uniform float uPrintHide;
 ${PRINT_GLSL}
+// Nor does anything stand up through a dungeon ring's forcefield (the ground's shader paints it).
+uniform vec4 uField;
 bool trodden(vec3 base) {
   if (uPrintHide < 0.5 || aI1.z > 5.0) return false;
+  if (uField.w > 0.0 && length(base.xz - uField.xy) < uField.z * uField.w) return true;
   return printClears(base.xz);
 }
 float harvestScale(vec3 base) {
@@ -1781,6 +1805,11 @@ uniform float uGlint;
 uniform float uWarmFlat;
 uniform vec3 cWarmHi;
 uniform vec3 cWarmLo;
+// The Drop: below this height (world) rock that no light is on isn't seen at all: it is this colour.
+uniform float uDarkY;
+uniform vec3 cUnseen;
+// (And only within this round: xy = its middle (world x, z), z = its radius.)
+uniform vec3 uDarkAt;
 void main() {
   vec3 n = normalize(vN);
   vec3 lp = vWorld - uOrigin;
@@ -1822,9 +1851,11 @@ void main() {
     if (uGlows[i].w < 0.0) warm = max(warm, float(lv));
     level = max(level, lv);
   }
+  bool unlit = level == 0;
   // A boulder's top catches what light there is.
   if (uShell < 0.5 && n.y > 0.62) level = max(level, 1);
   vec3 col = base * (level == 2 ? cLit : level == 1 ? cMid : cShade);
+  if (unlit && vWorld.y < uDarkY && length(vWorld.xz - uDarkAt.xy) < uDarkAt.z) col = mix(col, cUnseen, smoothstep(0.0, 7.0, uDarkY - vWorld.y));
   float em = 0.0;
   if (warm > 0.5) {
     col = base * (warm > 1.5 ? cWarm : mix(cWarm, cMid, 0.5));

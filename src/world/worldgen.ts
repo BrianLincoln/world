@@ -169,7 +169,7 @@ export class WorldGen {
 
   /**
    * Every dungeon's site, in the order the giant comes to them: the first
-   * (above), and the ones it walks on to as each is done (`nextSite`): three so far.
+   * (above), and the ones it walks on to as each is done (`nextSite`): four so far.
    * Found one after another, each with the ones before it already standing,
    * so the first is exactly what it was when it was the only one.
    */
@@ -186,11 +186,15 @@ export class WorldGen {
       const second = this.nextSite(first);
       this.know([first, second]);
       const t2 = Date.now();
-      // The third: where it walks on to when the second is done. (Nothing is under it yet: bare stones.)
+      // The third: where it walks on to when the second is done.
       const third = this.nextSite(second, [first]);
-      this.searchMs = [t1 - t0, t2 - t1, Date.now() - t2];
+      this.know([first, second, third]);
+      const t3 = Date.now();
+      // The fourth: where it walks on to when the third is done. (Nothing is under it yet: bare stones.)
+      const fourth = this.nextSite(third, [first, second]);
+      this.searchMs = [t1 - t0, t2 - t1, t3 - t2, Date.now() - t3];
       this.dungeonBusy = false;
-      this.presetDungeons([first, second, third]);
+      this.presetDungeons([first, second, third, fourth]);
     }
     return this._dungeons!;
   }

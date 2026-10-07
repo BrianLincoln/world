@@ -44,9 +44,9 @@ const LOCK_STAND = 1.5;
  * The spirit's sequence (s after the lock breaks): the door stone shudders
  * as glowing cracks run across it, it bursts, the spirit's glow stirs in
  * the dark doorway and it drifts out to beside you, looks about, is happy,
- * the climb, into the head.
+ * turns to the tower where it is, the climb from there, into the head.
  */
-const T_BURST = 0.95, T_EMERGE = 1.3, T_OUT = 2.9, T_LOOK = 3.4, T_HAPPY = 4.2, T_TURN = 6.1, T_REACH = 7.5;
+const T_BURST = 0.95, T_EMERGE = 1.3, T_OUT = 2.9, T_LOOK = 3.4, T_HAPPY = 4.2, T_TURN = 6.1, T_REACH = 6.7;
 /** Up into the head: arms arcing up to the eyehole, a tug on the grip, yanked up to it, popping in (the arms gone in a puff), and a beat after (s). */
 const ARMS_UP = 1.2, ARMS_HOLD = 0.5, PULL = 1.9, INTO = 0.35, AFTER = 2.2;
 /** How far through the pull the arms go in a puff (they'd crumple as it closes on the eye). */
@@ -510,9 +510,9 @@ class TowerSpirit {
 
 /** Where the climb goes, worked out once when it starts (see planClimb). */
 interface ClimbPlan {
-  /** Across the face (m, to the tower's right) where it waits, beside the doorway. */
+  /** The camera's side of the face (its sign: the arms and the arc swing away from it). */
   lat: number;
-  /** Where it floats at the foot (hem position). */
+  /** Where it floats at the foot, which is where it was happy (hem position). */
   foot: THREE.Vector3;
   /** Its hands' grips, just inside the left eyehole either side. */
   grips: [THREE.Vector3, THREE.Vector3];
@@ -788,7 +788,7 @@ export class Beacons {
     const mid = new THREE.Vector3(h.x, t.door.ground.y + tall * 0.52, h.z);
     const yawB = t.yaw + f.side * 0.4;
     const distB = tall * 1.2 + 16;
-    const k = THREE.MathUtils.smootherstep(u, T_TURN + 0.5, T_REACH + 1.2);
+    const k = THREE.MathUtils.smootherstep(u, T_TURN - 0.3, T_REACH + 1.2);
     const at = pair.clone().lerp(mid, k);
     const yawA = THREE.MathUtils.lerp(t.yaw + f.side * 0.55, f.camYaw, k0);
     const yaw = THREE.MathUtils.lerp(yawA, yawB, k);
@@ -798,6 +798,11 @@ export class Beacons {
     let dist = THREE.MathUtils.lerp(THREE.MathUtils.lerp(15, 12, k0), distB, Math.pow(k, 0.55));
     // As it nears the top, closer in on the head for the slip into the eye.
     const top = T_REACH + ARMS_UP + ARMS_HOLD;
+    // Until it's yanked off the ground the shot sits lower and further back:
+    // it starts out from the foot of the rock, often downhill of the door.
+    const low = k * (1 - THREE.MathUtils.smootherstep(u, top, top + PULL * 0.45));
+    at.y -= tall * 0.12 * low;
+    dist *= 1 + 0.14 * low;
     const k2 = THREE.MathUtils.smootherstep(u, top + PULL * 0.3, top + PULL + INTO * 0.5);
     if (f.plan && k2 > 0) {
       at.lerp(f.plan.eye.clone().setY(f.plan.eye.y - 3), k2 * 0.7);
@@ -1034,28 +1039,22 @@ export class Beacons {
     return out;
   }
 
-  /** A point out from the face: `d` along the face direction, `lat` across, at height y. */
-  private facePoint(t: Tower, d: number, lat: number, y: number, out = new THREE.Vector3()) {
-    const fx = Math.sin(t.yaw), fz = Math.cos(t.yaw);
-    return out.set(t.x + fz * lat + fx * d, y, t.z - fx * lat + fz * d);
-  }
-
   /**
-   * Work out the way up once: it waits beside the doorway; its arms arc out
-   * round the stack (well clear of every boulder) to the left eyehole; it's
-   * yanked up along an arc just as clear, and slips in.
+   * Work out the way up once: it goes from where it was happy, beside you
+   * (no float over to the tower first); its arms arc out round the stack
+   * (well clear of every boulder) to the left eyehole; it's yanked up along
+   * an arc just as clear, and slips in.
    */
-  private planClimb(t: Tower, side: number): ClimbPlan {
+  private planClimb(t: Tower, side: number, spot: THREE.Vector3): ClimbPlan {
     const S = SPIRIT_SIZE, bodyH = GHOST_H * S, halfW = GHOST_R * S + 0.15;
-    const door = t.boulders[1];
-    const lat = side * (0.3 * door.sx + 2.4);
-    const g0 = this.floorUnder(this.facePoint(t, door.sx + 4, lat, 0).x, this.facePoint(t, door.sx + 4, lat, 0).z, t.door.ground.y + 6);
-    const fd = this.faceClear(t, g0 + HOVER, g0 + HOVER + bodyH, lat, halfW) + halfW + 0.45;
-    const foot = this.facePoint(t, fd, lat, 0);
-    foot.y = this.floorUnder(foot.x, foot.z, g0 + 3) + HOVER;
+    const fx = Math.sin(t.yaw), fz = Math.cos(t.yaw);
+    const foot = spot.clone();
+    foot.y = this.floorUnder(foot.x, foot.z, foot.y + 2) + HOVER;
+    // Which way it swings on the way up is the camera's side still, not where it stands.
+    const lat = side;
+    const footLat = (foot.x - t.x) * fz - (foot.z - t.z) * fx;
     const h = t.head;
     const e = new THREE.Vector3(-0.27, 0.12, 0.955).normalize();
-    const fx = Math.sin(t.yaw), fz = Math.cos(t.yaw);
     const right = new THREE.Vector3(fz, 0, -fx), fwd = new THREE.Vector3(fx, 0, fz), up = new THREE.Vector3(0, 1, 0);
     const eye = new THREE.Vector3(h.x, h.y, h.z).addScaledVector(right, e.x * h.sx).addScaledVector(fwd, e.z * h.sx).addScaledVector(up, e.y * h.sy);
     const axis = right.clone().multiplyScalar(e.x / h.sx).addScaledVector(fwd, e.z / h.sx).addScaledVector(up, e.y / h.sy).normalize();
@@ -1064,7 +1063,7 @@ export class Beacons {
     const grips: [THREE.Vector3, THREE.Vector3] = [-1, 1].map((sd) => eye.clone().addScaledVector(axis, -0.5).addScaledVector(right, sd * hw).addScaledVector(up, -0.3 * h.sy * 0.5)) as [THREE.Vector3, THREE.Vector3];
     // How far the rock reaches out in front, anywhere between the foot and the eyes.
     const eyeLat = (eye.x - t.x) * fz - (eye.z - t.z) * fx;
-    const out = Math.max(this.faceClear(t, foot.y, eye.y + 2, lat, 2), this.faceClear(t, foot.y, eye.y + 2, eyeLat, 2));
+    const out = Math.max(this.faceClear(t, foot.y, eye.y + 2, footLat, 2), this.faceClear(t, foot.y, eye.y + 2, eyeLat, 2));
     // Just out from the eyehole, its middle level with the eye (it's a touch smaller by then).
     const hc = bodyH * 0.85 * 0.5;
     const mouth = eye.clone().addScaledVector(axis, halfW + 1.0).setY(eye.y - hc);
@@ -1110,7 +1109,7 @@ export class Beacons {
     // Startled back a step as the door bursts (through the walk mode, so it animates and collides).
     if (u > T_BURST && u < T_BURST + 0.3) b.vel.set(fwd.x * 3.2, b.vel.y, fwd.z * 3.2);
 
-    const P = f.plan ??= this.planClimb(t, f.side);
+    const P = f.plan ??= this.planClimb(t, f.side, f.spot);
     const reachEnd = T_REACH + ARMS_UP, holdEnd = reachEnd + ARMS_HOLD, pullEnd = holdEnd + PULL, poofAt = holdEnd + PULL * POOF, inEnd = pullEnd + INTO, end = inEnd + AFTER;
     const bob = () => Math.sin(this.time * 2.6) * 0.1;
     const hover = (p: THREE.Vector3) => { p.y = this.floorUnder(p.x, p.z, p.y + 2) + HOVER + bob(); return p; };
@@ -1179,13 +1178,11 @@ export class Beacons {
       if (u - dt < T_HAPPY + 0.95 && u >= T_HAPPY + 0.95) this.d.sfx.chirp(true);
       if (Math.random() < dt * 10) this.sparks.emit(sp.pos.clone().setY(sp.pos.y + sp.height), 1, 0.06, 1.2);
     } else if (u < T_REACH) {
-      // Floats round to the foot of the climb, beside the doorway, turning to
-      // the tower, and looks all the way up.
+      // Turns to the tower where it is, and looks all the way up.
       const k = (u - T_TURN) / (T_REACH - T_TURN);
-      sp.pos.lerpVectors(f.spot, P.foot, THREE.MathUtils.smootherstep(k, 0, 0.75));
-      hover(sp.pos);
-      sp.yaw = turnTo(toMe, toTower, THREE.MathUtils.smoothstep(k, 0.1, 0.6));
-      sp.tilt = -0.35 * THREE.MathUtils.smoothstep(k, 0.5, 0.9);
+      hover(sp.pos.copy(f.spot));
+      sp.yaw = turnTo(toMe, toTower, THREE.MathUtils.smoothstep(k, 0, 0.7));
+      sp.tilt = -0.45 * THREE.MathUtils.smoothstep(k, 0.3, 1);
       sp.grin = 1 - k;
     } else if (u < pullEnd) {
       // Both long arms shoot up, arcing out round the rock, and hook into

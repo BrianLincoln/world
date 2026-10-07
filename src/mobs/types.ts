@@ -43,6 +43,8 @@ export interface Mob {
   below?: boolean;
   /** Something else is its brain (a dungeon's creature at play): its species doesn't think for it, only animates it. */
   puppet?: boolean;
+  /** A flier told to stay down: it settles on the ground where it is and doesn't drift about (a dungeon's flier, above ground beside its shrine). */
+  settle?: boolean;
   /** Phasing with nobody on it (a glimmer): seconds of it left. Whoever drives it counts it down. */
   ghost?: number;
 }

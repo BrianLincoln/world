@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { Beast, clamp, collarGeometry, lerp, saddleGeometry, type Anim, type BeastData } from './beast';
+import { Beast, clamp, collarGeometry, frac, lerp, saddleGeometry, swing, type Anim, type BeastData } from './beast';
 import type { PartBatch } from './parts';
 import { colored, ellipsoid, furBall, merge, mirrorX, tube } from './shapes';
 import type { Mob } from './types';
@@ -73,7 +73,18 @@ function headGeometry() {
 }
 function smooth01(x: number) { return clamp(x * 1.5, 0, 1); }
 
-function bodyGeometry() {
+// Six thin legs, in two pieces each so they can step: a thigh out from the
+// hip along +x, sloping down, and a shin down from the knee to the foot.
+const THIGH: [number, number] = [0.2, -0.1];
+const SHIN: [number, number] = [0.03, -0.25];
+const LEG = '#cfc3b0';
+/** Hips: side, how far along the body, and which way the leg points at rest (rad forward of straight out). Left then right, front to back. */
+const LEGS: { s: number; z: number; fwd: number }[] = [];
+for (const s of [1, -1]) for (let i = 0; i < 3; i++) LEGS.push({ s, z: 0.14 - i * 0.14, fwd: 0.5 - i * 0.5 });
+const thighGeometry = () => tube([[0, 0, 0], [THIGH[0] * 0.55, THIGH[1] * 0.35, 0], [THIGH[0], THIGH[1], 0]], 0.028, 0.022, LEG, 0, false, 8, 5);
+const shinGeometry = () => tube([[0, 0, 0], [SHIN[0] * 1.2, SHIN[1] * 0.5, 0], [SHIN[0], SHIN[1], 0]], 0.022, 0.014, LEG, 0, false, 8, 5);
+
+function bodyGeometry(legs = false) {
   const thorax = furBall({ widthSegs: 40, heightSegs: 30, tufts: 60, amp: 0.12, sweep: 0.06, seed: 14 }).scale(0.34, 0.32, 0.38);
   // The abdomen: fuzzy rings tapering back.
   const rings: THREE.BufferGeometry[] = [];
@@ -81,17 +92,49 @@ function bodyGeometry() {
     const r = 0.3 - i * 0.045;
     rings.push(colored(furBall({ widthSegs: 22, heightSegs: 16, tufts: 16, amp: 0.1, seed: 30 + i }).scale(r, r * 0.92, r * 0.8).translate(0, -0.04 - i * 0.02, -0.38 - i * 0.2), i % 2 ? '#e4d8ea' : '#ffffff'));
   }
-  // Six thin legs, folded under.
-  const legs: THREE.BufferGeometry[] = [];
-  for (const s of [-1, 1]) for (let i = 0; i < 3; i++) {
+  // (The living moth's legs are parts of their own; the statue's are cut in with it, standing.)
+  const fixed: THREE.BufferGeometry[] = [];
+  if (legs) for (const s of [-1, 1]) for (let i = 0; i < 3; i++) {
     const z = 0.14 - i * 0.14;
-    legs.push(tube([[s * 0.12, -0.2, z], [s * 0.3, -0.3, z + 0.04], [s * 0.34, -0.55, z + 0.08 - i * 0.04]], 0.028, 0.016, '#cfc3b0', 0, false, 8, 5));
+    fixed.push(tube([[s * 0.12, -0.2, z], [s * 0.3, -0.3, z + 0.04], [s * 0.34, -0.55, z + 0.08 - i * 0.04]], 0.028, 0.016, LEG, 0, false, 8, 5));
   }
-  return merge([colored(thorax, '#ffffff'), ...rings, ...legs]);
+  return merge([colored(thorax, '#ffffff'), ...rings, ...fixed]);
+}
+
+/** A moonmoth in stone, settled, its wings half raised (the shrine the third ring becomes): position and normal, feet at y = 0, facing +z. */
+export function moonmothStatue(): THREE.BufferGeometry {
+  const pos: number[] = [], nor: number[] = [];
+  const m = new THREE.Matrix4(), n3 = new THREE.Matrix3(), v = new THREE.Vector3();
+  const add = (g: THREE.BufferGeometry, at: THREE.Matrix4) => {
+    const flat = g.index ? g.toNonIndexed() : g;
+    const p = flat.getAttribute('position'), n = flat.getAttribute('normal');
+    n3.getNormalMatrix(at);
+    for (let i = 0; i < p.count; i++) {
+      v.fromBufferAttribute(p, i).applyMatrix4(at);
+      pos.push(v.x, v.y, v.z);
+      v.fromBufferAttribute(n, i).applyMatrix3(n3).normalize();
+      nor.push(v.x, v.y, v.z);
+    }
+  };
+  const body = new THREE.Matrix4().makeTranslation(0, 0.58, 0);
+  add(bodyGeometry(true), body);
+  add(headGeometry(), body.clone().multiply(m.makeTranslation(0, 0.04, 0.46)));
+  // (Thin sheets: both faces, so the stone has two sides.)
+  const W: [boolean, boolean, number, number, number, number][] = [[false, false, 0.16, 0.12, 0.2, 0.42], [false, true, -0.16, 0.12, 0.2, -0.42], [true, false, 0.14, 0.08, -0.06, 0.32], [true, true, -0.14, 0.08, -0.06, -0.32]];
+  for (const [hind, mirror, x, y, z, up] of W) {
+    const at = body.clone().multiply(m.makeTranslation(x, y, z)).multiply(new THREE.Matrix4().makeRotationZ(up));
+    add(wingGeometry(hind, mirror), at);
+    add(wingGeometry(hind, mirror).scale(1, -1, 1), at.clone().multiply(m.makeTranslation(0, -0.03, 0)));
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  g.setAttribute('normal', new THREE.Float32BufferAttribute(nor, 3));
+  g.computeVertexNormals();
+  return g;
 }
 
 export class Moonmoth extends Beast {
-  private bodyB: PartBatch; private headB: PartBatch; private wingB: PartBatch[]; private saddleB: PartBatch; private collarB: PartBatch;
+  private bodyB: PartBatch; private thighB: PartBatch; private shinB: PartBatch; private headB: PartBatch; private wingB: PartBatch[]; private saddleB: PartBatch; private collarB: PartBatch;
 
   constructor() {
     super({
@@ -116,6 +159,8 @@ export class Moonmoth extends Beast {
     });
     const look = { keep: 0.6, softCrease: 0.7 };
     this.bodyB = this.batch(bodyGeometry(), look);
+    this.thighB = this.batch(thighGeometry(), look, 6);
+    this.shinB = this.batch(shinGeometry(), look, 6);
     this.headB = this.batch(headGeometry(), { ...look, eyeOrigin: CRANIUM.clone(), eyePos: [0.62, 0.05], eyeSize: [0.34, 0.34], pupil: [0.2, 0.22], lookRange: [0.08, 0.06] });
     const wl = { ...look, doubleSide: true };
     this.wingB = [this.batch(wingGeometry(false, false), wl), this.batch(wingGeometry(false, true), wl), this.batch(wingGeometry(true, false), wl), this.batch(wingGeometry(true, true), wl)];
@@ -130,6 +175,11 @@ export class Moonmoth extends Beast {
     this.draw(d, this.headB, d.head, { eye: true });
     const W: [string, number, number, number, number][] = [['fL', 0, 0.16, 0.12, 0.2], ['fR', 1, -0.16, 0.12, 0.2], ['hL', 2, 0.14, 0.08, -0.06], ['hR', 3, -0.14, 0.08, -0.06]];
     for (const [n, b, x, y, z] of W) this.draw(d, this.wingB[b], this.node(d, n, d.body, x, y, z));
+    LEGS.forEach((L, k) => {
+      const hip = this.node(d, `hip${k}`, d.body, L.s * 0.12, -0.2, L.z);
+      this.draw(d, this.thighB, hip);
+      this.draw(d, this.shinB, this.node(d, `knee${k}`, hip, THIGH[0], THIGH[1], 0));
+    });
     d.head.add(d.collar);
     d.collar.position.set(0, -0.02, -0.1);
     this.draw(d, this.collarB, d.collar, { tint: false, when: 2 });
@@ -150,17 +200,36 @@ export class Moonmoth extends Beast {
     const beat = Math.sin(d.s.flap * Math.PI * 2);
     let up = flying ? 0.2 + beat * lerp(0.75, 0.15, glide) : -0.08 + Math.sin(t * 0.8) * 0.1 * (1 - rest * 0.5);
     if (a.joy > 0) up = 0.4 + Math.sin(t * 12) * 0.5;
+    // Walking, they're held half up off the ground and shiver with each step.
+    const walk = flying ? 0 : a.moving;
+    const step = a.cyc * Math.PI * 2;
+    up += walk * (0.3 + Math.sin(step * 2) * 0.06);
     const sweep = flying ? -beat * 0.12 : 0.05;
     d.n.fL.rotation.set(0, sweep, up);
     d.n.fR.rotation.set(0, -sweep, -up);
     d.n.hL.rotation.set(0, sweep * 0.5 - 0.15, up * 0.85 - 0.05);
     d.n.hR.rotation.set(0, -sweep * 0.5 + 0.15, -up * 0.85 + 0.05);
     // The body rises and falls against each beat; tips into its turns.
-    const bob = flying ? -beat * 0.12 : 0;
+    // Legs: an insect's walk, three feet down at a time (fore and hind of one
+    // side with the middle of the other); tucked up under her in the air.
+    const tuck = a.air;
+    LEGS.forEach((L, k) => {
+      const [back, raise] = swing(frac(a.cyc + ((k + (L.s > 0 ? 0 : 1)) % 2) * 0.5), 0.6, 0.5, 1);
+      const fwd = lerp(L.fwd - back * walk, L.fwd * 0.4, tuck);
+      const lift = raise * 0.4 * walk;
+      // (Thigh along +x: the right side's are turned right round.)
+      d.n[`hip${k}`].rotation.set(0, L.s > 0 ? -fwd : Math.PI + fwd, lift * (1 - tuck) - 0.35 * tuck);
+      d.n[`knee${k}`].rotation.set(0, 0, -lift * 0.5 * (1 - tuck) - 1.3 * tuck);
+    });
+    const bob = flying ? -beat * 0.12 : Math.abs(Math.sin(step)) * 0.025 * walk;
     const pitch = d.pitch.step(flying ? clamp(-a.vy * 0.05, -0.35, 0.35) - a.speed * 0.012 : -a.slope * 0.8, 20, 7, a.dt);
     d.body.position.y += bob;
-    d.body.rotation.set(pitch, 0, flying ? a.bank * 1.6 : 0);
-    d.head.rotation.set(-0.1 + (flying ? 0 : 0.15), a.lookYaw * 0.6, Math.sin(t * 0.6) * 0.1 * a.alert);
+    // (Clinging to a rock face, head up, wings spread against it: `s.hang`, 0..1. Whoever has put her there says so.)
+    const hang = d.s.hang ?? 0;
+    // (On foot she waddles: a little roll and yaw onto each tripod.)
+    const waddle = Math.sin(step) * walk;
+    d.body.rotation.set(pitch * (1 - hang) - (Math.PI / 2) * hang, waddle * 0.05, flying ? a.bank * 1.6 : waddle * 0.04);
+    d.head.rotation.set(-0.1 + (flying ? 0 : 0.15), a.lookYaw * 0.6 - waddle * 0.05, Math.sin(t * 0.6) * 0.1 * a.alert);
     d.s.lids = rest > 0.5 ? 0.35 : undefined;
   }
 }

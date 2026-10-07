@@ -3,14 +3,15 @@ import { Beast, clamp, collarGeometry, LEG4, lerp, saddleGeometry, type Anim, ty
 import type { PartBatch } from './parts';
 import { colored, ellipsoid, furBall, hoof, lathe, limb, merge, sculpt, smooth } from './shapes';
 import type { Mob } from './types';
+import { PHASE_IN } from '../player/movement';
 
 // The glimmer: something between a fox and a cat, slim and long-legged,
 // with a coat the colour of dusk, a plume of a tail and great pointed ears.
 // Pale spots down its spine, the insides of its ears and the tip of its tail
 // shine softly (brightly after dark). It lives in the glimmerwood, and
 // comes out into any forest at night. Ridden, it's quick and nimble, and
-// Space sends it glimmering a few metres straight through whatever's in the
-// way: trunks, fences, cabin walls.
+// Space is a blink: gone where it stood, and back a few metres on, straight
+// through whatever's in the way: trunks, fences, cabin walls.
 
 const SHINE = '#c4f3ff';
 const PALE = '#eeeaf8';
@@ -143,6 +144,17 @@ export function glimmerStatue(): THREE.BufferGeometry {
   return g;
 }
 
+/** Seconds she takes to fill out again after a blink. */
+export const BLINK_IN = 0.3;
+/** Back from a blink, 0..1 through it: [how wide, how tall] against her own shape. A sliver of light that opens into her, a touch past and back. */
+export function blinkIn(k: number): [number, number] {
+  const u = k - 1;
+  return [Math.max(0.03, 1 + 2.4 * u * u * u + 1.4 * u * u), 1 + 0.7 * u * u];
+}
+const LIT = new THREE.Color('#d9f7ff');
+const coat = new THREE.Color();
+const tv = new THREE.Vector3();
+
 export class Glimmer extends Beast {
   private bodyB: PartBatch; private neckB: PartBatch; private headB: PartBatch; private earB: PartBatch; private tailB: PartBatch;
   private legB: PartBatch[]; private saddleB: PartBatch; private collarB: PartBatch;
@@ -205,6 +217,16 @@ export class Glimmer extends Beast {
     return this.legFeet(d.s.legs as LegSet);
   }
 
+  /** Just back from a blink she's pale as her own light, and takes her coat again as she fills out. */
+  emit(m: Mob, dist: number) {
+    const back = (m.data as BeastData).s.back as number | undefined;
+    if (back === undefined) return super.emit(m, dist);
+    coat.copy(m.tint);
+    m.tint.lerp(LIT, 1 - (back / BLINK_IN) ** 2);
+    super.emit(m, dist);
+    m.tint.copy(coat);
+  }
+
   protected pose(m: Mob, d: BeastData, a: Anim) {
     const t = a.t;
     const g = this.gaitMix(d, a, 3, 9);
@@ -213,11 +235,17 @@ export class Glimmer extends Beast {
     const pitch = d.pitch.step(-a.slope + g.rock - a.joy * 0.25 + (a.caught ? Math.max(0, Math.sin(m.stateT * 5)) * 0.3 : 0), 60, 12, a.dt) + (a.air > 0.5 ? clamp(-a.vy * 0.04, -0.3, 0.3) : 0);
     d.body.position.y += g.bounce + a.air * 0.05 - a.graze * 0.06 + a.joy * 0.15;
     d.body.rotation.set(pitch, 0, a.bank);
-    // Phasing: stretched thin (eased in and out), and under a rider flickering in and out. By herself in the
-    // Veil Cave (`ghost`) she doesn't flicker: going through a veil in front of you it read as a fault.
+    // Phasing: stretched thin (eased in and out). Under a rider it's a blink: she's gone for most of it, then
+    // back out of a sliver of light, pale at first (`blinkIn`, `emit`). By herself in the Veil Cave (`ghost`)
+    // she's never gone: going through a veil in front of you it read as a fault.
     const stretch = (d.s.thin = ((d.s.thin as number) ?? 0) + ((phase > 0 ? 1 : 0) - ((d.s.thin as number) ?? 0)) * (1 - Math.exp(-16 * a.dt)));
     d.body.scale.set(1 - 0.2 * stretch, 1 - 0.15 * stretch, 1 + 0.35 * stretch);
-    d.hidden = (a.gs?.phase ?? 0) > 0 && Math.floor(t * 30) % 2 === 0;
+    d.hidden = (a.gs?.phase ?? 0) > PHASE_IN;
+    if (d.hidden) d.s.back = 0;
+    else if (d.s.back !== undefined && (d.s.back += a.dt) < BLINK_IN) {
+      const [w, tall] = blinkIn(d.s.back / BLINK_IN);
+      d.body.scale.multiply(tv.set(w, tall, w));
+    } else d.s.back = undefined;
     this.poseLegs(d.s.legs, a, g.offs, g.duty, g.sweep, g.flex, pitch);
     if (act && act.crouch > 0.01) {
       // Down on folded legs, the body let down between them.

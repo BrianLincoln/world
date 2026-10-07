@@ -1,12 +1,14 @@
 // The offering (dungeon 1, slice B): node scripts/offering.mjs <dir> [seed=hilda] [t=10] [sandbox] [play,reload,views]
 //   play:   in the story at the ring (?cp=ring), as if the light had just been taken: up on the rockhopper,
-//           the ring shutting into a shrine, the light going to it, and the whole of the crow and the
+//           the ring shutting into a shrine, you getting down and taking the light to it, and the whole of the crow and the
 //           giant, a shot every `every` seconds (every=1), W held throughout (it is a cutscene: nothing
 //           may move you). Exits 1 if a step failed.
 //   reload: a reload at each step (light held, light in the bowl, the giant has it): what a save finds.
 //   views:  the giant asleep beforehand, and from the saddle afterwards: the shrine, the giant from three sides.
 //   mouth:  the crow going into the giant's mouth, a shot every 0.2 s from the cutscene's own camera; and the open
 //           mouth from straight in front and from either side (is the hollow there, is anything in the way).
+//   claws:  the crow's feet as it takes the light, from beside it: a shot every 3 frames through the snatch (feet out
+//           ahead, then back under it with the light in them), then hanging with it and flying up with it.
 //   home:   what follows the smile (giant/homecoming.ts, slice C): a crow leaving the giant with a light, the cut
 //           to the village (the light set down, the spirit, the guide, the house tidied), the cut back, the giant
 //           getting up and walking off; then the walk to the second ring from where you sit and from above, it
@@ -24,7 +26,7 @@ const dir = args[0] ?? 'shots/offering';
 const arg = (k, d) => args.find((a) => a.startsWith(k + '='))?.slice(k.length + 1) ?? d;
 const seed = arg('seed', 'hilda'), hour = arg('t', ''), every = parseFloat(arg('every', '1'));
 const sandbox = args.includes('sandbox');
-const kinds = (args.find((a) => /^(play|reload|views|mouth|home)/.test(a)) ?? 'play').split(',');
+const kinds = (args.find((a) => /^(play|reload|views|mouth|claws|home)/.test(a)) ?? 'play').split(',');
 fs.mkdirSync(dir, { recursive: true });
 const server = http.createServer((req, res) => {
   const p = decodeURIComponent(new URL(req.url, 'http://x').pathname);
@@ -98,7 +100,8 @@ if (kinds.includes('play')) {
   for (let i = 0; i < 9 && (s = await state()).state === 'held'; i++) { await step(30); await shot(`o-00-up-${i}`); }
   const f = await untilPlaced();
   s = await state();
-  check('the ring shut, the shrine came up, and the light left for it by itself', f >= 0 && s.sealed && s.sealK >= 1 && s.state === 'placed' && s.mode === 'ride', JSON.stringify(s));
+  check('the ring shut, the shrine came up; you got down, walked to it by yourself, and the light left your mittens', f >= 0 && s.sealed && s.sealK >= 1 && s.state === 'placed' && s.mode === 'walk' && s.fromShrine < 3.3, JSON.stringify(s));
+  const p1 = await where();
   const cues = await run(() => window.__ow.offering().cues);
   console.log('cues', JSON.stringify(Object.fromEntries(Object.entries(cues).map(([k, v]) => [k, +v.toFixed(1)]))));
   let n = 0, moved = 0;
@@ -107,12 +110,13 @@ if (kinds.includes('play')) {
     s = await state();
     await shot(`o-${String(++n).padStart(2, '0')}-t${String(Math.round(s.clock < 0 ? t : s.clock)).padStart(2, '0')}`);
     const p = await where();
-    if (s.busy) moved = Math.max(moved, Math.hypot(p[0] - p0[0], p[2] - p0[2]));
+    if (s.busy) moved = Math.max(moved, Math.hypot(p[0] - p1[0], p[2] - p1[2]));
   }
-  check('hands off from coming up to the end', moved < 0.3, `moved ${moved.toFixed(2)} m with W held`);
+  void p0;
+  check('hands off from there to the end', moved < 0.3, `moved ${moved.toFixed(2)} m with W held`);
   s = await state();
   check('the giant has it: awake, its mouth shut again, smiling', s.state === 'given' && !s.busy && s.giant.awake && s.giant.mouth === 0 && s.giant.grin > 0.4, JSON.stringify(s));
-  check('still on the rockhopper at the end of it', s.mode === 'ride', s.mode);
+  check('on foot by the shrine at the end of it', s.mode === 'walk' && s.fromShrine < 3.3, s.mode);
   check('and it carries straight on: the homecoming has the camera', s.home?.state === 'playing', JSON.stringify(s.home));
   await keysUp();
   await shot('o-end');
@@ -125,7 +129,7 @@ if (kinds.includes('reload')) {
   await again();
   await run(() => { window.__ow.manual(true); window.__ow.advance(20); });
   let s = await state();
-  check('reload with the light held: by the shrine, mounted, ring shut', (s.state === 'held' || s.state === 'placed') && s.mode === 'ride' && s.sealed && s.fromShrine < 8, JSON.stringify(s));
+  check('reload with the light held: by the shrine (mounted, until you get down to offer it), ring shut', (s.state === 'held' || s.state === 'placed') && (s.mode === 'ride' || s.mode === 'walk') && s.sealed && s.fromShrine < 8, JSON.stringify(s));
   await shot('r-held');
   const f = await untilPlaced();
   await keysUp();
@@ -161,8 +165,8 @@ if (kinds.includes('home')) {
   /** Look at the giant from where you are, the orbit camera behind you. */
   const lookAtGiant = (dist = 14, pitch = 0.02) => run(([dist, pitch]) => { const ow = window.__ow, g = ow.giant(), b = ow._body.pos; ow.view(Math.atan2(b.x - g.centre.x, b.z - g.centre.z), pitch, dist); ow.advance(2); }, [dist, pitch]);
   await setup();
-  const p0 = await where();
   await untilPlaced();
+  const p0 = await where();
   const cues = await run(() => window.__ow.offering().cues);
   await step(Math.round((cues.end - 1.5) * 60));
   // The smile, and on. W is still held: nothing may move you until it hands you back.
@@ -184,7 +188,7 @@ if (kinds.includes('home')) {
   console.log(`the homecoming took ${secs.toFixed(0)} s from 1.5 s before the smile's end`);
   check('it ran through every part and handed you back', s.home.state === 'done' && (sandbox ? seen.has('rise') : ['leave', 'village', 'rise'].every((k) => seen.has(k))), [...seen].join(' '));
   check('hands off throughout', moved < 0.3, `moved ${moved.toFixed(2)} m with W held`);
-  check('still on the rockhopper', s.mode === 'ride', s.mode);
+  check('still on foot by the shrine', s.mode === 'walk', s.mode);
   let g = await giantNow();
   check('the giant is up, walking, and not solid', g.sunk < 0.05 && g.walking && !g.dormant && !g.solid, JSON.stringify(g));
   if (!sandbox) {
@@ -299,6 +303,25 @@ if (kinds.includes('views')) {
   // And from up close under the fist, where a player would go and look.
   await run(() => { const ow = window.__ow, g = ow.giant(), d = ow.gen().dungeon; const ux = g.centre.x - d.x, uz = g.centre.z - d.z, l = Math.hypot(ux, uz); ow.teleport(d.x + (ux / l) * (l - 42), d.z + (uz / l) * (l - 42)); ow.view(Math.atan2(-ux, -uz), -0.3, 16); ow.advance(40); });
   await shot('v-given-under');
+}
+if (kinds.includes('claws')) {
+  await setup();
+  await untilPlaced();
+  await keysUp();
+  const cues = await run(() => window.__ow.offering().cues);
+  const to = async (t) => { const c = (await state()).clock; if (c >= 0 && c < t) await step(Math.round((t - c) * 60)); };
+  // Beside the crow, a little ahead and below: side on to its legs.
+  await run(() => {
+    const o = window.__ow.offering(), b = o.crow.birds[0];
+    o._cine ??= o.cinematic;
+    o.cinematic = () => { const d = b.dir, l = Math.hypot(d.x, d.z) || 1, at = b.pos.clone(); at.y -= 0.8; const pos = at.clone(); pos.x += (-d.z / l) * 9 + (d.x / l) * 2; pos.z += (d.x / l) * 9 + (d.z / l) * 2; pos.y -= 0.3; return { pos, at, fov: 30 }; };
+  });
+  await to(cues.has - 0.9);
+  for (let i = 0; i < 26; i++) { await step(3); await shot(`c-${String(i).padStart(2, '0')}-t${((await state()).clock - cues.has).toFixed(2)}`); }
+  await to(cues.has + 2.5); await shot('c-hang');
+  await to(cues.fly + 1.2); await shot('c-fly-1');
+  await to(cues.fly + 2.6); await shot('c-fly-2');
+  await run(() => { const o = window.__ow.offering(); o.cinematic = o._cine; });
 }
 if (kinds.includes('mouth')) {
   await setup();

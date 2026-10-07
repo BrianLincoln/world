@@ -72,10 +72,8 @@ const ARM = 1.4;
 const STEP = 0.5;
 const TAKE_R = 1.9;
 const WAKE_R = 12, WAKE = 0.7;
-/** Taking the light: how long the gladness lasts (s) and when its hops come. */
-const WIN = 4.3, WIN_HOPS = [0.5, 1.35, 2.2];
-/** The way out, in seconds from the gladness's end: the cut to the well, the cut lifting, a breath before she's off, how far short of the veil she starts (m), and how long the cut takes to come down once she's through. */
-const OUT = { cut: 0.45, lift: 0.4, wait: 0.45, from: 20, veil: 0.35 };
+/** Taking the light: how long the gladness lasts (s), when its hops come, and how long the cut takes to come down at its end. */
+const WIN = 4.3, WIN_HOPS = [0.5, 1.35, 2.2], WIN_VEIL = 0.9;
 /** Waiting in a room with no veil led through (dev): how near you come, nothing between you, before she runs on (m). */
 const SEEN = 24;
 /** Her head out through the pocket's veil: how near you come before she comes out to you (m). */
@@ -92,6 +90,8 @@ const PEEKS: [string, string][] = [['E2', HIDE], ['E3', 'P'], ['E4', 'P'], ['W4'
  * on through these rooms as she did the first two; from the last she goes into the wall for the next of `PEEKS`.
  */
 const LAP_AT = 2, LAP = ['F', 'W4'];
+/** The room she waits in at the very end, a veil on from her last head out, and how near you come for her to be yours (m). */
+const LAST = 'W2', CATCH = 4.5;
 /** How fast she goes: leading you (and through a veil), and following once she's yours (m/s). You run at 6.2. */
 const PACE = { dash: 14, follow: 9 };
 /**
@@ -150,11 +150,6 @@ export class VeilCave {
   readonly lit: boolean[];
   readonly buildMs: { plan: number; mesh: number };
   private win = -1;
-  /** The way out, in seconds since the gladness ended (or -1). */
-  private exit = -1;
-  private exitFrom = new THREE.Vector3();
-  private exitDir = new THREE.Vector3();
-  private exitGone = 0;
   private heart = new Billboard(tex(bubbleCanvas('heart')), 1.05, 52);
   private cheer = 0;
   private root = new THREE.Group();
@@ -165,6 +160,8 @@ export class VeilCave {
   private arms: Arm[];
   private ember: THREE.Mesh;
   private emberAt = new THREE.Vector3();
+  /** How far the light has come to your mittens since you took it (0..1). */
+  private grip = 0;
   private time = 0;
   private camK = 1;
   private top: THREE.Vector3;
@@ -206,6 +203,8 @@ export class VeilCave {
   private peekN = 0;
   /** The rooms of the second lap she has still to lead you through (the first is where she's going, or is). */
   private lap: string[] = [];
+  /** She has stopped running: she waits in `LAST` to be walked up to. */
+  private last = false;
   /** What's left of her gladness at being yours (s). */
   private glad = 0;
   /** How long she has stood before it, and how long since she began to turn back to it (s). */
@@ -218,8 +217,6 @@ export class VeilCave {
   private scars: { at: THREE.Vector3; k: number; going: boolean }[] = [];
   /** How hidden from you she is (0..1): a veil between you, and the game still on. Her room is alight by it. */
   private hidden = 0;
-  /** Where the orbit camera should be put at once (a yaw), once: main takes it. */
-  snapYaw: number | null = null;
 
   constructor(site: DungeonSite, seed: number, groundY: number, private d: CaveDeps) {
     const turn = (Math.PI * 2) / 9;
@@ -302,7 +299,7 @@ export class VeilCave {
   /** The dungeon's creature, for whoever asks which (main). */
   get creature() { return this.she; }
   /** She has offered her back: E by her gets you on. */
-  get mountable() { return this.round >= 3 && this.exit < 0 && this.glad <= 0; }
+  get mountable() { return this.round >= 3 && this.glad <= 0; }
 
   /** The cave's light and rock, into the shared uniforms (every frame you're inside). As dungeon 1's, with her light added. */
   applyLight(cam: THREE.Vector3) {
@@ -515,6 +512,7 @@ export class VeilCave {
     this.peekAt = null;
     this.peekN = 0;
     this.lap = [];
+    this.last = false;
     this.waiting = false;
     this.forget(true);
     m.stabled = this.round >= 3;
@@ -672,7 +670,7 @@ export class VeilCave {
     const far = Math.hypot(px - hx, pz - hz), level = Math.abs(b.pos.y - m.pos.y) < 3;
     /** Nothing between the two of you but air. */
     const clear = () => !L.firstVeil(px, pz, hx, hz);
-    const held = !!this.seq || this.win >= 0 || this.exit >= 0;
+    const held = !!this.seq || this.win >= 0;
     const face = (x: number, z: number, rate = 6) => { const yaw = this.yawOf(x - hx, z - hz); m.heading += Math.atan2(Math.sin(yaw - m.heading), Math.cos(yaw - m.heading)) * (1 - Math.exp(-rate * dt)); };
     data.lookAt = far < 45 ? b.pos : null;
     this.playT += dt;
@@ -766,6 +764,12 @@ export class VeilCave {
           this.send(x, z, 'hide');
           break;
         }
+        // The end of it: she stands and waits, her tail going, and this time lets you walk right up to her.
+        if (this.last) {
+          act.twitch = 0.7;
+          if (far < CATCH && level && clear()) { this.round = 3; this.save(); this.forget(); this.play = 'yours'; this.playT = 0; this.stall = 0; this.offer(); }
+          break;
+        }
         // The second lap: the same in each of its rooms; and from the last of them, into the wall of the shut cell beside it.
         const here = L.cell(L.cellAt(hx, hz));
         if (this.round === 2 && this.lap.length && here && here.ring >= 0) {
@@ -839,12 +843,15 @@ export class VeilCave {
           break;
         }
         if (this.playT > 1.6 && far < PEEK_R && !held) {
-          this.round = 3;
-          this.save();
+          // The last time: out of the wall by you and through one more veil; and in the room beyond she doesn't
+          // run. She is there in the middle of it, waiting for you.
+          this.last = true;
+          const ox = a.x + a.v.nx * a.out * 4.4, oz = a.z + a.v.nz * a.out * 4.4, [tx, tz] = L.at[LAST];
           this.forget();
-          this.path = [[a.x + a.v.nx * a.out * 4.4, a.z + a.v.nz * a.out * 4.4]];
-          this.then = 'yours';
-          this.play = 'go';
+          this.send(tx, tz, 'hide');
+          this.path = [[ox, oz], ...L.route(ox, oz, tx, tz, true).slice(1)];
+          this.voice('glad');
+          this.d.glow(v.copy(m.pos).setY(m.pos.y + 1.5), 9, 0.12, 2.2);
         }
         break;
       }
@@ -902,7 +909,7 @@ export class VeilCave {
     this.wake += ((on ? 1 : 0) - this.wake) * (1 - Math.exp(-4 * dt));
     VEIL_U.uWake.value.set(b.pos.x, b.pos.y + 1.2, b.pos.z, this.wake);
     this.balk = Math.max(0, this.balk - dt);
-    if (!on || this.exit >= 0) return;
+    if (!on) return;
     const wx = Math.sin(b.heading), wz = Math.cos(b.heading), dx = wx * this.cos + wz * this.sin, dz = -wx * this.sin + wz * this.cos;
     if (gs.fx === 'phase') {
       // What's ahead of her: a veil (through it), open floor (a plain dash), or rock.
@@ -990,15 +997,26 @@ export class VeilCave {
     this.save();
   }
 
-  get busy() { return !!this.seq || this.win >= 0 || this.exit >= 0; }
+  get busy() { return !!this.seq || this.win >= 0; }
+
+  /** The light is yours to carry: in both mittens (1), or held up in them while you're glad of it (2). */
+  get carrying(): 0 | 1 | 2 { return !this.taken ? 0 : this.win >= 0 ? 2 : 1; }
+  /** Where your mittens are this frame (main, once the rig has moved): the light goes to them and stays. */
+  carryAt(p: THREE.Vector3) {
+    if (!this.taken) return;
+    // (Flaring, it's bigger: up on your mittens by as much, not down over your face.)
+    p.y += 0.2 * this.cheer;
+    this.emberAt.lerp(p, this.grip * this.grip);
+    this.root.worldToLocal(this.ember.position.copy(this.emberAt));
+  }
 
   /** Dev: what the camera and her poses are up to (the veils she has open and how wide their holes are, how far in the camera is drawn). */
-  get debug() { return { pass: this.pass.map((p) => ({ id: p.v.id, r: p.r, t: p.t })), camK: this.camK, pose: { ...this.pose }, stall: this.stall, stalls: this.stalls, waiting: this.waiting, glad: this.glad, lap: this.lap.length, heart: this.heart.alpha, peekN: this.peekN, peekCell: PEEKS[this.peekN][0], hidden: this.hidden, prints: this.trail.count, scars: this.scars.filter((o) => !o.going).length, win: this.win, exit: this.exit, balk: this.balk }; }
+  get debug() { return { pass: this.pass.map((p) => ({ id: p.v.id, r: p.r, t: p.t })), camK: this.camK, pose: { ...this.pose }, stall: this.stall, stalls: this.stalls, waiting: this.waiting, glad: this.glad, lap: this.lap.length, last: this.last, heart: this.heart.alpha, peekN: this.peekN, peekCell: PEEKS[this.peekN][0], hidden: this.hidden, prints: this.trail.count, scars: this.scars.filter((o) => !o.going).length, win: this.win, balk: this.balk }; }
 
   /** How much of the frame the flat veil of the cut covers (0..1). */
   get veil() {
     const s = this.seq;
-    if (this.exit >= 0) return Math.max(ss(this.exit, 0, OUT.cut) * (1 - ss(this.exit, OUT.cut + 0.05, OUT.cut + OUT.lift)), this.exitGone > 0 ? ss(this.exitGone, 0, OUT.veil) : 0);
+    if (this.win >= 0) return ss(this.win, WIN - WIN_VEIL, WIN - 0.1);
     if (!s) return 0;
     if (s.phase === 'lower') return 1 - ss(s.t, 0.05, 0.6);
     if (s.phase === 'lift') return ss(s.t / LIFT, 0.45, 1);
@@ -1009,7 +1027,6 @@ export class VeilCave {
   cinematic(): { pos: THREE.Vector3; at: THREE.Vector3 } | null {
     const s = this.seq, b = this.d.body.pos, L = this.layout;
     const c = Math.cos(L.door), n = Math.sin(L.door), side = Math.sign(n) || 1;
-    // (The way out has no camera of its own: the one behind you follows her through the veil, as on any dash.)
     if (!s || (s.phase !== 'lower' && s.phase !== 'letgo')) return null;
     return { pos: this.world(-11 * c + 3.2 * side * n, 1.7, -11 * n - 3.2 * side * c), at: new THREE.Vector3(b.x, b.y + 1.6, b.z).lerp(this.world(0, 3, 0), 0.25) };
   }
@@ -1027,7 +1044,7 @@ export class VeilCave {
     this.prev = [px, pz];
     this.ride(dt, mode, px, pz);
 
-    // The warm light: on its stone until you come to it, then at your shoulder.
+    // The warm light: on its stone until you come to it, then in your mittens.
     const rest = this.world(L.ember.x, L.ember.y + 0.06 * Math.sin(this.time * 1.7), L.ember.z);
     if (!this.taken && !this.seq && Math.hypot(b.pos.x - rest.x, b.pos.z - rest.z) < TAKE_R && Math.abs(b.pos.y + 1 - rest.y) < 3) {
       this.taken = true;
@@ -1039,6 +1056,7 @@ export class VeilCave {
       this.save();
     }
     // It's yours: the light flares, the lanterns brighten, she hops round three times with a heart over her.
+    // Then the cut, and the ring's arms lift you out on the surface, as from the first dungeon.
     if (this.win >= 0) {
       const t0 = this.win;
       this.win += dt;
@@ -1057,16 +1075,25 @@ export class VeilCave {
       this.heart.alpha += (show - this.heart.alpha) * (1 - Math.exp(-7 * dt));
       this.heart.scale = (0.6 + 0.4 * this.heart.alpha) * (1 + 0.12 * Math.sin(this.win * 6));
       this.heart.pos.set(b.pos.x, b.pos.y + (mode === 'ride' ? 3.7 : 2.8), b.pos.z);
-      if (this.win >= WIN) { this.win = -1; this.cheer = 0; this.heart.alpha = 0; this.exit = 0; this.exitGone = 0; }
+      if (this.win >= WIN) {
+        this.win = -1;
+        this.cheer = 0;
+        this.heart.alpha = 0;
+        this.d.gs.phase = 0;
+        this.inside = false;
+        this.hideArms();
+        this.pass.length = 0;
+        VEIL_U.uWake.value.w = 0;
+        VEIL_U.uHer.value.w = 0;
+        for (const h of [...VEIL_U.uHole.value, ...VEIL_U.uScar.value]) h.w = 0;
+        this.onWon?.();
+        return;
+      }
     }
-    // And out: a cut to the well, and she takes you across it and through the veil in its wall.
-    if (this.exit >= 0 && this.leave(dt, mode)) return;
 
-    if (this.taken) {
-      const up = mode === 'ride' ? 2.9 : 2.0;
-      rest.set(b.pos.x - Math.sin(b.heading) * 0.55 + Math.cos(b.heading) * 0.5, b.pos.y + up + 0.08 * Math.sin(this.time * 2.1), b.pos.z - Math.cos(b.heading) * 0.55 - Math.sin(b.heading) * 0.5);
-      this.emberAt.lerp(rest, 1 - Math.exp(-(this.seq || this.exit >= 0 ? 30 : 5) * dt));
-    } else this.emberAt.copy(rest);
+    // (Taken, it's in your mittens: `carryAt`, once the rig has moved.)
+    if (this.taken) this.grip = Math.min(1, this.grip + dt / 0.4);
+    else { this.grip = 0; this.emberAt.copy(rest); }
     this.root.worldToLocal(this.ember.position.copy(this.emberAt));
     this.ember.scale.setScalar((this.taken ? 0.6 : 1) * (1 + 0.07 * Math.sin(this.time * 4.1)) * (1 + 0.9 * this.cheer));
     for (let i = 0; i < this.lit.length; i++) {
@@ -1085,7 +1112,7 @@ export class VeilCave {
     if (off > ARM_R) this.armed = true;
     const on = DUNGEON_U.uMarkOn;
     on.value += ((this.armed ? 1 : 0) - on.value) * (1 - Math.exp(-4 * dt));
-    if (!this.seq && this.armed && mode === 'walk' && grounded && off < LIFT_R && this.exit < 0 && this.win < 0) {
+    if (!this.seq && this.armed && mode === 'walk' && grounded && off < LIFT_R && this.win < 0) {
       this.seq = { phase: 'reach', t: 0, from: b.pos.clone() };
       b.vel.set(0, 0, 0);
       this.d.sfx.sink(true);
@@ -1135,63 +1162,6 @@ export class VeilCave {
       const a2 = hand.clone().add(new THREE.Vector3(0, Math.min(len * 0.25, 3), 0));
       this.arms[k].set(sh, a1, a2, hand, 0.1 * ARM, 0.075 * ARM, 0.16 * ARM, -side, chest);
     }
-  }
-
-  /**
-   * The way out, hands off: under the cut you are put in the well on her
-   * back; she runs across it and straight through the veil in its far wall,
-   * and as she goes through the cut comes down again. True when it's over
-   * (main has you on the surface).
-   */
-  private leave(dt: number, mode: string): boolean {
-    const b = this.d.body, L = this.layout, gs = this.d.gs, m = this.she;
-    const t0 = this.exit;
-    this.exit += dt;
-    const q = L.veil('out'), mx = (q.ax + q.bx) / 2, mz = (q.az + q.bz) / 2;
-    if (t0 < OUT.cut && this.exit >= OUT.cut) {
-      // In the well, facing the way out. (Up on to her, if you walked the last few steps to the light.)
-      if (m && mode !== 'ride') { const [x, z] = this.local(b.pos.x, b.pos.z); this.put(x, z); this.d.mount(m); }
-      this.world(mx - q.nx * OUT.from, 0, mz - q.nz * OUT.from, this.exitFrom);
-      this.exitFrom.y = this.origin.y;
-      this.world(mx + q.nx, 0, mz + q.nz, v);
-      this.exitDir.set(v.x - this.exitFrom.x, 0, v.z - this.exitFrom.z).normalize();
-      b.pos.copy(this.exitFrom);
-      b.grounded = true;
-      b.heading = Math.atan2(this.exitDir.x, this.exitDir.z);
-      this.prev = null;
-      this.pass.length = 0;
-      this.camK = 1;
-      // The camera behind her, looking the way she's going.
-      this.snapYaw = b.heading + Math.PI;
-    }
-    if (this.exit < OUT.cut) { gs.speed = 0; b.vel.x = b.vel.z = 0; return false; }
-    // A breath; then off, faster and faster, and through.
-    const t = Math.max(0, this.exit - OUT.cut - OUT.lift - OUT.wait), run = t < 0.8 ? 13.5 * t * t : 13.5 * 0.64 + 21.6 * (t - 0.8);
-    const speed = t < 0.8 ? 27 * t : 21.6, gap = OUT.from - run;
-    b.pos.copy(this.exitFrom).addScaledVector(this.exitDir, run);
-    b.pos.y = this.floorAt(b.pos.x, b.pos.z);
-    b.heading = Math.atan2(this.exitDir.x, this.exitDir.z);
-    b.vel.set(this.exitDir.x * speed, 0, this.exitDir.z * speed);
-    b.grounded = true;
-    gs.speed = speed;
-    // (Glimmering from a few metres short of the veil.)
-    if (gap < 4.5) { if (gs.phase <= 0) this.d.glow(v.copy(b.pos).setY(b.pos.y + 1), 8, 0.12, 1.6); gs.phase = 0.2; }
-    if (gap < -1.5) this.exitGone += dt;
-    if (this.exitGone >= OUT.veil) {
-      this.exit = -1;
-      this.exitGone = 0;
-      gs.phase = 0;
-      gs.speed = 0;
-      this.inside = false;
-      this.hideArms();
-      this.pass.length = 0;
-      VEIL_U.uWake.value.w = 0;
-      VEIL_U.uHer.value.w = 0;
-      for (const h of [...VEIL_U.uHole.value, ...VEIL_U.uScar.value]) h.w = 0;
-      this.onWon?.();
-      return true;
-    }
-    return false;
   }
 
   dispose() {

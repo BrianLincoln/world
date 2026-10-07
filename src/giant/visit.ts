@@ -649,7 +649,10 @@ export class Visit {
           const to = v.spirits[i].pos;
           const down = i ? SNATCH.down : SNATCH.leadDown, go = this.takeAt(i) - down;
           if (passed(go)) stoop(i, v1.copy(to).setY(to.y + GRIP), down);
+          // (Feet first, as for anything it takes on the wing, and they stay down to what it has.)
+          fl.birds[i].fore = Birds.reach(t, go + down);
           if (passed(go + down)) {
+            fl.birds[i].holds = true;
             // Snatched: off the ground and away under the bird, as itself.
             v.take(i, fl.birds[i].grip);
             this.d.sound('snatch', i < SEEN_TAKEN ? 1 : 0.2);

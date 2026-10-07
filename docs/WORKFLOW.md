@@ -176,7 +176,8 @@ change goes through this loop:
   the two checkpoints in the story (a second spirit home); `home2` (add
   `sandbox` for outside the story) plays what follows the second smile, a
   frame a second (`h2-*`: look at them), walks the giant to the third ring
-  and reloads; `arrive` walks
+  and reloads (`scripts/moth.mjs <dir> home3` is the same after the third:
+  `h3-*`, to the fourth ring); `arrive` walks
   the giant to the second ring the real way and sees it open; `perf` (add
   `uncapped`) is frame cost in seven places. Its bot is `window.__bot`
   (`walk('E3')` goes round the ring by the gaps, `dash('E3', 'P')` rides at

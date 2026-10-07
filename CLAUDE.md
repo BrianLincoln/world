@@ -17,7 +17,19 @@ count.** Keep this file lean. Depth lives in:
   **not yet played by the owner**: `docs/NEXT-dungeon2.md` has what it is,
   the defaults taken and the questions to answer after playing it. After
   it a second spirit is flown home and the giant walks on to a third ring
-  (2026-10-06): bare stones, nothing under it yet. Dungeon 3 is not designed.
+  (2026-10-06), which opens when it lies down. Dungeon 3, the Moon Hall (its
+  creature the moonmoth), is built under it (2026-10-07) and **played by the
+  owner only in its first rough form**: `docs/NEXT-dungeon3.md`. After its
+  offering a third spirit is flown home and the giant walks on to a fourth
+  ring (2026-10-07) and lies down. That ring is bare stones: dungeon 4
+  isn't built, and the trail ends there.
+  **The open world is changing too** (2026-10-07) to "The cold country":
+  the land is cold (pale, fogged, empty) until you light beacon towers
+  with sparks, and each warms a swath; a tower rises from each won
+  dungeon's ring; the giant is a tower whose light went out; the lasso
+  comes much later. Decided, not built: `docs/ROADMAP-openworld.md` (all
+  of it, and what was tried and left), `docs/NEXT-warmth.md` (what to
+  build first: a mock of the look).
   No combat, no text. Spooky is fine where the story wants it (the
   giant's crows); nothing gory or cruel.
 - `docs/BRIEF.md`: the original request, verbatim, plus how to read `/inspo`.
@@ -67,6 +79,7 @@ npm run shots    # build + headless GPU screenshots -> shots/   (look at them!)
   `floof.ts`, `crow.ts`, `stelk.ts` (geometry + brain + animation per species),
   `beast.ts` (shared brain/body for the eleven wilder kinds in `beasts.ts`;
   their ride traits are `MountTrait` in `movement.ts`),
+  the glimmer's phase is a blink (gone, then back a few metres on; looks only, the body runs the whole way: `PHASE_IN`, `blinkWork` in main; check with `scripts/blink.mjs <dir>`),
   `parts.ts` (instanced part batches, fur), `rope.ts`.
 - `src/vehicles/`: bicycles. `bicycle.ts` (geometry, instanced parts,
   skeleton), `bikes.ts` (seeded placement, parking, riding presentation,
@@ -104,10 +117,13 @@ npm run shots    # build + headless GPU screenshots -> shots/   (look at them!)
   Just after the village bolts every wild creature about runs or flies off for good (`Mobs.scare`, each species' `bolt`; check with `scripts/visit.mjs <dir> tower mobs fine`).
   `ring.ts`: the dungeon ring once open (forcefield, dark spirit, the two
   arms that pull you down and lift you back out), and shutting for good
-  (`seal`).
+  (`seal`). The field has no mesh: the ground's shader paints it (`FIELD_U`,
+  `uField` in `TERRAIN_FRAG`; tufts under it are hidden in `trodden`), so it
+  is opaque and no ground can stand above it. Check with `scripts/ring-field.mjs <dir>`.
   `offering.ts`: what becomes of the dungeon's light above ground, a
-  cutscene with your hands off (the shrine the ring becomes, the crow that
-  takes the light and flies into the giant's open mouth: the whole
+  cutscene with your hands off (the shrine the ring becomes; you get down,
+  walk to it and hold the light up, `approach`; the crow that swoops through,
+  takes the light on the wing and flies into the giant's open mouth: the whole
   sequence and its camera are the table `T` and `cinematic()`; saved as
   `embla.offer1.<seed>`). No guide in it. The giant's side of it is
   `awake` / `mouth` / `gulp` / `grin` / `look` in `giant.ts`; its open
@@ -120,7 +136,9 @@ npm run shots    # build + headless GPU screenshots -> shots/   (look at them!)
   `homecoming.ts`: what follows the smile, still hands off (a crow leaves
   with a light; the camera cuts to the guide's cabin under a veil and
   waits for `terrain.busy`; the crow drops the light, it lands in dust and
-  is the spirit, `Village.comeHome`; the two meet; its house is left a wreck, step 0;
+  is the spirit, `Village.comeHome`; the two meet, and everyone home already is in the yard cheering,
+  `crowd` / `Village.attend`; that crow never goes back to the giant, `Birds.leave`: crows on it = spirits
+  still to save; its house is left a wreck, step 0;
   the cut back; `Giant.rise` (it stands up: `UP`),
   and the walk to the second ring, `onwardRoute` in `visit.ts`). Saved as
   `embla.home1.<seed>` once the spirit is home; a reload after that
@@ -130,7 +148,10 @@ npm run shots    # build + headless GPU screenshots -> shots/   (look at them!)
   There are two of them: `homecoming2` in main is the same class after
   dungeon 2's offering (`who: 1, leg: 2, name: 'home2'`: the second spirit
   taken, the walk from ring 2 to ring 3, its veil teal). Check with
-  `scripts/veil.mjs <dir> home2 [sandbox]`.
+  `scripts/veil.mjs <dir> home2 [sandbox]`. And `homecoming3` after dungeon
+  3's (`who: 2, leg: 3, name: 'home3'`: ring 3 to ring 4, its veil rose; no
+  `settledAt`, so nothing opens there). Check with
+  `scripts/moth.mjs <dir> home3 [sandbox]`.
 - `src/dungeon/`: dungeon 1 inside, its own scene, drawn instead of the
   world while `dungeon.inside` (main swaps the `WorldQuery` over to it).
   `layout.ts` (the cave's plan as functions of the seed, drawn at its top:
@@ -140,7 +161,8 @@ npm run shots    # build + headless GPU screenshots -> shots/   (look at them!)
   and what you do there: the wrong-way ledge, the stones, the rockfall, the
   shut-in rockhopper, the thought on the high stone of how the parachute is
   opened: `chuteHintCanvas`, check with `scripts/chute-hint.mjs <dir> [touch]`; the warm light: a dark light, violet, `darkLight.ts`;
-  orange is only ever a spirit). Its creature is a `Mob` with `below`,
+  orange is only ever a spirit; once taken it's in your mittens, here and in
+  the Veil Cave and up to the shrine: `Character.carry` / `hands`, `carryAt`). Its creature is a `Mob` with `below`,
   run through `Mobs.under`. Slices A and B of `docs/NEXT-dungeon1.md` are
   built (taking the light: a success beat, then out on the surface on the
   rockhopper: `leaveDungeon(true)`, `dungeonWon`, `bringUp` in main; the
@@ -148,6 +170,14 @@ npm run shots    # build + headless GPU screenshots -> shots/   (look at them!)
   `scripts/dungeon-plan.mjs` (the plan from above, what can reach what) and
   `scripts/dungeon.mjs <dir> quest` (plays it through by the keys, the
   offering included).
+  **Every dungeon ends the same way, from the light to the spirit home**
+  (owner, 2026-10-06/07, DESIGN.md "Dungeons"): one standard sequence, the
+  same code with only the creature, statue and colours swapped. Take the
+  light, the success beat on the spot, the cut, `onWon`, the ring's
+  `emerge` lifts you out with the creature (under you if you were riding
+  it when you took the light, `bringUp`; beside you if not, `standBy`),
+  then `Offering`, then `Homecoming`. No other way out, and no ending of a
+  dungeon's own unless the owner asks. (Dungeon 3 has no homecoming yet.)
   Dungeon 2, the Veil Cave, under the second ring (`ring2`, `cave`,
   `offering2` in main; `den()` is whichever dungeon you're in):
   `veilPlan.ts` (the plan, drawn at its top: a honeycomb of cells, rock
@@ -159,7 +189,7 @@ npm run shots    # build + headless GPU screenshots -> shots/   (look at them!)
   and the holes she opens; hide and seek: `playHer`, the glimmer a `puppet`
   mob: she runs veil to veil, looks back before each, waits in the room beyond till you're in its doorway, never comes back for you; two veils' ends, then into the shut cell `HIDE` and her head back out; `LEAD`;
   `pawTrail.ts` is her prints on the floor, `uScar` her mark in a veil,
-  `uHer` her room alight behind one; the way out). Veils are `VEIL_FRAG`. Saved as
+  `uHer` her room alight behind one; taking the light ends as dungeon 1's does: the cut, and `ring2.emerge` lifts you out). Veils are `VEIL_FRAG`. Saved as
   `embla.dungeon2.<seed>` (`round`, `taken`), its ending as `offer2`
   and `home2`. Its offering is dungeon 1's `Offering` with `OfferOpts`
   (`OFFER_SHORT`, a glimmer statue). Dev: `?dungeon=2[,x,z]`,
@@ -169,9 +199,49 @@ npm run shots    # build + headless GPU screenshots -> shots/   (look at them!)
   `scripts/veil.mjs <dir> quest,dash,stall,reload,story,arrive` (look at the
   `dash-*` frames for the camera). Build to your own folder and pass
   `DIST=<folder>`: other sessions rebuild `dist/`.
+  Dungeon 3, the Moon Hall, under the third ring (`ring3`, `hall`,
+  `offering3` in main): `mothPlan.ts` (the plan, drawn at its top: a long
+  way in with a bend, one great dark hall 130 m high, a ledge 50 m up with
+  a pulpit of rock standing out from it, a long tall gallery behind to the
+  light; a ring of eight moon pictures in the floor round a lamp, fixed,
+  the answer: `phaseAt`; four turning stones, `dials`; `wallCaps`), `mothShell.ts`
+  (moons as geometry: `moonGeometry` / `craterGeometry` take a phase of
+  eight; the stones' heads; the floor's pictures, `floorMoon`), `mothCave.ts` (`MoonHall`:
+  scene, collision with the walls' lean since you fly in it, turning a
+  stone: `action` / `act`; the lamp lighting and the moth's flight down:
+  `SHOW`, `cinematic()`; it ends as the other two do). The moth is a `puppet`
+  mob until she's yours; clinging to the pulpit is `d.s.hang` in
+  `moonmoth.ts`. Above ground she has `Mob.settle` (a flier that stays
+  down). Saved as `embla.dungeon3.<seed>`, its ending as `offer3` and `home3`. Dev:
+  `?dungeon=3[,x,z]`, `?fresh=1&cp=ring3` / `cp=offer3`, `__ow.hall()`
+  (`.debug`, `.debugSolve()`, `.debugYours()`), `__ow.winDungeon(3)`,
+  `__ow.secondDone()`; check a change with `scripts/moth.mjs <dir>
+  inside,quest,reload,story` (plays it through by the keys; a script that
+  steps frames must call `__ow.manual(true)` first, or every `advance`
+  leaves another frame loop running).
+  Dungeon 4, the Drop, under the fourth ring (`ring4`, `chasm`,
+  `offering4` in main; **a first rough form, not played through by the
+  owner, and nothing follows its offering yet**: `docs/NEXT-dungeon4.md`):
+  `dropPlan.ts` (the plan, drawn at its top: a cavern with a bottomless
+  pit straight across it, six pillars' tops down it and last a long ledge
+  along the foot of its far face, `tops`; the burrow and den the ledge
+  comes out of; `at` names its places), `dropShell.ts`, `dropCave.ts` (`DropCave`:
+  the way down on the parachute, a lantern waking on the top to land on
+  next, `target`; the wind that carries you back to the lip if you drop
+  past it: `caught`, `updraft`, which `GlideMode` follows through
+  `WorldQuery.updraft`; the dark below the lips, `uDarkY` / `uDarkAt` in
+  the dungeon shader; `Dust`; the wurm in the den, who goes out along the ledge
+  and straight up the cavern's far face through `climbTop`, and is held
+  back from the dark at every edge while ridden; her thought of it is
+  `climbHintCanvas`; the wind's sound is `Sfx.wind`). Saved as
+  `embla.dungeon4.<seed>`, its ending as `offer4`. Dev: `?dungeon=4[,x,z]`,
+  `?fresh=1&cp=ring4` / `cp=offer4`, `__ow.thirdDone()`, `__ow.chasm()`
+  (`.debug`, `.goTo(name)`, `.debugDown(n)`, `.debugYours()`),
+  `__ow.winDungeon(4)`; check a change with `scripts/drop.mjs <dir>
+  inside,quest,climb,story,offer`.
   `WorldGen.dungeons`: every dungeon's ring and the way to it, a list
-  (three so far, the third with nothing under it; `dungeon` is the first). Slow to find: found in order on
-  the main thread, cached per seed (`embla.dungeon.v9`; when the land moves, bump `WORLD_VERSION` in main, which wipes every save) and handed to
+  (four so far; `dungeon` is the first; nothing is under the fourth). Slow to find: found in order on
+  the main thread, cached per seed (`embla.dungeon.v10`; when the land moves, bump `WORLD_VERSION` in main, which wipes every save) and handed to
   the workers, which never search (`primeDungeon` in main). Adding one must
   not move the ones before it: `scripts/sites.mjs` prints a fingerprint.
   `src/world/hands.ts`: stone hands standing about the world on islands
@@ -185,7 +255,10 @@ npm run shots    # build + headless GPU screenshots -> shots/   (look at them!)
   and the dungeon. The giant's visit has three pieces of its own, played
   once each and cross-faded (`CUES`); which one is `Visit.music`, set by
   the visit's own events; check with `scripts/music.mjs [tower] [real]`.
-  Volume is `Ambience.gains.music` (`scene`: the visit's pieces, times that). On the `Sfx` context
+  The Moon Hall has four the same way (two of them loops; `CUES` is the table,
+  `MoonHall.music` says which, from the hall's own events); check with
+  `scripts/moth-music.mjs`.
+  Volume is `Ambience.gains.music` (`scene`: the visit's pieces, times that; `hall`: the Moon Hall's). On the `Sfx` context
   (`src/story/audio.ts`, the synthesised effects), its own gain. Files are
   `public/audio/*.mp3`, made from the WAV by `scripts/audio.mjs`.
 - `src/ui/debug.ts`: the panel and HUD. `towerDebug.ts`: tower sight lines

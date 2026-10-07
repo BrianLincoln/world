@@ -73,6 +73,17 @@ export const U = {
   uFocus: { value: new THREE.Vector3() },
 };
 
+/**
+ * A dungeon ring's forcefield (giant/ring.ts), painted by the ground's own
+ * shader so it lies on whatever ground is there: x, z, radius, how far open
+ * (0: none). Only one is ever open at a time.
+ */
+export const FIELD_U = {
+  uField: { value: new THREE.Vector4(0, 0, 1, 0) },
+  /** Where something stands on it (world x, z). */
+  uFieldStir: { value: new THREE.Vector2(1e6, 1e6) },
+};
+
 export const TERRAIN_U = {
   cMeadow: { value: col(BIOME.meadow) },
   cMeadowDark: { value: col(BIOME.meadowDark) },
@@ -99,6 +110,7 @@ export const TERRAIN_U = {
   cPrintWarm: { value: col('#f2a784') },
   cPrintEarth: { value: col('#a08268') },
   ...PRINT_U,
+  ...FIELD_U,
 };
 
 export const WATER_U = {
@@ -168,7 +180,7 @@ export const PROP_U = {
 /** Harvestable world props: which grid and which flag channel (see world/harvest.ts). */
 export interface HarvestOpt { grid: number; chan: 0 | 1 }
 function harvestU(h?: HarvestOpt, prints = false) {
-  return { uHarvest: { value: HARVEST_TEX }, uHarvestGrid: { value: h?.grid ?? 0 }, uHarvestChan: { value: h?.chan ?? 0 }, uPrintHide: { value: prints ? 1 : 0 }, ...PRINT_U };
+  return { uHarvest: { value: HARVEST_TEX }, uHarvestGrid: { value: h?.grid ?? 0 }, uHarvestChan: { value: h?.chan ?? 0 }, uPrintHide: { value: prints ? 1 : 0 }, ...PRINT_U, uField: FIELD_U.uField };
 }
 
 export function makePropMaterial(opts: { bend?: number; wind?: number; heightRef?: number; toneVar?: number; doubleSide?: boolean; flipBack?: boolean; cutaway?: 'near' | 'occluders'; harvest?: HarvestOpt; nearCut?: number;
@@ -328,6 +340,10 @@ export const DUNGEON_U = {
   uFeet: { value: new THREE.Vector3(0, -1e4, 0) },
   uMark: { value: 2.4 },
   uMarkOn: { value: 0 },
+  // (The Drop's dark: off unless a dungeon sets it. main puts it back each frame.)
+  uDarkY: { value: -1e9 },
+  cUnseen: { value: new THREE.Color(0, 0, 0) },
+  uDarkAt: { value: new THREE.Vector3(0, 0, 1e9) },
   // (The floor is a pale blue slate, the walls a darker violet: in the dark they were one tone, and
   // a ledge's face, which is wall, was the floor going on.)
   cFloor: { value: col('#b4c0ea') },
