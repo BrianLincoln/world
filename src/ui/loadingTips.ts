@@ -1,4 +1,4 @@
-import '@fontsource/im-fell-english/latin-400-italic.css';
+import '@fontsource/eb-garamond/latin-500-italic.css';
 
 // Tips on the loading veil, under the flame: one line each, turned over every few seconds.
 // The one place the game uses words (DESIGN.md, "Wordless": the owner's exception).
@@ -10,8 +10,8 @@ interface Tip {
 }
 
 /** Seconds a tip stays up. */
-const HOLD = 5;
-const FONT = 'italic 24px "IM Fell English"';
+const HOLD = 10;
+const FONT = 'italic 500 25px "EB Garamond"';
 
 /** Some save has got as far as writing a key that starts so: what a tip gives away is no longer news. */
 function saved(prefix: RegExp) {

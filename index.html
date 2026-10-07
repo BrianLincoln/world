@@ -18,9 +18,10 @@
       /* Tips (ui/loadingTips.ts): hung below the middle, so the flame doesn't move when they arrive. */
       #veil .tip {
         position: absolute; left: 50%; top: calc(50% + 64px); width: min(26em, 86vw); margin: 0; transform: translateX(-50%);
-        font: italic 24px/1.35 'IM Fell English', Georgia, serif; letter-spacing: 0.01em; opacity: 0; transition: opacity 0.4s ease;
+        font: italic 500 25px/1.35 'EB Garamond', Georgia, serif; letter-spacing: 0.01em; opacity: 0;
+        -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility; transition: opacity 0.4s ease;
       }
-      #veil .tip.on { opacity: 0.9; }
+      #veil .tip.on { opacity: 1; }
       @keyframes storyBreathe { 0%, 100% { transform: scale(0.92); opacity: 0.8; } 50% { transform: scale(1.06); opacity: 1; } }
     </style>
   </head>
