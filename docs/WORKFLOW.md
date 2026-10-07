@@ -1,4 +1,4 @@
-# Working on Fjellheim
+# Working on Embla
 
 ## The loop
 The brief says: don't call it done until you've *looked* at it. Every visual
@@ -76,6 +76,8 @@ change goes through this loop:
   flats, how much of the land near the start you can reach dry, lakes, forest),
   and with `png=` a map of each. Runs `worldgen.ts` in node, no build, about
   3 s a seed. Run it before and after anything that touches `baseHeight`.
+- `scripts/cabin-clear.mjs <seed> ...`: how near the giant's prints come to
+  your cabin (fails under `KEEP`, 10 m; 4 m for the print on a house).
 - `scripts/sites.mjs [map.png] <seed> ...`: the dungeon sites per seed
   (where, how far, the way's length, how long each search took), a
   fingerprint of the first site and of the visit's footfalls (neither may
@@ -108,6 +110,9 @@ change goes through this loop:
   `.debug('held'|'placed'|'given')`), `__ow.winDungeon()`.
 - Stone hands about the world: `__ow.hands().list` (found so far),
   `__ow.hands().survey(x, z, cells)` (look further at once; returns them).
+- `scripts/chute-hint.mjs <dir> [seed=..] [touch]`: the thought on dungeon
+  1's high stone (its four frames, the reminder in the air, gone once the
+  parachute is open); `touch` as a phone has it, jump button included.
 - `scripts/dungeon-plan.mjs <out.png> [seed=..]`: the plan from above (floor
   height, lanterns, stones, named places) and a flood fill of what you can
   reach on foot, past the stones, with the rockfall open, and mounted; the
@@ -148,7 +153,37 @@ change goes through this loop:
   `?lod3=0` turns the far shape off, `?lod3=512` starts it a node size later.
 - `scripts/dungeon.mjs` and `scripts/offering.mjs` serve `$DIST` if set
   (`DIST=dist-lod node scripts/dungeon.mjs ...`), so a session can test its
-  own build folder.
+  own build folder. So do `sites.mjs`, `dungeon-plan.mjs`, `veil.mjs` and
+  `veil-plan.mjs`. **Do this whenever another session may be working:**
+  they share this checkout and rebuild `dist/` under you (`npx vite build
+  --outDir dist-mine`).
+- `scripts/veil-plan.mjs <out.png> [seed=..]`: dungeon 2's plan (the Veil
+  Cave) from above, and proof that it holds: on foot (veils are walls) every
+  cell of the ring is reachable and the three middle cells, the light and
+  the way out are not; riding (veils open) everything is; no dash from
+  anywhere crosses two veils; a dash made square at a veil ends in open
+  floor. Prints the loop's length and exits 1 on a failure. Run it after
+  any change to `veilPlan.ts`, on a few seeds (the seed mirrors the plan).
+- `scripts/veil.mjs <dir> [seed=..] [inside,quest,dash,stall,reload,story,arrive,perf]`:
+  dungeon 2. `inside` is stills round the cave; `quest` **plays it through
+  by the keys** from the second ring (taken down; her three hides; a veil
+  tried on foot; Space at rock; the four veils of the ride; the last veil
+  and the light; the way out; the ending above), ok/FAIL per step; `dash`
+  draws every third frame of two dashes (one with the camera swung to one
+  side) and prints the camera's distance per frame and whether a veil ever
+  hid you: **look at the `dash-*` frames**; `stall` stands still and goes
+  the wrong way at each round; `reload` reloads at five stages; `story` is
+  the two checkpoints in the story (a second spirit home); `home2` (add
+  `sandbox` for outside the story) plays what follows the second smile, a
+  frame a second (`h2-*`: look at them), walks the giant to the third ring
+  and reloads; `arrive` walks
+  the giant to the second ring the real way and sees it open; `perf` (add
+  `uncapped`) is frame cost in seven places. Its bot is `window.__bot`
+  (`walk('E3')` goes round the ring by the gaps, `dash('E3', 'P')` rides at
+  a veil and presses Space, `mount()`). `__ow.cave()` is the cave (`.round`,
+  `.play`, `.she`, `.debugRound(n)`, `.debugYours()`, `.goTo(name)`,
+  `.debug`), `__ow.enterCave()`, `leaveCave()`, `winDungeon(2)`,
+  `firstDone()` (dungeon 1 behind you, as a save has it), `goToRing(1)`.
 - Perf with extra URL params: `Q='&mobs=0' node scripts/shots.mjs --no-build --only none --perf --uncapped`.
 
 ### Page hooks (`window.__ow`)
@@ -189,7 +224,9 @@ Story and life: `story=0|1` (it's off by default when `t`, `x` or
 `stable=<step>`, `cp=<id>` (with `fresh=1`: any checkpoint in `ui/checkpoints.ts`; the \` key shows a strip to step through them), `debug=1` (keep the panel during the story), `mobs=<density>`,
 `bikes=0`, `eyes=round`,
 `giant=<metres>[,walk]` (stand the giant in view, or walk it across),
-`dungeon=1` or `dungeon=<x>,<z>` (start inside dungeon 1, at a point of its plan).
+`dungeon=1` or `dungeon=<x>,<z>` (start inside dungeon 1, at a point of its plan),
+`dungeon=2` or `dungeon=2,<x>,<z>` (inside dungeon 2, the Veil Cave; dungeon 1 is made done first),
+`ride=<species>` (on a tame one of its kind where you stand).
 
 ## Debugging approach that worked
 When a frame looks wrong, bisect in the page rather than guessing:

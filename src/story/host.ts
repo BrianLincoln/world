@@ -1,11 +1,11 @@
 import * as THREE from 'three';
+import { loadingTips } from '../ui/loadingTips';
 import type { Environment } from '../gfx/environment';
 import type { PostPipeline } from '../gfx/post';
 import type { CharacterRig } from '../player/character';
 import type { Body } from '../player/movement';
 import type { WorldGen } from '../world/worldgen';
 import { Sfx } from './audio';
-import { iconCanvas } from './icons';
 import { OVERLAY_U } from './overlay';
 import { Story } from './story';
 import type { Colliders } from '../world/colliders';
@@ -36,22 +36,15 @@ export class StoryHost {
 
   constructor(private d: HostDeps, readonly active: boolean) {
     d.post.overlay = { scene: this.overlay, tND: OVERLAY_U.tND, uRes: OVERLAY_U.uRes };
-    if (active) {
-      // No words anywhere: the loading veil becomes a small breathing flame.
-      const veil = document.getElementById('veil');
-      if (veil) {
-        veil.innerHTML = '';
-        const img = document.createElement('img');
-        img.src = iconCanvas('flame').toDataURL();
-        img.alt = '';
-        img.style.cssText = 'width:72px;height:72px;animation:storyBreathe 1.6s ease-in-out infinite';
-        veil.appendChild(img);
-        const st = document.createElement('style');
-        st.textContent = '@keyframes storyBreathe{0%,100%{transform:scale(0.92);opacity:.8}50%{transform:scale(1.06);opacity:1}}';
-        document.head.appendChild(st);
-      }
-      document.getElementById('help')?.remove();
+    // No words anywhere in the story: the loading veil is index.html's breathing flame, and the
+    // controls line stays out. The sandbox gets its words back.
+    const veil = document.getElementById('veil');
+    if (active) document.getElementById('help')?.remove();
+    else {
+      if (veil) veil.innerHTML = '<div>Embla</div><span>unrolling the map…</span>';
+      document.getElementById('help')?.removeAttribute('hidden');
     }
+    if (veil) loadingTips(veil);
   }
 
   build(gen: WorldGen, seedText: string) {

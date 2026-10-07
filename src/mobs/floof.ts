@@ -206,6 +206,15 @@ export class Floof implements Species {
     return false;
   }
 
+  /** They turn tail and go, as fast as a floof goes, and higher. */
+  bolt(f: Flock, from: THREE.Vector3, _ctx: MobCtx) {
+    const fd = f.data;
+    const rnd = fd.rnd as () => number;
+    fd.ang = Math.atan2(f.centre.x - from.x, f.centre.z - from.z) + (rnd() - 0.5) * 0.6;
+    fd.speed = 11 + rnd() * 3;
+    for (const m of f.members) (m.data as FloofData).alt += 6 + rnd() * 8;
+  }
+
   initMob(m: Mob, i: number, f: Flock, ctx: MobCtx) {
     const r = m.rnd;
     const d: FloofData = {

@@ -418,6 +418,27 @@ export abstract class Beast implements Species {
     f.target.copy(at);
   }
 
+  /** The herd runs (or flies) from it (see `thinkFlock`: on and on, by whatever way is open). */
+  bolt(f: Flock, from: THREE.Vector3, ctx: MobCtx) {
+    const fd = f.data;
+    fd.mode = 'flee';
+    fd.from = from.clone();
+    fd.fleeT = 4;
+    fd.alarm = false;
+    f.target.copy(f.centre);
+    this.onward(f, ctx);
+  }
+
+  /** Running from the giant: the next stretch, away from it, over its own kind of ground if there is some. Walkers stop at water. */
+  private onward(f: Flock, ctx: MobCtx) {
+    const fd = f.data;
+    if (this.findSpot(ctx, f.centre, fd.from, fd.rnd, f.target, 60, 110, 8)) return;
+    const a = Math.atan2(f.centre.x - fd.from.x, f.centre.z - fd.from.z);
+    const x = f.centre.x + Math.sin(a) * 70, z = f.centre.z + Math.cos(a) * 70;
+    if (this.cfg.flier || ctx.surface(x, z) - ctx.gen.height(x, z) < 0.3) f.target.set(x, 0, z);
+    else { fd.gone = false; f.target.copy(f.centre); }
+  }
+
   initMob(m: Mob, _i: number, f: Flock, ctx: MobCtx) {
     const r = m.rnd;
     const o = () => new THREE.Object3D();
@@ -475,7 +496,7 @@ export abstract class Beast implements Species {
     for (const m of M) near = Math.min(near, Math.hypot(m.pos.x - player.pos.x, m.pos.z - player.pos.z));
     const fast = Math.hypot(player.vel.x, player.vel.z) > 7 || player.mode === 'ride';
     const scare = fast ? this.cfg.wary[1] : this.cfg.wary[0];
-    if (fd.alarm || near < scare) {
+    if (!fd.gone && (fd.alarm || near < scare)) {
       if (fd.mode !== 'flee') {
         fd.mode = 'flee';
         if (!this.findSpot(ctx, f.centre, player.pos, rnd, f.target, 50, 100, 8)) {
@@ -491,6 +512,7 @@ export abstract class Beast implements Species {
       tv.subVectors(f.target, f.centre).setY(0);
       const dist = tv.length();
       if (dist > 1) f.centre.addScaledVector(tv.normalize(), Math.min(dist, this.cfg.flee * dt));
+      if (fd.gone) { if (dist < 14) this.onward(f, ctx); if (fd.gone) return; }
       if (fd.fleeT < 0 && (dist < 6 || near > 45)) {
         fd.mode = 'graze';
         fd.spot.copy(f.centre);
@@ -520,7 +542,7 @@ export abstract class Beast implements Species {
 
   think(m: Mob, ctx: MobCtx, leashIndex: number) {
     const d = m.data as BeastData;
-    if (m.ridden) return;
+    if (m.ridden || m.puppet) return;
     const { dt, player } = ctx;
     d.lookAt = null;
     const toPlayer = Math.hypot(player.pos.x - m.pos.x, player.pos.z - m.pos.z);

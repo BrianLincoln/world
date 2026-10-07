@@ -1,4 +1,4 @@
-# Fjellheim — notes
+# Embla — notes
 
 > Decision log. The original brief is in `docs/BRIEF.md`; the working loop and gotchas are in `docs/WORKFLOW.md`; agent entry point is `CLAUDE.md`. The shared design doc (pillars, decided features, player sequence, open questions, parking lot) is `DESIGN.md`.
 
@@ -214,6 +214,7 @@ Bugs found only by looking at screenshots:
   - Adaptive quality: when frames run long it sheds resolution first
     (down to 70%), then terrain and prop detail (split factor and near-LOD
     distance), then more resolution.
+    (Desktop stops at 85% since 2026-10-06; see the end of this file.)
 - Chunk builds take 3–5 ms each in the workers.
 - Visible load: ~2.5–6 M triangles and 380–580 draw calls, depending on
   how much forest is in view.
@@ -768,7 +769,7 @@ camera.
 - **Clock:** each step drifts the time to its start hour, then runs naturally
   but never past the next step's hour, so dusk arrives only when the hearth
   is ready; the ending time-lapses into night.
-- **Save:** localStorage per seed (`fjellheim.story.<seed>`, v2: includes
+- **Save:** localStorage per seed (`embla.story.<seed>`, v2: includes
   tools and everything felled / smashed). The lit cabin is the respawn point.
   `?fresh=1` forgets, `?story=0` turns the story off (also off when the URL
   sets a time, position or flight, for shots).
@@ -1022,7 +1023,7 @@ The design is in `DESIGN.md` (our shared doc); this is the how and why.
   being set down, the lift is disarmed until you step 10 m away.
 - **Lighting**: on the capstone, the action badge shows the flame. The
   press plays the give gesture, a spark arcs into the crown, and the tower
-  catches. Lit towers are saved per seed (`fjellheim.towers.<seed>`,
+  catches. Lit towers are saved per seed (`embla.towers.<seed>`,
   cleared by `?fresh=1`).
 - **Bug found by the Phase 1 replay:** `Input.pressed()` consumes the press,
   and the tower check read E before the story did, so the chimney step never
@@ -1264,7 +1265,7 @@ asked for as far as possible). Everything below is a first pass for review.
 - **Stage 5, the journey** (`story/journey.ts`, data-light director; the
   story lends it the hearth spirit with `Story.lent`). Stages: gift → ride1 →
   lock1 → enter1 → ride2 → lock2 → enter2 → done, saved per seed
-  (`fjellheim.journey.<seed>`, cleared by `?fresh=1`). The paths are real
+  (`embla.journey.<seed>`, cleared by `?fresh=1`). The paths are real
   world footpaths (`WorldGen.journey`, drawn and kept clear of trees like any
   path): yard → the home tower's doorway, and on to the next tower (a
   neighbour of home, preferring one whose face looks back at home, nearest
@@ -1607,7 +1608,7 @@ asked for as far as possible). Everything below is a first pass for review.
   160 m of the pasture. Then, the first moment it's off screen or over 90 m
   away, it's back in the pasture. Tamed ones you never brought home go wild
   again once you're 500 m from them. The roster (species, tint) is saved as
-  `fjellheim.herd.<seed>` and adopted back into the pasture on load.
+  `embla.herd.<seed>` and adopted back into the pasture on load.
 - **Tally board:** on the stable's gate-side gable at eye height. There are
   20 carved grooves (four fives, the fifth struck across) and a cream mark
   is painted over each one per resident (a draw range over the painted
@@ -2384,7 +2385,7 @@ then open world, with the second guided ride scrapped.
   paths, so no bog pool or ravine opens under it.
 - **It is slow to find** (0.4 to 4.8 s; failed path searches are the
   cost), so the main thread finds it once per seed, keeps it in
-  localStorage (`fjellheim.dungeon.v1.<seed>`: bump the version if the
+  localStorage (`embla.dungeon.v1.<seed>`: bump the version if the
   search changes) and hands it to the chunk workers with each request
   (`ChunkRequest.dungeon`, `WorldGen.presetDungeon`). First load of a new
   seed stalls for that long.
@@ -2982,7 +2983,7 @@ becomes the mount the dungeon needs*, with one platforming beat:
   grotto's passage, each its own mesh so it can go. The swing is the
   tower lock's (`Dungeon.action` / `act`, the story's action badge via
   `story.external`; the sandbox lends a pick).
-- **Saved** per seed (`fjellheim.dungeon1.<seed>`: freed, taken);
+- **Saved** per seed (`embla.dungeon1.<seed>`: freed, taken);
   `?fresh=1` forgets it.
 - **Checked** (`scripts/dungeon.mjs <dir> quest`, `hilda`, scripted): the
   boulder breaks and the creature is freed; a ridden run at the ledge
@@ -3469,7 +3470,7 @@ ground it is a plump black shape that hops, which reads.
 - **Outside the story** (`story=0`, as the quest script runs) nothing has
   walked to the ring, so a giant is stood 66 m off on the way in, and
   there is no guide.
-- Saved as `fjellheim.offer1.<seed>`: `placed` or `given` (held is "the
+- Saved as `embla.offer1.<seed>`: `placed` or `given` (held is "the
   dungeon's light is taken and neither of those").
 
 ### Checked
@@ -3565,7 +3566,7 @@ way, save my people"), not frightened.
 - **Letting go:** you out of the village and 90 m from it and its spot: it
   walks home (no teleport) and is the house's again. Back in the village
   after being away, it does it again. Within 70 m of the ring is "found"
-  (saved as `fjellheim.journey.<seed>.ring`), and that's the end of it.
+  (saved as `embla.journey.<seed>.ring`), and that's the end of it.
 - **The brave face:** a new `mood`. `uBrow` on the part material cuts the
   top of each eye on a slant, low at the inner corner (all creatures share
   the shader; only the spirit sets it). Eyes wide under it, mouth a nearly
@@ -3624,7 +3625,7 @@ that's best".
   when no way reaches any candidate it now takes the most level, open,
   dry, low spot of the same sweep, with a straight line to 48 m short of
   it for a way, instead of "1.2 km toward the next tower, whatever is
-  there". The cache key is `fjellheim.dungeon.v6` so old answers are
+  there". The cache key is `embla.dungeon.v6` so old answers are
   thrown away. On such a seed the prints may cross ground you have to go
   round.
 - The owner's other answers are in `docs/NEXT-dungeon1.md` and
@@ -3912,7 +3913,7 @@ It carries straight on from the offering's last frame (`Offering.play` at
   way to it kept clear of trees and wild biomes like the first way. Stone
   hands keep off both rings.
 - Workers never search: they're handed the list. Cache key
-  `fjellheim.dungeon.v7.<seed>`, an array.
+  `embla.dungeon.v7.<seed>`, an array.
 - **Cost of the second search:** 0.3 to 1.9 s on the seeds tried (`hilda`
   0.28, `frost` 0.47, `bergen` 0.44, `42` 0.62, `hildaz2` 1.87). The
   first site's search is what it was: 0.8 s on `hilda`, 15 s on `42`
@@ -3989,7 +3990,7 @@ back up the way the giant came for a few hundred metres. Two things:
   first version put it squarely behind a standing stone on `hilda`.
 
 ### Saves
-`fjellheim.home1.<seed>` = `1`, set the moment the spirit is on its
+`embla.home1.<seed>` = `1`, set the moment the spirit is on its
 doorstep (outside the story: when the giant starts to rise).
 - Before that (the offering `given`, this not saved): a reload puts you by
   the shrine on the rockhopper and the homecoming plays from its start,
@@ -4198,7 +4199,7 @@ played by hand.
 - `nextSite`: the way on keeps 75 m off every tower. On `hildaz2` in the
   new land the giant trod on a tower's feet (three footfalls);
   `sites.mjs` caught it. The first way already did this for its own tower.
-- `primeDungeon`: cache key `fjellheim.dungeon.v8`.
+- `primeDungeon`: cache key `embla.dungeon.v8`.
 
 ### Measured (`scripts/water.mjs`: a 12 km square round the start, every 40 m)
 `water` is the share under sea level; `reach` is how much of the land within
@@ -4269,24 +4270,24 @@ integrated graphics. **Left as it is; the owner should decide** (below).
 ### Saves an old save now has wrong
 Everything is the seed's, and the seed's land moved. Nothing is migrated
 and no save version was bumped except the site cache.
-- `fjellheim.dungeon.v7.<seed>`: the sites. **Bumped to v8**, so found
+- `embla.dungeon.v7.<seed>`: the sites. **Bumped to v8**, so found
   again. (The old key is left behind in storage, unused.)
-- `fjellheim.story.<seed>`: `world` (the harvest: felled trees and smashed
+- `embla.story.<seed>`: `world` (the harvest: felled trees and smashed
   rocks by world cell: now holes in the forest where you never were, or
   nothing), `felled` / `smashed` (indices into the start site's own trees
   and stones: other trees now). Step, inventory and what is built are by
   id and still mean what they did, at the new site.
-- `fjellheim.towers.<seed>`: lit tower ids. The network is regrown, so the
+- `embla.towers.<seed>`: lit tower ids. The network is regrown, so the
   same ids are other towers, somewhere else.
-- `fjellheim.journey.<seed>` (and `.ring`): the stage names the second
+- `embla.journey.<seed>` (and `.ring`): the stage names the second
   tower and "found the ring": true of a tower and a ring that are now
   elsewhere.
-- `fjellheim.offer1.<seed>`, `fjellheim.home1.<seed>`,
-  `fjellheim.dungeon1.<seed>`: flags only; the prints, the giant's place,
+- `embla.offer1.<seed>`, `embla.home1.<seed>`,
+  `embla.dungeon1.<seed>`: flags only; the prints, the giant's place,
   the shrine and the mended house are worked out from the seed again, so
   they are consistent, in the new places. Not wrong, but not where you
   left them.
-- `fjellheim.herd.<seed>`: no positions. Fine.
+- `embla.herd.<seed>`: no positions. Fine.
 - Bicycles, stone hands, creatures: seeded, not saved. They moved.
 Simplest for a player: an old save keeps its story step and plays on in a
 different land. Whether to wipe instead is an open question.
@@ -4310,8 +4311,8 @@ different land. Whether to wipe instead is an open question.
 
 ### Less water: the owner's answers (2026-10-02)
 - 20% water: good. The coast and the thinner forest: fine so far.
-- **Old saves are wiped.** `WORLD_VERSION` in `main.ts` (`fjellheim.world`
-  in storage): when it differs, every `fjellheim.*` key of every seed is
+- **Old saves are wiped.** `WORLD_VERSION` in `main.ts` (`embla.world`
+  in storage): when it differs, every `embla.*` key of every seed is
   removed before anything reads one. Bump it with any change that moves the
   land (and the site cache key no longer needs its own bump for that, though
   it does for a change to the search). Dev keys (`ow.*`) are kept.
@@ -4613,3 +4614,642 @@ pass on hilda and 42 (they take `$DIST` now).
 - Felled trees and the giant's trodden trees are per instance in the
   vertex shader, so they hold on lod 3 by construction; not shot.
 - Still not measured on integrated graphics.
+
+### The giant and water: what's allowed (2026-10-02)
+
+Owner: "I don't mind if it goes through water on the way to the village
+initially, in fact it looks better when it emerges from the water. It's
+just that the character needs to be able to follow its path to the dungeons
+so it can't pass through deep water."
+
+- Checked after the cut in water: on 20 seeds no footfall from the village
+  to ring 1, or on to ring 2, is in water, and no site's way is a fallback.
+- The lead-in to the village (the ten or so steps before the first house)
+  is a straight line back out along the lane and is in a lake on about 3
+  seeds in 20 (`2`, `a`, `102`; up to 23 m deep). Left as it is, on purpose.
+- `scripts/sites.mjs` now tests heel, middle and toe of each sole, reports
+  `wadesVisit` (from the last house on) beside `wades` (the walk on), and
+  fails on either.
+- Also settled: the offering is good enough for now; the stone hands are no
+  longer tracked in the dungeon docs.
+
+## The send-off: in the middle of the trail, and not cross with you (2026-10-02)
+- **Where it stands:** it stood on the heel rim of one print, so off to one
+  side of the trail, pointing at a print of the same foot. Now
+  `Journey.trailEdge()` puts it halfway between the first two prints beyond
+  the houses (a left and the right after it: the middle of the trail) and
+  points it at the same midpoint three prints on, so the arm lies along the
+  trail.
+- **The brave face read as angry at you.** Two changes: the brow cut in
+  `PART_FRAG` is much lighter (0.38 of the eye, slant 0.14; was 0.8 and
+  0.55), and `uBrow` only goes on while it isn't looking at you. Down the
+  trail: set. Round to you, waving you on: eyes simply wide.
+- `scripts/sendoff.mjs` now shoots both faces (`face`, `toyou`) and the spot
+  from above (`above`).
+- **The walk out (same day):** it kept stopping: a turn-and-wave every 5 s
+  (`rally`) and a wait whenever you were 10 m behind, at 3.1 m/s. Now
+  `want.lag` (new, in `Want`) means "leading at a stride": no stops on the
+  way, and it only waits once you're that far behind (`SEND_LAG` 24 m; it
+  goes again at half that). Pace is `SEND_PACE` 5.4 m/s via `haste` (you run
+  at 6.2). The hop-point-wave is kept for when it's standing at the end.
+- **Down the middle of the trail:** `trailEdge().way` is the midpoints of
+  successive prints, from where the giant left the houses for good (among
+  them it doubled back; following that took 12 s longer and looked lost) to
+  the pointing spot. It joins at the nearest of them and `sendOff` feeds
+  them to `want.at` one at a time. `scripts/sendoff.mjs` prints the walk:
+  seed hilda, 34 s, 13 s to reach the trail, then within 0.9 m of its
+  middle, no stops.
+- **Prints go cold when the giant stops (2026-10-02):** warmth was only
+  "how many prints back from the newest", so the last nine glowed for good
+  beside a sleeping giant. Now the head runs on while it isn't walking
+  (`Prints.cool`, from `Trail.update`): the glow is gone about 6 s after it
+  stops, and the next print it makes is numbered from there, so it is warm
+  and the old ones stay cold. Print numbers are no longer list indices.
+  On a reload nothing has walked yet, so restored prints are cold at once.
+- **A bike at the trail (same day):** if you've come out to the pointing
+  spot on foot (not cycling, not on a creature: new dep `mounted()`), within
+  `SEND_BIKE` 12 m for 1.5 s, it conjures the gift bike again right there:
+  2 m to the side you're not on, pointing down the trail. Same `conjure()`
+  as the first gift, but no camera shot (hands stay on). `Bikes.place('gift')`
+  replaces the old one, so the one at the cabin (or wherever it was left) is
+  gone. Not if the gift bike already stands within 30 m. `tidyCabin` still
+  brings it back to the cabin spot when you next come home on foot.
+- **The trail shot (same day):** at the pointing spot, once the bike is made
+  (or isn't needed: you rode out, or it's already there), with you within
+  12 m and on the ground, `Journey.look` runs for `LOOK` 6.5 s: `busy` (so
+  controls freeze, as for the gift shot) and `cinematic()` returns
+  `trailShot()`: from 9 m behind the spirit and 4 m up to 55 m behind and
+  62 m up, looking down the trail, so the prints read as a line going off
+  across the country. Main eases in and back out. Once per load (`looked`),
+  not saved. `scripts/sendoff.mjs` shoots it (`shot1`, `shot2`).
+- **Shorter, and it doesn't wait (same day):** the walk was still a chore.
+  `TOWN_EDGE` 55 -> 20 m (the spot is the first clear pair of prints just
+  past the last house; the trail shot does the showing), and the walk is no
+  longer `lead`: it goes on ahead and hops at the spot until you turn up, by
+  whatever way you like. (With `lead` it measured "behind" against its next
+  waypoint, so cutting the corner made it stop for you.) If you stay in the
+  yard it comes back for you after `SEND_LEFT`, now 20 s (was 8). Seed
+  hilda: 25.5 s for it, about half of that getting to the trail.
+- **The spot, again (same day):** with `TOWN_EDGE` 20 the "first print past
+  the village" can still be among the houses, where the giant turned about
+  (seed troll: 25 m from the cabin, in trees, prints at all angles). Now
+  `trailEdge()` goes on from there to the first place the giant is simply
+  walking: three even strides (0.6 to 1.4 of the median), each print's
+  heading within 0.4 rad of the trail's, and no tree within 7 m of the
+  middle (new dep `trees()`). Checked from above on hilda, troll, 12345,
+  fjellheim (`shots/sendoff-<seed>/above.png`).
+- **From the middle of the village after all (same day, owner's call):** the
+  way now starts at the giant's nearest print to the cabin and follows the
+  middle of the trail the whole way, wanderings among the houses included;
+  the spirit joins at the nearest point of it. The end spot is unchanged.
+  Its walk: hilda 42.5 s (was 30), troll 29.5 s, 12345 14.5 s. It doesn't
+  wait for you, so the length costs you nothing unless you choose to follow.
+
+## The giant clears its whole trail (2026-10-02)
+- **Was:** only props under a sole (`soleSdf < 1`) went, so in a wood the
+  strip between its left and right prints kept its trees, and the middle of
+  the trail (where the send-off walks and stands) was forest. Seed hildaz3.
+- **Now:** each print clears a box: 1 m out past its outer edge, 13 m in
+  toward the other foot, 13 m ahead and behind (`CLEAR_*` in
+  `world/prints.ts`; the feet are about 29 m apart centre to centre and
+  21 m a stride, so the boxes meet). "In" is the side the previous print
+  was on (`Print.side`; none if there's no telling, then just the sole).
+- **How:** a second wrap-around texture, the clear mask (`CLEAR_TEX`, R8,
+  3 m texels, 2048 wide). The prop shaders' `trodden()` and
+  `colliders.skip` (`Prints.clears`) read it. First tried through the print
+  cells (wider sdf, then a box test per print): two prints a cell isn't
+  enough where the way in and the way out cross, trees survived. The mask
+  has no such limit.
+- **Never un-cleared:** `erase` (a plot mended) no longer brings back what
+  stood round that print.
+- Only trees under the sole lie there flattened, as before; the rest are
+  simply gone (flattening them all carpeted the trail).
+- The send-off spot also keeps off flattened trees (`Trail.littered`).
+- **The trail shot pans:** once up, the look-at runs on down the trail
+  (to the middle of it 12 prints on), so it tips up toward the horizon.
+  `LOOK` 8.5 s.
+- **No set face at the spot (2026-10-02):** `mood = 'brave'` only for the
+  walk out; once it's at the pointing spot the mood is cleared (its usual
+  face). Even the lighter brow read as "get out of here" when it stood
+  pointing.
+
+## 2026-10-02: the dungeon's light is a dark light
+What a dungeon keeps and the giant is fed is no longer orange: it is a dark
+light (`src/dungeon/darkLight.ts`: an ink heart with a violet rim, the ring's
+colours), so it can't be taken for a spirit's light. Orange now means a
+spirit and nothing else: the giant eats a violet one and gives back an orange
+one. The pool it throws in the cave, the glow in the giant's mouth and the
+Veil Cave's "amber" veil (`cAmber`) are violet to match; the `warm` / `cWarm`
+names in code are kept and now mean the dark light's. The lore of why is
+not decided. Not yet looked at in the Veil Cave.
+
+## Dungeon 2: the Veil Cave (2026-10-02)
+
+Built in one go from a brief agreed with the owner (design in DESIGN.md,
+"Dungeon 2's interior"). **Not yet played by the owner.** Plays through by
+the keys, start to finish, in `scripts/veil.mjs quest`. Another session was
+working in this checkout at the same time and changed the dungeons' light
+to the dark light (the section above) part way through: the frames looked
+at before about 15:17 had an amber veil, the ones after a violet one. Its
+edits to these files were left as they were.
+
+### The plan (`veilPlan.ts`; a diagram is at its top)
+- **A honeycomb.** Hexagonal cells 46 m across the flats, as overlapping
+  round rooms (r 27.5) in dungeon 1's SDF, so it is one cavern with waists.
+  A rock pier (r 4.2 to 5, part of the SDF) at every corner two cells
+  share: 24 of them. A veil on every shared edge, pier to pier: 28 in all.
+- **Ten cells make the ring** you walk (`RING`), three in a row down the
+  middle are shut (M2, M1, and P, the pocket). Round the ring each edge has
+  a short veil from one pier to a slim post half way, and a gap about 7 m
+  wide beside it; the gap is at the inner pier and the outer one by turns,
+  so the way weaves. The post is a `Solid`, not SDF: the shell's 1 m grid
+  can't draw a 1.3 m column.
+- The light's room opens off the first cell behind the last veil; the way
+  out is an alcove behind a veil in the well's wall, opposite the way on.
+- **Sizes come from the dash** (`DASH` 10.7 m: 0.42 s at 1.15 times her
+  sprint). No two veils are within a dash of each other along any line
+  that clears the piers (veils meet at 120 degrees at a pier, so a line
+  crossing two of them near it would pass through the pier). Nothing
+  solid stands within a dash of a veil. The light is 14 m past its veil,
+  so a dash through sets you down short of it.
+- **The checker proves it** (`scripts/veil-plan.mjs`): on foot the middle
+  cells, the pocket, the light and the way out are unreachable and all the
+  ring is reachable; riding, everything is; 153,816 dashes from a 2 m grid
+  in 24 directions, none crossing two veils; about 3,700 made square at a
+  veil (within 15 degrees, not in its last 2 m by a pier), none stopped by
+  rock. Wider of square or hard by a pier she can meet the pier on the far
+  side, which stops her like any rock (counted apart). Passed on `hilda`,
+  `42`, `frost`, `bergen`, `hildaz2` (both mirror sides).
+- **Lengths:** the loop is 470 m, 76 s at a run. From the well to where you
+  get her, by the east, is 222 m. The ride (pocket, middle, first cell,
+  light) is 208 m: about 23 s at her canter, 9 flat out. **The brief asked
+  for about four minutes on foot and twenty seconds riding.** The ride
+  fits; the loop is a third of that. Four minutes at a run is 1.5 km of
+  cave: a comb about three times as wide, or two rings deep. Not done:
+  it is the owner's call whether the walk should be that long.
+
+### Veils (`veilShell.ts`, `VEIL_FRAG`)
+- One mesh, a folded sheet per veil from under the floor to over the
+  ceiling, its ends in the rock. Two flat tones for its folds.
+- **Lit from behind is baked.** Per vertex, per side: what each steady
+  light near it (glowcap clumps, the dungeon's light, the daylight behind
+  the way out) would show on the other face: a patch that widens and
+  fades with how far behind the light is. In the shader it is two hard
+  bands, a pale heart in a halo, the edge wandering on noise. Baked rather
+  than read from the 16 nearest glows so that every veil in view has its
+  patch, however many there are.
+- **Glowcaps stand on one side of each veil only**, the far one (the shut
+  cell's; of two shut cells the one nearer the start; round the ring the
+  cell further round). With clumps on both sides the near one lit the veil
+  from in front and washed the patch out. A veil is also never lit from in
+  front past the middle tone: what shows through is the brightest it gets.
+- The patches' emissive is low (0.1 to 0.3): a patch is big and flat, and
+  at dungeon 1's lantern strength the bloom whited the whole thing out.
+- **Her lights** (`uShe`: ears, spine, tail tip) show through as three
+  small moving patches when she's behind one. **Ridden**, `uWake` runs
+  rings out across any veil within about 9 m. **A hole** (`uHole`, two
+  slots) is where she takes you through, and where her head pokes out.
+
+### The camera through a veil (`VeilCave.clampCamera`)
+The part most likely to feel bad, so it was built first and looked at a
+frame at a time (`scripts/veil.mjs dash`).
+- A veil stops the camera like rock, except one she has just taken you
+  through. That veil is open to it (`pass`) and has a hole in it, centred
+  where the camera's line to you crosses the veil, so the camera follows
+  at its own distance and passes through the hole. The hole shuts when the
+  camera is on your side.
+- Measured: over a dash the camera's distance stays within 9.3 to 10.6 m,
+  the biggest change in a frame is 0.08 m, a veil is between it and you
+  for about 25 frames and the hole is open (2 m, then 3.3 m) for every
+  one of them. Same with the camera swung 0.9 rad to one side.
+- Pull up just past a veil with the camera still behind it: after `LAG`
+  (1.1 s) the veil draws it through at a walk (rate 4.5, not the 14 rock
+  uses) and the hole shuts behind it. Checked.
+
+### Phase and rock
+- Outdoors a phasing glimmer passes everything but the towers
+  (`world.landmarks`). In the cave `landmarks` is `cave.collide(.., true)`:
+  rock, piers and what stands on the floor stop her; veils don't.
+- **Space at rock** (`VeilCave.ride`): the frame the dash starts, a ray
+  along her heading. Rock before any veil within a dash: the phase is
+  cancelled, her speed put back to what it was, 0.35 s before she can try
+  again, a shake of the head and two notes down (`Sfx.nope`). She brakes
+  to about a metre short of the rock.
+- A dash that ends inside a veil's thickness is pushed out to whichever
+  side she's nearer.
+
+### Hide and seek (`VeilCave.playHer`)
+- The glimmer is a `Mob` with `below` like dungeon 1's rockhopper, and
+  `puppet`: `Beast.think` leaves her alone and the cave drives her
+  (position along `VeilLayout.route`, which goes cell middle to cell
+  middle through the veils between; `ghost` for the flicker of a phase
+  with nobody on her; `GlimmerAct` in `BeastData.s.act` for crouch, head
+  down, tail twitch, head shake). All additive: a glimmer outdoors is
+  unchanged.
+- States: `watch`, `go`, `hide`, `fetch`, `show`, `found`, `peek`,
+  `yours`. `round` (0 to 3) is what's saved.
+- **Stalls.** Left unfound for 24 s (16 after the first time) she comes to
+  you by the comb's ways, stops about 7 m off, hops twice, then leads back
+  at 6.8 m/s (you run at 6.2). More than 17 m ahead she waits, hopping and
+  calling; left 11 s she comes back again. Walk up to her at any of these
+  and it counts. At round 3 a stall ends the game instead: she comes out
+  to you and offers her back, wherever you are.
+- **Yours:** more than 15 m away, or a veil between, and she follows.
+  Checked getting off her inside the pocket and on again.
+
+### The way out and the ending
+- After the gladness (4.3 s), under the cut you're put in the well on her;
+  she runs 20 m and through the veil in its wall; the cut comes down
+  0.35 s after she's through. About 3.2 s. The camera is the ordinary one
+  behind her (a fixed camera was tried first and lost her behind one of
+  the well's columns).
+- Above, `leaveCave(true)`: no arms; you're on her in the ring in a burst
+  of her light, and the ring seals.
+- **The ending is dungeon 1's `Offering` with options** (`OfferOpts`: a
+  save name, a statue, a timing). `OFFER_SHORT` is 16.3 s from the light
+  leaving you; with the ring sealing, 21 s from coming up (measured, in
+  1.5 s steps). Dungeon 1 passes no options and is as it was.
+- `secondHome()`: when the giant has the light, spirit 1 is put home and
+  its crow's light put down, unseen; saved as `embla.home2.<seed>`.
+- The second ring opens when `Homecoming` says the giant has settled
+  (`settledAt`), or at once on a save from after that.
+
+### Defaults taken (each the builder's choice or the brief's, not played)
+- In on foot; the rockhopper stays above. The ring only takes you off a
+  mount, as the first does.
+- The second ring opens as the first does.
+- The ending above ground: the short offering, a second spirit home
+  unseen, the giant doesn't walk on.
+- The cave is a function of the seed: which side it winds to, the walls'
+  wobble, the scatter. The comb itself is the same on every seed.
+- **Which spirit comes home second:** the second one taken (index 1).
+- **Touching her anywhere counts as finding her**, not only at her hide.
+- **The pocket is entered from the columns' cell** (she goes that way so
+  you can follow to its veil), but she'll put her head out through
+  whichever of its veils you come to.
+- **She gets her saddle when she offers her back**, as the rockhopper got
+  its when freed.
+- **After the ending the glimmer waits by the second ring** on a reload,
+  as the rockhopper does by the first. Neither is in the herd's save.
+- **The portal overhead and the cut are teal** in this dungeon; the ring
+  above and its dark spirit are the first's violet ink (`Ring` is shared).
+- **Glowcaps and lanterns:** lanterns wake as you pass, as in dungeon 1,
+  on the outer wall only; they don't light veils from behind.
+- Dev entry: `?dungeon=2` makes dungeon 1 done first (`firstDone()`), by
+  writing the saves a finished dungeon 1 leaves and rebuilding from them.
+
+### Shared code touched, and what it does to dungeon 1
+- `shell.ts`: `buildShell` takes a `ShellPlan` (an interface `Layout`
+  already satisfies); `tint` and `lathe` exported. No change in output.
+- `materials.ts` / `shaders.ts`: the portal's three colours are uniforms
+  (dungeon 1's as exact defaults); `makeDungeonMaterial` takes a rock
+  palette; `uWarmFlat` (0 in dungeon 1: off).
+- `offering.ts`: its timing table is per instance; name and statue are
+  options. `homecoming.ts`: `settledAt`. `dungeon.ts`: a `mountable`
+  getter. `beast.ts`: `puppet`. `types.ts`: `puppet`, `ghost`.
+- `main.ts`: `den()` is whichever dungeon you're in, used where
+  `dungeon?.inside` was.
+- **Checked:** dungeon 1's quest passes, 41 checks, the same ones as
+  before this work (160 s before, 159 after). Five of its stills
+  against the build from before, pixel by pixel: they differ by 0.7 to
+  5%, and two runs of the *old* build differ by the same amount (the
+  lights breathe), so no difference was found. `scripts/sites.mjs` on
+  `hilda`, `42`, `frost`: both sites, the first's fingerprint, the visit's
+  and the walk on are identical to before. The land and the cached sites
+  were not touched; no save is wiped. (All of that was before the other
+  session's dark light went into dungeon 1.)
+
+### Perf (M1 Pro, 1600x900, uncapped, quiet runs)
+- Inside: 370k to 382k triangles, 59 to 68 draw calls, 1.8 to 2.65 ms a
+  frame, p99 3.4 ms, in seven places, lanterns dark or all lit. Dungeon 1
+  on the same day: 402k, 58 calls, 1.4 to 2.0 ms. Building it: 23 ms for
+  the plan, about 270 ms for the meshes, once, on first entry.
+- Outdoors, the default run: 4.19 ms average, p99 7.9, against 4.22 and
+  7.6 on the build from before. No change.
+- A third run of the cave's timings gave 28 ms in one cell and 8 in
+  another; two runs after it gave 2.6 again. Another session's browser was
+  on the GPU. Not verified on real integrated graphics, like everything
+  else here.
+
+### Rough / open
+- **The walking loop is short of the brief** (above).
+- **How a child learns Space.** In the story the key hints are hidden
+  (`story.silent`). The veil waking as you ride near it says "something
+  here"; nothing says "press Space". Dungeon 1's bound has the same hole.
+  One answer: ridden at a veil she takes it by herself.
+- **"Two bright eyes"** at arrival are small: she is 21 m off in the mouth
+  of the way on, a dark shape with her spots and tail alight. Seen, not
+  striking.
+- **Her head through the stone** is a round hole with her face in it. It
+  reads, but as a porthole more than a head pushed through rock.
+- **The rock is as smooth as dungeon 1's**: strata and boulders at the
+  walls' feet. "Rough and lumpy" is carried by the contrast with the
+  veils' folds, not by the rock itself.
+- The veils' folds are two flat tones with no outline between them; from
+  far off a veil with nothing lit behind it is only a little paler than
+  the rock beside it. The piers frame it, which helps.
+- Front-lit patches on veils (from glowcaps on your side, or her own
+  light) have the same wandering edge as on rock and can look blotchy.
+- **The shrine's glimmer** has thin legs and tail in stone.
+- **She runs through glowcaps and small stones** on her way (her path is
+  kept clear of boulders by the plan, not of everything).
+- The ring above takes you only on foot: arrive on the rockhopper and
+  nothing says to get off (as at the first ring).
+- No sound was heard: the scripts run muted. `Sfx.shimmer` (through a
+  veil) and `Sfx.nope` are new and unheard.
+- Seen only in scripted frames and stills; nobody has held the keys.
+
+## Creatures run from the giant (2026-10-06)
+Just after the village bolts from the giant (`BOLT` in `giant/visit.ts`) every wild flock about is off the
+other way for good: `Mobs.scare` calls each species' `bolt`, which sets `flock.data.gone`. Crows and floofs
+climb and fly a straight line that never lands; herds run stretch by stretch over good ground and stop only
+where there is none (a shore). A `gone` flock is drawn to 1000 m and dropped at 1100 (not 460 / 500), so
+fliers are seen going until they're specks. Nothing new turns up until the visit hands the camera back
+(`Mobs.calm`). Tamed, roped and the lesson's calm stelk stay.
+- They go `BOLT` (0.35) steps after `FRIGHT`, just after the cut to the village running (owner's call,
+  2026-10-06: at the first footfall they were out of view by the time the camera was back on the giant).
+- Six more flocks of birds are put down in the woods between where the village gathers and the giant, and go
+  up with the rest (`scare(.., flush, seen)`): the ambient flocks are few and anywhere. Session-random like
+  all creatures, not world gen.
+- Check with `DIST=<folder> node scripts/visit.mjs <dir> tower mobs fine` (frames from step 3.5 on; it prints who fled).
+
+## A second homecoming, and a third ring (2026-10-06)
+Asked for by the owner: after dungeon 2 a crow should be seen bringing a spirit home, and the giant should
+walk on to where dungeon 3 will be.
+- `Homecoming` takes `who` / `leg` / `name` (which of the taken, which ring it walks to, its save key) and
+  main makes two: `homecoming` as before and `homecoming2` (`who: 1, leg: 2, name: 'home2'`), which starts
+  from `offering2`'s last frame. Its `rest` is the end of the first one's route and its `before` that route,
+  so it treads back in its own prints where the way on runs back. Its veil is the cave's teal.
+- `embla.home2.<seed>` used to mean "the second spirit went home unseen" (set when the offering was
+  given). It now means the second homecoming is done, so an old save with it set finds the giant already by
+  the third ring. `secondHome` and the `home2` flag in main are gone.
+- `WorldGen.dungeons` has a third site: `nextSite(second, [first])`. `older` rings are kept 700 m off and the
+  way keeps off them; with none (the second site's search) nothing changes, so the first two are where they
+  were (12 seeds compared against the build before; `scripts/sites.mjs` now prints `second` too and checks
+  the walk to the third: no wading, ends 45-130 m short). Cache key `embla.dungeon.v9`. The search for
+  the third costs 0.1-2.3 s once per seed.
+- The third ring is the POI's bare stones only: no `Ring`, nothing opens, the giant just lies down by it.
+  Dungeon 3 needs a `Ring` there, a `settledAt` on `homecoming2` to free its dark spirit, and its inside.
+- Not changed: the village scene is the first one again (same yard, same camera rules). The ending after
+  dungeon 2 is now about 50 s hands off rather than 20.
+- Check: `scripts/veil.mjs <dir> home2 [sandbox]`.
+
+## Dungeon 2: she leads you like a puppy (2026-10-06)
+
+The owner played the Veil Cave and didn't get it: she ran off at 14 m/s to
+a hide 60 m away, nothing showed where, and after 24 s she "eventually just
+finds me". Asked for: her coming back to check you're following, a trail
+that shows she went through the wall, and her room lit so you know which
+wall she's behind. Hide and seek is now follow-me (`VeilCave.playHer`).
+
+- **Leading** (`go` with `then === 'hide'`, numbers in `LEAD`). She runs
+  ahead at 9.5 m/s (you run at 6.2) and stops when she's 15 m ahead, turns,
+  bows, hops, wags and calls until you're within 8.5 m. **At a veil she
+  stops 3.4 m short and only goes through when you're within 9.5 m with
+  nothing between you**, so you always see it happen. Past a veil she goes
+  5.5 m and waits for you to come round. Left waiting 5 s in the open, or
+  10 s with a veil between, she comes back to you (`fetch`, `show`) and
+  leads off again; hidden at her spot it is 11 s, then 9.
+- **She leads only where you can follow** (`VeilLayout.route(.., walk)`):
+  round the ring by its short veils, never through a shut middle cell. The
+  first version took the short way through M1 when you were on the west
+  side and waited inside it for ever. Only the last veil, into the pocket,
+  is one you can't get round. Fetching you she still takes any veil.
+- **Finding her is only at her hide.** Touching her on the way no longer
+  counts (it let you win a round at the veil without ever going round it).
+- **Prints** (`pawTrail.ts`): pads of her light on the floor every 0.95 m,
+  left and right, a beat running along them the way she went. One mesh of
+  150, moved on the CPU. They go out when she's found or sets off again.
+- **A mark in the veil** where she went through (`uScar`, three slots): a
+  ring round a heart, seen from both sides, until that trail goes out.
+- **Her room alight** (`hidden`, `uHer`, `ROOM_R`): whenever a veil is
+  between you and her and the game is on, her pool of light grows from 5.2
+  to 11.5 m and she shows on the veil as a wide patch that beats twice and
+  rests. Its emissive is very low (0.14 / 0.06): at 0.4 the bloom whited
+  the whole veil out. Her three small lights came down from 0.7 to 0.5 for
+  the same reason.
+- **The pocket.** She waits at its veil for you, goes in, and 1.5 s later
+  her head comes back out where you stand. If you never follow her there,
+  after three fetches she gives in and offers her back where you are.
+- A reload part way has her out to fetch you after 3.5 s rather than 24.
+- Checked with `scripts/veil.mjs quest,stall,reload,dash` (the script
+  follows her now: `chase`) and `veil-plan.mjs`. Not heard, and not held:
+  frames and checks only. In `quest`, "the second ring does not take you
+  again" fails above ground (E doesn't get you off the glimmer after the
+  ending); nothing here touches that.
+- Rough: at arrival she is 21 m off, so her first "come on" is small; she
+  comes to you 5 s later. With her right behind a veil the mark, the patch
+  and her own lights overlap into one bright shape.
+
+## Thinner outlines, and a higher resolution floor on desktop (2026-10-06)
+- **Why:** the owner's game looked rough (creature faces first). Nothing in
+  the render path had changed and the working tree was no slower than the
+  commit before it: other sessions' headless browsers had the GPU, frames
+  ran long, and the adaptive controller had shed resolution to 55 to 70%.
+- **Floor:** on desktop, resolution now sheds to 85% and no further
+  (`softFloor` / `hardFloor` in main); after that go shadows, then terrain
+  and prop detail. Touch devices keep 70%, then 55% last, as before. The
+  cost: a truly slow integrated GPU loses geometry where it used to lose
+  pixels, and has less to shed in all. Not measured on one.
+- **Outlines:** default width 1 px, from 1.6 (`postSettings.outlineWidth`).
+  The width is in render pixels, so at a lower resolution scale a line is
+  that much wider on screen; 1 holds up there where 1.6 went chunky. The
+  owner's call, by eye.
+
+
+## The walk home, faster again (2026-10-06)
+
+Owner: speed up the trudge back to the village after the giant.
+
+- `TRUDGE` 2.4 -> 3.4 m/s (`story/journey.ts`): a little over its trot
+  (3.1), where it was well under. The look is unchanged: the sullen gait's
+  step rate and tiny hop don't depend on its speed (`hopRate` in
+  `spirit.ts`), so it still reads as a trudge, just covering more ground.
+- Untouched: `MOPE` (1.8, the village shuffle), the unseen catch-up
+  (`UNSEEN`, `UNSEEN_PACE`), `GRIEVE` (75 s from setting off, so a quicker
+  walk means more of it is spent in the village; `GRIEVE_MIN` still holds).
+- Not re-shot with `scripts/trudge.mjs`.
+
+## The giant's prints keep off your cabin (2026-10-06)
+
+Owner: can the main cabin never be directly over or beside a footprint?
+
+Measured first (`scripts/cabin-clear.mjs`): on every seed tried a print's
+edge was within 9 m of the walls, on two seeds touching them. Three causes,
+all in `visitRoute` (`giant/visit.ts`):
+
+- The print on the house nearest the yard (20 m down the lane, sole 22 m
+  long). Now trodden askew or off its middle, as little as it takes; the
+  house stays well under the sole. That only buys so much: 5 m on `hilda`
+  and `7`, 10 m or more on most. More would mean moving the village
+  (`findVillage`: first house further from the yard), which moves the land
+  and wipes saves (`WORLD_VERSION`). Not done.
+- The four steps leaving the yard: the old test was 26 m from the ankle and
+  only a preference. Now measured sole edge to wall (`gap`, `KEEP` = 10 m),
+  weighed before everything else, with sharper turns tried if no gentle one
+  clears.
+- The turn on to the way to ring 1, which could come back round over the
+  cabin (seeds `2`, `3`): each candidate is now judged with its first twelve
+  steps of the walk too.
+
+The visit's footfalls change on most seeds (the `visit` fingerprint in
+`scripts/sites.mjs`); the dungeon sites don't. The walks on from ring 1 and
+ring 2 are 500 m and more away and weren't touched. Checked on 16 seeds;
+`scripts/visit.mjs` played through on `hilda` and `7`.
+
+- 2026-10-06: the spirit's sad face redrawn (`uSad.x` in `CREATURE_FRAG`): no more flat slanted lids; instead short thin ink brows with the inner ends up (after the cartoon bear in the inspo), pupils grown big with a glint, and tears welling along the lower lids. One face for every kind of sad (`sullen`, and the `sad` / `down` moods through `Spirit.woe`); only `sullen` keeps the ashen colour and the tear that falls. The explorer's face is untouched.
+
+## 2026-10-06: the giant is solid while it moves, and carries you
+
+It was solid only asleep (its boulders' ellipsoids cached once it lay still). Now `Giant.shell` works the
+47 boulders out again after every `pose`, lazily, and only when something within 80 m asks: about 0.03 ms a
+frame, so no cost to speak of. What it needed besides:
+
+- **Carrying** (`rider`, `footing` / `carry` in `update`): the body standing on a boulder is kept at the same
+  place on it through the pose. Without it the giant walks out from under you (17 m/s). `rise()` carries too.
+- **Sticky stone** (owner's idea): on its stone your feet are glued to it (up to 0.6 m of it dropping away is
+  closed each frame), the boulder you stand on is never a wall to you (`held`: the "steeper than 45 degrees is
+  a wall" rule was shoving a rider down the head as it tipped, getting up), and your own going is halved
+  (`STICKY`, applied to the position after the movement mode, so it holds for mounts too). `vel.y > 1` (a jump,
+  a flyer climbing) lets go; a jump on a walking giant lands you further back on it, no momentum kept.
+- Not done: no sweep, so a foot or hand that comes down on you shoves you out by the nearest way (6 m in the
+  check, 2 frames inside stone), and other boulders moving into a rider just push. The walks to rings 2 and 3
+  are not cutscenes at present, so this can be ridden in the story.
+
+Check: `scripts/giant-solid.mjs <dir> [spot=hump]` (rides the head walking and getting up, walks and jumps on
+it, stands under a footfall, times it).
+
+Later the same day, from the owner's second go: **no glowcaps behind the
+first short veil** (`L1-E1`; she stood in them at her first hide and was
+hard to make out; the clump is grown and taken away so the rest of the
+scatter doesn't move), and **the first hide has no finding**: the moment
+you come round the veil's end and nothing is between you (within `SEEN`,
+24 m) she runs on to the grove, with no heart and no hops. The heart is
+for the grove.
+
+And a third note from the owner: her coming back "happens too close".
+**Through a veil with a gap, she no longer comes back to you first: she
+goes and stands in the gap** (`door`), where you can see her from your
+side, and bows and hops there. She only does it once you have stood about
+for 3.5 s without getting nearer the gap (`toDoor`: making for the gap
+never counts against you, so there is always time to reach it). Come
+within 6 m of her there and she goes back to what she was doing (11.5 was
+tried: where you stand to watch her go through is already that near the
+gap, so she went straight back). Left
+14 s in the doorway she comes for you as before, and now stops 11 m short
+(`DOOR.short`; it was 7.5).
+
+### Dungeon 2, as it stands at the end of 2026-10-06 (supersedes the three notes above where they differ)
+
+The owner, over the afternoon: scrap her coming back for you ("the trail
+removes the need for it"); she waited "much much too close"; and the last
+sequence made no sense ("I keep going around and there is no way in"):
+"I turn 2 corners then see the trail, maybe it leads to another wall".
+
+- **No fetch, no show, no doorway, no bow, no heart, no giving in.** The
+  states are `watch`, `go`, `hide`, `peek`, `yours`. She never comes back:
+  she waits, however long, and her prints and marks are the way.
+- **Veil to veil at 14 m/s.** She runs to 3.4 m short of the next veil and
+  stops. When you have her in sight within 32 m (`LEAD.veil`) she looks
+  back for 1.1 s and goes through. Beyond it she goes to the middle of the
+  room and waits until you are in its doorway (`through()`: nothing
+  between you, and within 4 m of the veil's line or past it); then on.
+- **Two veils' ends, then the wall.** Rounds 0 and 1 are the rooms past the
+  first and second short veils (E1, E2: she only waits in each). Round 2:
+  from the middle of E2, as you come into its doorway, she runs to the
+  wall of the shut cell beside it (`HIDE`, M1; it was the far pocket P, a
+  third veil on), looks back, goes in, and 0.9 s later **her head comes
+  back out through the stone where she went in and stays** until you are
+  within 12 m (`PEEK_R`); then out, and her back offered. The grove is
+  scenery now: she doesn't hide in it, and nothing is "found".
+- A reload part way puts her in the mouth of the way on again, to lead
+  you from the well to wherever the game had got to.
+- `scripts/veil.mjs`: `chase` walks the ring by its gaps; `stall` checks
+  that she waits (half a minute at the first veil; in the next room;
+  while you go the wrong way and come back). `quest,stall,reload` and
+  `veil-plan.mjs` pass, but for "the second ring does not take you again"
+  above ground, as before.
+- Open: go the wrong way round and she is out of sight at a veil with only
+  her prints to say so; nothing calls you back. The owner chose that.
+  DESIGN.md's "three hides" text and `docs/NEXT-dungeon2.md`'s "as built"
+  still describe the grove and the pocket.
+
+## The parachute's hint (2026-10-06)
+The owner: the parachute bubble after three falls came too late; "front
+load that and make it clear from the start (any time you are on that top
+step thing)", and say how without words, on a keyboard and on a phone.
+- Dungeon 1's long fall is the first place the game needs the parachute,
+  and nothing before it teaches the second press. So the thought is there
+  whenever she stands on the high stone, fall count gone (`HINT_AFTER`,
+  `falls` removed), and it stays after you've crossed.
+- It says how, as four frames in one bubble (`chuteHintCanvas` in
+  `icons.ts`, held for `HINT_HOLD`): on a stone; a press, and she's
+  jumped; falling; a second press, and the canopy is open. The thing
+  pressed is a blank space bar (a shape, no letter) or, by touch, the
+  tapping finger. Drawn at 256 px and shown bigger than other bubbles.
+- Off the stone and falling with nothing open, the bubble comes with her
+  and turns its last two frames about quickly (`HINT_QUICK`): press now.
+  Only until the first crossing (`crossed`, saved as before).
+- By touch the jump button itself becomes the parachute's while a press
+  would open it, anywhere in the world (`TouchContext.chute`, the same
+  test as `WalkMode`: on foot, in the air, `deployClearance` under you).
+  It flashes at the top of an ordinary jump too; that's true, so it stays.
+- Not done: holding jump to open it (a change to every jump), a ghost
+  that shows the way. The touch buttons still carry words (Jump, Ride,
+  Lasso, Fly); this is the first of them to be a picture.
+- Check: `scripts/chute-hint.mjs <dir> [touch]`.
+
+## The name: Embla (2026-10-06)
+The owner, after a long hunt for a title: "Let's call it Embla everywhere
+for now." Embla is the first woman of the Norse myths, driftwood given
+breath and warmth; a working title, not settled.
+- Was Fjellheim. Changed in the page title (now just "Embla", the
+  "storybook sandbox" tag dropped), the loading veil, the docs, and every
+  save key (`embla.<what>.<seed>`).
+- Saves made under the old name are carried over once, at the top of
+  `main.ts`, before the world-version check reads them.
+- Left alone: `package.json`'s `open-world` (the repo's name), and
+  `fjellheim` where it's a seed someone typed.
+
+Later still (owner: the turn to look "pivots in place", and coupled with
+the phase "looks buggy"): before a veil she now **skips half round** (a
+small hop, 0.34 s; side on at most, 1.75 rad, her head does the rest),
+looks, **skips back to face the veil, and only when that turn is done**
+(within 0.08 rad) does she run at it. Before, she spun to face you at rate
+8 and then turned back while already running and flickering.
+
+And: "too easy now... I do like the head poking back through but it
+shouldn't just end so soon". **Her head comes out three times** (`PEEKS`:
+from M1 into E2, from P into E3, from P into E4). Come within 12 m of the
+first two and she draws it in and runs on inside the shut cells, her light
+going along behind the stone, and puts it out again through the wall of
+the next room round; at the third she comes out and offers her back. So it
+is four veils' ends in all now, with her head showing where she is at each
+of the last three rooms. Not saved: a reload in round 2 starts her from
+the well again.
+
+And: she **only stops and looks back at the first veil** (`round === 0`);
+the rest she runs straight through, as you come into the doorway behind
+her ("the pass and look gets redundant"). And **she no longer flickers
+going through a veil by herself**: `Glimmer.pose` hid her body on
+alternate 30ths of a second whenever she phased, which read as a fault
+seen from outside. Unridden (`ghost`) she now only stretches thin, eased
+in and out; ridden, outdoors and in the cave, the flicker is as it was.
+
+And: **the heart and the bouncing are for the bond, and only that**
+(owner: "the universal sign that we've bonded a pet"). When she comes out
+of the last wall she bounces three times and turns about with a heart over
+her (`GLAD`, 2.5 s), then goes down and offers her back; E doesn't get you
+on until it's over. Nothing earlier in the cave shows a heart. (At the
+stable a creature brought home already hops with hearts floating up,
+`herd.ts`; the two aren't the same picture yet.)
+
+And: "let's make the chase a little longer... have it come out of that
+wall and run through another round of walls". **A second lap** (`LAP_AT`,
+`LAP`): come up to her third head (in E4) and she comes out of the wall
+beside you and away through the next short veil; she waits in the middle
+of F, then of W4, as she did in the first two rooms; from W4 she goes
+into P's wall and her head comes out; come up, and it comes out once more
+a room on (W3); there she comes out for good, with the heart. Seven
+veils' ends in all, about 85 s at a run by the script. `PEEKS` has five
+entries now. Not saved: a reload in round 2 starts from the well.

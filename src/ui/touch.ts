@@ -1,4 +1,5 @@
 import type { Input } from '../player/input';
+import { iconCanvas } from '../story/icons';
 
 // On-screen controls for touch screens. Everything lands in Input as the same
 // signals the keyboard and mouse produce (virtual keys, look deltas, zoom), so
@@ -19,6 +20,8 @@ export interface TouchContext {
   down: boolean;
   /** Show the fly (F) toggle (dev only). */
   fly: boolean;
+  /** In the air on foot with room under you: a press of jump opens the parachute. */
+  chute: boolean;
 }
 
 const STICK_R = 56;
@@ -39,7 +42,7 @@ export class TouchControls {
   private pinch = 0;
   /** Seconds since a finger last steered the camera (0 while one is down). */
   lookIdle = 99;
-  private last: TouchContext = { ride: null, lasso: null, down: false, fly: false };
+  private last: TouchContext = { ride: null, lasso: null, down: false, fly: false, chute: false };
 
   constructor(private input: Input, el: HTMLElement) {
     document.body.classList.add('touch');
@@ -79,6 +82,7 @@ export class TouchControls {
       down: button('down', '▼', 'KeyC'),
       fly: button('fly', 'Fly', 'KeyF'),
     };
+    this.buttons.jump.style.setProperty('--chute', `url(${iconCanvas('parachute').toDataURL()})`);
     document.body.appendChild(this.root);
     this.apply(this.last, true);
 
@@ -102,7 +106,7 @@ export class TouchControls {
 
   private apply(c: TouchContext, force: boolean) {
     const l = this.last;
-    if (!force && l.ride === c.ride && l.lasso === c.lasso && l.down === c.down && l.fly === c.fly) return;
+    if (!force && l.ride === c.ride && l.lasso === c.lasso && l.down === c.down && l.fly === c.fly && l.chute === c.chute) return;
     this.last = { ...c };
     const b = this.buttons;
     b.ride.hidden = !c.ride;
@@ -111,8 +115,10 @@ export class TouchControls {
     if (c.lasso) b.lasso.textContent = c.lasso;
     b.down.hidden = !c.down;
     // Flying or riding, the jump button climbs.
-    b.jump.textContent = c.down ? '▲' : 'Jump';
+    b.jump.textContent = c.down ? '▲' : c.chute ? '' : 'Jump';
     b.jump.classList.toggle('climb', c.down);
+    // In the air it's the parachute's button, and shows it.
+    b.jump.classList.toggle('chute', c.chute && !c.down);
     b.fly.hidden = !c.fly;
   }
 

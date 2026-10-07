@@ -1,4 +1,4 @@
-# Fjellheim
+# Embla
 
 A procedurally generated Nordic landscape to wander, drawn like a storybook
 (after the backgrounds of *Hilda*). A wordless story runs through it: a

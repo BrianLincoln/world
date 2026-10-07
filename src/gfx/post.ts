@@ -11,7 +11,7 @@ import { FXAAShader } from 'three/examples/jsm/shaders/FXAAShader.js';
 
 export const postSettings = {
   outline: true,
-  outlineWidth: 1.6,
+  outlineWidth: 1,
   depthThreshold: 0.045,
   normalThreshold: 0.4,
   outlineFadeStart: 220,

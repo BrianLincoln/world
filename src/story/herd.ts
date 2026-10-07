@@ -211,7 +211,7 @@ export class Herd {
 
   // ------------------------------------------------------------ save
 
-  private key() { return `fjellheim.herd.${this.d.saveKey}`; }
+  private key() { return `embla.herd.${this.d.saveKey}`; }
   private save() { try { localStorage.setItem(this.key(), JSON.stringify(this.roster)); } catch { /* private mode */ } }
   private load() {
     try {

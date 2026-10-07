@@ -19,7 +19,7 @@ const ROPE = '#c9a26b';
 const LEATHER = '#6e4a33';
 const BRASS = '#d9b36a';
 const TINTS = ['#ffffff', '#f4eef6', '#eef0f8', '#fbf2ec'].map((h) => new THREE.Color(h));
-const MAX = 64;
+const MAX = 128;
 /** Crows won't touch down within this many metres of the story cabin (they still fly over). */
 const BASE_CLEAR = 80;
 /** Keep off a beacon tower's hilltop: its stack, doorway and room are within ~35 m. */
@@ -390,6 +390,25 @@ export class Crow implements Species {
     }
   }
 
+  /** Up and away from it, high, in a straight line that never comes down (the far end is never reached). */
+  bolt(f: Flock, from: THREE.Vector3, _ctx: MobCtx) {
+    const fd = f.data;
+    const rnd = fd.rnd as () => number;
+    const a = Math.atan2(f.centre.x - from.x, f.centre.z - from.z) + (rnd() - 0.5) * 0.7;
+    f.target.set(f.centre.x + Math.sin(a) * 6000, 0, f.centre.z + Math.cos(a) * 6000);
+    fd.mode = 'fly';
+    fd.flyT = 0;
+    fd.landAt = 0;
+    fd.passing = true;
+    fd.cruise = 32 + rnd() * 22;
+    for (const m of f.members) {
+      const d = m.data as CrowData;
+      d.delay = rnd() * 0.9;
+      d.landing = false;
+      d.alt = fd.cruise + (rnd() - 0.5) * 8;
+    }
+  }
+
   initMob(m: Mob, i: number, f: Flock, ctx: MobCtx) {
     const r = m.rnd;
     const o = () => new THREE.Object3D();
@@ -480,7 +499,7 @@ export class Crow implements Species {
       fd.alarm = false;
       tv.subVectors(f.target, f.centre).setY(0);
       const dist = tv.length();
-      if (dist > 1) f.centre.addScaledVector(tv.normalize(), Math.min(dist, 11 * dt));
+      if (dist > 1) f.centre.addScaledVector(tv.normalize(), Math.min(dist, (fd.gone ? 17 : 11) * dt));
       if (dist < 4 && fd.flyT > 4) {
         // Circle a little, then everyone lands.
         if (!fd.landAt) fd.landAt = fd.flyT + 1.5 + rnd() * 2;
@@ -546,7 +565,7 @@ export class Crow implements Species {
           const alt = THREE.MathUtils.lerp(Math.min(d.alt, 10), d.alt, THREE.MathUtils.smoothstep(near, 20, 90));
           goal.y = g + alt + 12 * THREE.MathUtils.smoothstep(ctx.gen.forestDensity(goal.x, goal.z, g), 0.05, 0.4);
           fly = true;
-          speed = 15;
+          speed = fd.gone ? 21 : 15;
         }
       } else if (fd.mode === 'fly' && d.landing) {
         // Drop onto its own patch of the landing spot. Aim a little below

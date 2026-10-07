@@ -1,6 +1,7 @@
 // The giant's visit, frame-stepped (giant slice 1, step 4): node scripts/visit.mjs <outdir> [seed=hilda] [t=16.6] [tower] [fine] [after]
 //   A frame every 1.5 s of the event, then (`after`) the wrecked lane from above and a reloaded save.
-// Needs a build (npx vite build).
+//   `mobs`: with the creatures about (they run from it: mobs/manager.ts `scare`), and what became of them printed.
+// Needs a build (npx vite build); DIST=<folder> to serve another than dist/.
 import { chromium } from 'playwright';
 import http from 'node:http'; import fs from 'node:fs'; import path from 'node:path';
 const root = process.cwd();
@@ -11,7 +12,7 @@ const hour = args.find((a) => a.startsWith('t='))?.slice(2) ?? '16.6';
 fs.mkdirSync(out, { recursive: true });
 const server = http.createServer((req, res) => {
   const p = decodeURIComponent(new URL(req.url, 'http://x').pathname);
-  const f = path.join(root, 'dist', p === '/' ? 'index.html' : p);
+  const f = path.join(root, process.env.DIST ?? 'dist', p === '/' ? 'index.html' : p);
   if (!fs.existsSync(f)) { res.writeHead(404); res.end(); return; }
   res.writeHead(200, { 'content-type': f.endsWith('.js') ? 'text/javascript' : f.endsWith('.html') ? 'text/html' : f.endsWith('.css') ? 'text/css' : 'application/octet-stream' });
   fs.createReadStream(f).pipe(res);
@@ -23,7 +24,7 @@ page.on('pageerror', (e) => console.log('[pageerror]', e.message));
 page.on('console', (m) => { if (m.type() === 'error' && !m.text().includes('useProgram')) console.log('[page]', m.text().slice(0, 400)); });
 const W = (ms) => page.waitForTimeout(ms);
 const ev = (f, a) => page.evaluate(f, a);
-const url = `http://localhost:${server.address().port}/?seed=${seed}&story=1&mobs=0&bikes=${args.includes("tower") ? 1 : 0}&drak=0&capture=1&ui=0`;
+const url = `http://localhost:${server.address().port}/?seed=${seed}&story=1&mobs=${args.includes('mobs') ? 1 : 0}&bikes=${args.includes("tower") ? 1 : 0}&drak=0&capture=1&ui=0`;
 await page.goto(`${url}&fresh=1`);
 for (let i = 0; i < 160; i++) { if (await ev(() => window.__ow?.ready())) break; await W(250); }
 await W(1000);
@@ -60,10 +61,10 @@ let n = 0;
 const fine = args.includes('fine');
 let dtShot = fine ? 0.5 : 1.0;
 for (let t = 0; t < 120; t += dtShot) {
-  const s = await ev((n) => { const o = window.__ow; o.advance(n, 1 / 60); return { busy: o.visit().busy, steps: +o.giant().steps.toFixed(1), jt: +o.visit().jt.toFixed(1) }; }, Math.round(dtShot * 60));
+  const s = await ev((n) => { const o = window.__ow; o.advance(n, 1 / 60); const g = o.giant().centre, fl = [...(o.mobs?.flocks.values() ?? [])]; return { busy: o.visit().busy, steps: +o.giant().steps.toFixed(1), jt: +o.visit().jt.toFixed(1), fled: fl.filter((f) => f.data.gone).map((f) => f.species.name + ' ' + Math.round(Math.hypot(f.centre.x - g.x, f.centre.z - g.z))).join(', '), stay: fl.filter((f) => !f.data.gone).length }; }, Math.round(dtShot * 60));
   await W(80);
   if (fine && s.jt >= 0) dtShot = 0.4;
-  console.log(n, (t + dtShot).toFixed(1) + ' s', 'step', s.steps, 'stopped', s.jt);
+  console.log(n, (t + dtShot).toFixed(1) + ' s', 'step', s.steps, 'stopped', s.jt, args.includes('mobs') ? `| fled (m from it): ${s.fled || 'none'} | not: ${s.stay}` : '');
   await page.screenshot({ path: `${out}/visit-${String(n++).padStart(3, '0')}.png` });
   if (!s.busy) { console.log('camera handed back after', (t + dtShot).toFixed(1), 's, at step', s.steps); break; }
 }

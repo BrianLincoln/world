@@ -5,7 +5,7 @@ import type { Sfx } from '../story/audio';
 import type { Story } from '../story/story';
 import { CAB } from '../story/geometry';
 import { siteLocal } from '../world/storySite';
-import type { WorldGen } from '../world/worldgen';
+import type { DungeonSite, WorldGen } from '../world/worldgen';
 import type { Birds } from './birds';
 import type { Giant } from './giant';
 import { onwardRoute, restOf, type Footfall } from './visit';
@@ -30,13 +30,16 @@ import { onwardRoute, restOf, type Footfall } from './visit';
 //     dungeon's ring, leaving prints. You get your hands back after its
 //     first few steps; it goes on walking, and lies down again by that ring.
 //
-// That second ring is bare stones and stays shut: there is nothing under it
-// yet (dungeon 2 isn't built). The trail ends there for now.
+// The same again follows dungeon 2's offering (`who: 1, leg: 2, name:
+// 'home2'` in main): the second spirit taken comes home, and the giant gets
+// up from the second ring and walks to a third. That third ring is bare
+// stones and stays shut: there is nothing under it yet (dungeon 3 isn't
+// built). The trail ends there for now.
 //
 // Outside the story (`story=0`) there is no village and there are no crows:
 // it goes straight from the smile to the giant getting up.
 //
-// Saved as `fjellheim.home1.<seed>` from the moment the spirit is on the
+// Saved as `embla.home1.<seed>` from the moment the spirit is on the
 // ground. A reload before that plays this again from the start (you're
 // put back by the shrine); a reload after it finds everything done: the
 // spirit home, and the giant asleep by the second
@@ -50,9 +53,9 @@ export interface HomeDeps {
   sfx: Sfx;
   /** The story (its village and the guide), or null outside it. */
   story: Story | null;
-  /** The giant where it lies by the first ring. */
+  /** The giant where it lies by the ring it's about to leave (the first, unless `leg` says otherwise). */
   giant(): Giant;
-  /** Where that is: where its walk to the first ring ended. */
+  /** Where that is: where its walk to that ring ended. */
   rest(): { x: number; z: number; heading: number };
   /** The footfalls of that walk (none: nothing walked there). */
   before(): Footfall[];
@@ -69,13 +72,23 @@ export interface HomeDeps {
   tree(x: number, z: number, max: number): number;
   /** Is the land round the camera still being built? */
   loading(): boolean;
+  /** It has lain down by the second ring (what it does there next is dungeon 2's: main). */
+  settledAt?(g: Giant): void;
   saveKey: string;
+  /**
+   * Which homecoming this is (left out: the first dungeon's). `who`: which of
+   * the taken comes home, in the order they were taken (the first: the one
+   * the visit's camera went down with). `leg`: the ring it walks on to,
+   * `gen.dungeons[leg]`; it gets up from the one before. `name`: what it's
+   * saved as.
+   */
+  who?: number;
+  leg?: number;
+  name?: string;
 }
 
 type Phase = 'leave' | 'cutTo' | 'village' | 'cutBack' | 'rise';
 
-/** Which of the taken comes home first: the first one taken (the one the visit's camera went down with). */
-const WHO = 0;
 /** The veil: how long it takes to come up or go, the least it holds, and the longest it waits for the land (s). */
 const VEIL = { fade: 0.55, hold: 0.45, most: 20 };
 /** The crow leaving the giant: how long it's watched, and how far past the camera it's bound (m). */
@@ -140,7 +153,17 @@ export class Homecoming {
   private lookAt = new THREE.Vector3();
   private staged = false;
 
+  private who: number;
+  private leg: number;
+  private name: string;
+  /** The ring it gets up from (a shrine by now). */
+  private site: DungeonSite;
+
   constructor(private d: HomeDeps) {
+    this.who = d.who ?? 0;
+    this.leg = d.leg ?? 1;
+    this.name = d.name ?? 'home1';
+    this.site = d.gen.dungeons[this.leg - 1];
     this.orb = new THREE.Mesh(new THREE.IcosahedronGeometry(1, 3), makeSolidMaterial('#ee6a20', 1.6, { keep: 1 }));
     this.orb.frustumCulled = false;
     this.orb.visible = false;
@@ -156,19 +179,19 @@ export class Homecoming {
 
   private get village() { return this.d.story?.village ?? null; }
   /** Is there a village to go to, a spirit to take there and a crow to take it? */
-  private get whole() { const v = this.village, c = this.d.crows(); return !!v && !!c && c.birds.length > WHO && v.spirits.length > WHO; }
+  private get whole() { const v = this.village, c = this.d.crows(); return !!v && !!c && c.birds.length > this.who && v.spirits.length > this.who; }
 
-  /** The giant's footfalls from the first ring to the second. */
-  get route(): Footfall[] { return (this.falls ??= onwardRoute(this.d.gen, 1, this.d.rest(), this.d.before())); }
+  /** The giant's footfalls from the ring it lies by to the next. */
+  get route(): Footfall[] { return (this.falls ??= onwardRoute(this.d.gen, this.leg, this.d.rest(), this.d.before())); }
 
   private save() {
-    try { localStorage.setItem(`fjellheim.home1.${this.d.saveKey}`, '1'); } catch { /* ignore */ }
+    try { localStorage.setItem(`embla.${this.name}.${this.d.saveKey}`, '1'); } catch { /* ignore */ }
   }
 
   /** A save from after the spirit was home: all of it as it was left, and the giant asleep by the second ring. Nothing is replayed. */
   restore() {
     let saved = false;
-    try { saved = localStorage.getItem(`fjellheim.home1.${this.d.saveKey}`) === '1'; } catch { /* no storage */ }
+    try { saved = localStorage.getItem(`embla.${this.name}.${this.d.saveKey}`) === '1'; } catch { /* no storage */ }
     if (!saved) return;
     this.state = 'done';
     this.left = true;
@@ -176,8 +199,8 @@ export class Homecoming {
     this.home = this.whole;
     const v = this.village;
     if (this.whole && v) {
-      v.comeHome(WHO);
-      this.d.crows()!.shed(WHO);
+      v.comeHome(this.who);
+      this.d.crows()!.shed(this.who);
     }
     const falls = this.route;
     for (const f of falls) this.d.stamp(v1.set(f.x, 0, f.z), f.yaw);
@@ -214,23 +237,23 @@ export class Homecoming {
       // In front of its face and off to one side, about level with its trees: the crow comes out of them toward us.
       const c = this.d.crows()!, r = this.d.rest();
       const fwd = v1.set(Math.sin(r.heading), 0, Math.cos(r.heading)), side = v2.set(fwd.z, 0, -fwd.x);
-      g.perch(WHO, v3);
+      g.perch(this.who, v3);
       const sd = this.clearer(g.centre, fwd, side, 52, 20);
       this.pos.copy(g.centre).addScaledVector(fwd, 52).addScaledVector(side, 20 * sd).setY(v3.y - 7);
       this.pos.y = Math.max(this.pos.y, this.d.ground(this.pos.x, this.pos.z) + 3);
       // Up out of its tree, out over its head and on past the camera's shoulder.
       const via = new THREE.Vector3().copy(v3).addScaledVector(fwd, 16).setY(v3.y + 11);
       const to = new THREE.Vector3().copy(this.pos).addScaledVector(fwd, LEAVE.past).addScaledVector(side, -sd * 7).setY(this.pos.y + 5);
-      c.send(WHO, 'climb', via, to, LEAVE.secs + 0.4, 'hover');
+      c.send(this.who, 'climb', via, to, LEAVE.secs + 0.4, 'hover');
       this.atNow.copy(v3);
       g.look = this.lookAt.copy(v3);
       fx.whoosh();
     } else if (p === 'cutTo') {
       this.stageVillage();
     } else if (p === 'village') {
-      const c = this.d.crows()!, b = c.birds[WHO];
+      const c = this.d.crows()!, b = c.birds[this.who];
       // The light is ours from here: the crow lets it go.
-      c.shed(WHO);
+      c.shed(this.who);
       this.orb.visible = true;
       // (Smaller than it hangs under a crow far off: here it is a few metres from the lens.)
       this.orb.scale.setScalar(0.5);
@@ -240,7 +263,7 @@ export class Homecoming {
       b.pos.copy(v1).addScaledVector(this.fly, -78).setY(v1.y + 30);
       b.dir.copy(this.fly);
       v2.copy(v1).addScaledVector(this.fly, -22).setY(v1.y + 1.5);
-      c.send(WHO, 'dive', v2, v1, V.dive, 'hover');
+      c.send(this.who, 'dive', v2, v1, V.dive, 'hover');
       this.orbAt.copy(b.pos);
       this.atNow.copy(this.drop).lerp(this.step, 0.5).setY(this.drop.y + 1.2);
       fx.whoosh();
@@ -248,12 +271,12 @@ export class Homecoming {
       this.stageRise();
       // The crow is back in its tree, with nothing to carry.
       const c = this.d.crows();
-      if (c) c.birds[WHO].state = 'roost';
+      if (c) c.birds[this.who].state = 'roost';
       this.orb.visible = false;
       const st = this.d.story, v = this.village;
       if (st) { st.lent = this.wasLent; st.spirit.haste = null; }
       // (Back to its own pace: it walks home to its house from here.)
-      if (v) v.spirits[WHO].haste = 1.8;
+      if (v) v.spirits[this.who].haste = 1.8;
     } else {
       this.stageRise();
       g.look = null;
@@ -352,7 +375,7 @@ export class Homecoming {
   update(dt: number, given: boolean) {
     // On from the offering's last frame (or, a save from between the two: as soon as you're by the shrine again).
     if (this.state === 'idle') {
-      const s = this.d.gen.dungeon, b = this.d.body.pos;
+      const s = this.site, b = this.d.body.pos;
       if (given && Math.hypot(b.x - s.x, b.z - s.z) < 40) this.begin();
     }
     if (this.state === 'playing') this.play(dt);
@@ -363,6 +386,7 @@ export class Homecoming {
         this.settled = true;
         this.asleep(g);
         g.dormant = true;
+        this.d.settledAt?.(g);
       }
     }
   }
@@ -372,7 +396,7 @@ export class Homecoming {
     const passed = (k: number) => t0 < k && t >= k;
     this.frames++;
     this.d.halt();
-    const c = this.d.crows(), bird = c?.birds[WHO];
+    const c = this.d.crows(), bird = c?.birds[this.who];
     switch (this.phase) {
       case 'leave': {
         this.lookAt.lerp(bird!.pos, 1 - Math.exp(-3 * dt));
@@ -430,7 +454,7 @@ export class Homecoming {
    * was, the first time: all stone, and no you) or the shrine.
    */
   private backYaw() {
-    const b = this.d.body, s = this.d.gen.dungeon, back = b.heading + Math.PI;
+    const b = this.d.body, s = this.site, back = b.heading + Math.PI;
     let best = -Infinity, yaw = back;
     for (const off of [0, 0.3, -0.3, 0.6, -0.6, 0.9, -0.9, 1.25, -1.25]) {
       const a = back + off;
@@ -460,7 +484,7 @@ export class Homecoming {
   }
 
   private playVillage(dt: number, t: number, passed: (k: number) => boolean) {
-    const v = this.village!, st = this.d.story!, fx = this.d.sfx, c = this.d.crows()!, bird = c.birds[WHO], sp = st.spirit, home = v.spirits[WHO];
+    const v = this.village!, st = this.d.story!, fx = this.d.sfx, c = this.d.crows()!, bird = c.birds[this.who], sp = st.spirit, home = v.spirits[this.who];
     const L = this.landed;
     this.veil = Math.max(1 - ss(t, 0, VEIL.fade), L >= 0 ? ss(t, L + V.out - VEIL.fade, L + V.out) : 0);
     // The crow comes over and doesn't stop: as it passes it lets go, and flies on up and away until it's out of
@@ -470,7 +494,7 @@ export class Homecoming {
       this.orbVel.copy(this.fly).multiplyScalar(5);
       v1.copy(bird.pos).addScaledVector(this.fly, 24).setY(bird.pos.y + 4);
       v2.copy(bird.pos).addScaledVector(this.fly, 150).setY(bird.pos.y + 70);
-      c.send(WHO, 'climb', v1, v2, V.away, 'hover');
+      c.send(this.who, 'climb', v1, v2, V.away, 'hover');
       fx.whoosh();
     }
     // The light: under the crow; then falling, a little the way the crow was going; then gone into who it was.
@@ -490,7 +514,8 @@ export class Homecoming {
         this.d.puff(v1.setY(g + 1.0), 12, 0.6, 2);
         fx.thud();
         fx.chirp(true);
-        v.comeHome(WHO, this.drop);
+        v.comeHome(this.who, this.drop);
+        home.size = 0.2;
         home.heading = Math.atan2(this.step.x - this.drop.x, this.step.z - this.drop.z);
         home.want.face = sp.pos;
         sp.flinch();
@@ -502,7 +527,7 @@ export class Homecoming {
       const k = ss(t, L, L + V.grow);
       this.orb.scale.setScalar(0.5 * (1 - ss(t, L, L + 0.25)));
       this.orb.visible = t < L + 0.25;
-      home.group.scale.setScalar(k < 1 ? 0.2 + 0.8 * k + 0.25 * Math.sin(k * Math.PI) : 1);
+      home.size = (k < 1 ? 0.2 + 0.8 * k + 0.25 * Math.sin(k * Math.PI) : 1);
       // A moment while the dust thins; then they go to each other, and jump for joy.
       if (passed(L + 0.18)) this.d.puff(v1.copy(this.drop).setY(this.drop.y + 0.6), 10, 0.6, 2.4);
       if (passed(L + V.go)) {

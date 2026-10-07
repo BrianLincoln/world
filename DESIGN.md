@@ -1,4 +1,4 @@
-# Fjellheim: design
+# Embla: design
 
 Our shared design doc: what the game is and what has been decided.
 The build log (how things were made, tradeoffs, perf) lives in `NOTES.md`.
@@ -19,6 +19,8 @@ These apply to everything.
 - **Wordless.** There is no text or dialogue anywhere in the player
   experience. The game teaches through the spirits' behaviour, gestures,
   emotes, pictogram bubbles, visual cues and sound.
+  One exception (owner, 2026-10-06): the loading screen turns over tips, one
+  line of words each under the flame.
 - **No combat.**
 - **Spooky, not horrible.** It's for the owner and their kids, but don't
   over-soften it (owner, 2026-09-30): the giant's crows are black and
@@ -183,8 +185,12 @@ to stay inside the art direction (`docs/BRIEF.md`) and "nothing scary".
   metres up, it lands in dust and is the spirit again, and the two run to
   each other; the crow flies on out of sight; the camera cuts back, and the
   giant stands up out of the ground and walks to a second ring, leaving
-  prints, and lies down there. That ring is bare stones and shut: nothing
-  is under it yet, so **the trail ends there for now**.
+  prints, and lies down there. Lying down, it lets a second dark spirit go
+  into that ring, which opens as the first did: under it is dungeon 2 (below).
+  After dungeon 2 the same happens again (owner, 2026-10-06): the second
+  spirit taken is flown home to the guide's cabin, and the giant gets up
+  and walks to a third ring and lies down. **The trail ends there for
+  now**: the third ring is bare stones with nothing under it.
   `docs/NEXT-dungeon2.md`.)*
 - **Rescued spirits mend the village as you go** (owner, 2026-10-01): you
   see them working on it and clearing up, and it steps on at each
@@ -204,8 +210,9 @@ to stay inside the art direction (`docs/BRIEF.md`) and "nothing scary".
   mount is the reward. `docs/NEXT-dungeon2.md`. This answers conflict 9's "awaiting a yes"
   differently.)*
 - **There is a list of dungeon sites** (2026-10-02): `WorldGen.dungeons`,
-  two so far, each a ring of stones found from the seed, the second
-  0.9-1.5 km on from the first by a way a bike can take. Where the only
+  three so far, each a ring of stones found from the seed, each
+  0.9-1.5 km on from the one before by a way a bike can take (and never
+  within 700 m of an older one). Where the only
   way on is back the way it came, the giant treads in its own prints.
 - **Stone hands stand about the world** (owner, 2026-10-01): the hand in
   dungeon 1 didn't read as the giant's but was liked, so the shape is
@@ -222,11 +229,73 @@ to stay inside the art direction (`docs/BRIEF.md`) and "nothing scary".
   fall, to a rockhopper shut in by a rockfall. Freed with the pick, it
   carries you off a one-way balcony back to the fork, and its bound gets
   you up the ledge. Whether the pick is the right way to free it is open.
+- **Dungeon 2's interior: the Veil Cave** (agreed with the owner
+  2026-10-02; *built, not yet played by the owner*). Its creature is the
+  glimmer. A cave under a glimmerwood: teal where dungeon 1 is violet, moss
+  on the floor, glowcaps in clumps. It has two kinds of wall, and that is
+  the whole dungeon. **Rock** is dark and lumpy and nothing passes it.
+  **Veils** are thin sheets of pale stone hung like curtains from ceiling
+  to floor; light shows through them, and a phasing glimmer passes them.
+  Nothing else does: not you, not the axe or pick. The rule a child reads
+  from the picture: *if light shows through it, you can go through it.*
+  - **The plan** is one cavern cut into cells like a honeycomb: great rock
+    piers at the corners, veils hung from pier to pier. Three cells in a
+    row down the middle are shut in by veils on every side. Ten more make a
+    ring round them, each open to the next by a gap beside a short veil.
+    On foot the only way is round the ring; riding, straight down the
+    middle. Not a maze: the ring is one way that comes back to its start,
+    and its cells are told apart (a pool, the grove, a stand of stone
+    columns, one great glowcap, a ring of small ones).
+  - **How you know which walls:** glowcaps behind a veil show on it as a
+    teal patch (a pale heart in a halo); rock never glows. The glimmer
+    behind a veil shows through as three small moving lights. The
+    dungeon's own light shows through the veil of its room, seen from the
+    first cell with no way round to it: the one colour in the cave that
+    isn't teal. (It was amber when this was agreed; since the dark light,
+    below, it is violet.) Ridden, she wakes a veil near by: rings of her
+    light run out across it. Space at rock costs nothing: she pulls up
+    short and shakes her head.
+  - **Follow me** (was hide and seek; changed 2026-10-06 after the owner
+    played it and couldn't tell what was happening). She runs, far faster
+    than you, to just before a veil, looks back until you have her in
+    sight, goes through, and waits in the middle of the room beyond until
+    you are in its doorway. Her prints stay alight on the floor, her mark
+    in the veil, and her room is alight whenever a veil is between you. She
+    never comes back for you. Two veils' ends on, she goes into the wall of
+    the shut cell beside that room and her head comes straight back out of
+    it; walk up, and she comes out and offers her back. No grove hide, no
+    far pocket: the text below is how it was first built.
+  - **Hide and seek (as first built).** She isn't trapped and you don't free her: she is
+    bored and you are something to play with. Three rounds, each won by
+    walking up to her; no lasso, no pick, no timer, no way to fail. 1: two
+    eyes watch you arrive; she slips through a short veil and her glow
+    sits behind it; you walk round its end. 2: she hides flat among
+    glowcaps, where her spots look like them; her tail twitches. 3: she
+    goes into the pocket (the last of the three shut cells); come to its
+    veil and she puts her head back out through the stone, looks at you,
+    comes out, crouches and offers her back. Leave her waiting at any
+    round and she comes and fetches you; walk up to her then and it counts.
+  - **The ride:** into the pocket; three veils in a row down the middle;
+    out into the first cell; the last veil, and the light. Taking it ends
+    the dungeon with a small success beat, and she carries you out through
+    a veil in the wall of the entry well: you are on the surface, on her.
+  - **Above:** dungeon 1's offering told quickly (about 20 s hands off:
+    the ring shuts into a shrine, a glimmer in stone; a crow takes the
+    light into the giant's mouth; it smiles). Then dungeon 1's homecoming again
+    (owner, 2026-10-06): a crow flies the second spirit's light home, and
+    the giant gets up and walks on to a third ring.
+  - You go in on foot; the rockhopper stays above.
+- **The light a dungeon keeps is a dark light** (2026-10-02, changed in
+  another session while dungeon 2 was being built): an ink heart with a
+  violet rim, the ring's colours, in both dungeons and in the offering.
+  Orange is only ever a spirit. See NOTES.md, "the dungeon's light is a
+  dark light".
 
 ### The trail and the core loop (decided, not built)
-- **Loop:** follow the trail → catch the right creature → solve the
-  dungeon → rescue a spirit → return to the village (it grows, and unlocks
-  new buildables) → follow the new trail.
+- **Loop:** follow the trail → go down into the dungeon on foot → unlock
+  its creature inside and use it to solve the dungeon → rescue a spirit →
+  follow the new trail. *(Owner, 2026-10-02: you don't catch a creature
+  beforehand and bring it in. This replaces "catch the right creature".)*
 - **Story layout is authored:** trail direction, dungeon order and each
   dungeon's required abilities. **Terrain and rooms are procedural** around
   that, deterministic from the seed like the story site, towers and journey
@@ -235,9 +304,12 @@ to stay inside the art direction (`docs/BRIEF.md`) and "nothing scary".
 - The main path is open from the start. No timer. Only a gentle pull.
 
 ### Dungeons (decided, not built)
-- Metroidvania-style gating by **mount ability**: swimmer, digger, glider,
-  heavy pusher, climber, small-gap, and glowing (for dark rooms). The axe
-  and pickaxe still matter.
+- **You unlock a new mount in the dungeon and use it to solve the
+  dungeon** (owner, 2026-10-02), as dungeon 1 does with the shut-in
+  rockhopper. You go in on foot; no mount comes in with you; you leave
+  riding the new one, and it is the reward. Abilities a dungeon can be
+  built round: swimmer, digger, glider, heavy pusher, climber, small-gap,
+  and glowing (for dark rooms). The axe and pickaxe still matter.
 - Each dungeon teaches one ability. Later ones combine them.
 - **Generated backward from an ability chain** so they're solvable by
   construction, using room templates per ability.

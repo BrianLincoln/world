@@ -25,6 +25,9 @@ export const CHECKPOINTS: Checkpoint[] = [
   { id: 'ring', label: '4.1 ring (dungeon 1)', kind: 'ring', giantGone: true },
   // The dungeon done: coming up with its light, the ring shutting into a shrine (giant/offering.ts).
   { id: 'offer', label: '4.2 offering (dungeon 1 done)', kind: 'ring', giantGone: true },
+  // The first dungeon done and the giant walked on: by the second ring, opened; and that one done too.
+  { id: 'ring2', label: '5.1 ring (dungeon 2)', kind: 'ring', giantGone: true },
+  { id: 'offer2', label: '5.2 offering (dungeon 2 done)', kind: 'ring', giantGone: true },
 ];
 
 const SHOW_KEY = 'ow.cp.show';

@@ -1,7 +1,22 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { buildBoulder } from '../gfx/geometry';
-import { COLUMN_R, Layout, type Stone } from './layout';
+import { COLUMN_R, Layout, type Cap, type Lantern, type Shelf, type Stone } from './layout';
+
+/** What the shell is built from: a plan's functions (dungeon 1's `Layout`, the Veil Cave's `VeilLayout`). */
+export interface ShellPlan {
+  readonly box: [number, number, number, number];
+  readonly shelves: Shelf[];
+  sdf(x: number, z: number): number;
+  grad(x: number, z: number): [number, number];
+  pitSd(x: number, z: number): number;
+  sinkOf(x: number, z: number): number;
+  ground(x: number, z: number): number;
+  low(x: number, z: number): number;
+  ceil(x: number, z: number): number;
+  past(k: Shelf, x: number, z: number): number;
+  riseOf(k: Shelf, x: number, z: number, hard?: boolean): number;
+}
 
 // The cave's meshes, from its plan (layout.ts), in the plan's local frame.
 
@@ -20,7 +35,7 @@ const ROWS = 10;
  * pit's own floor is a sheet below; a ledge's top is a sheet above, drawn
  * back to its line; and each edge has a plain face of its own.
  */
-export function buildShell(L: Layout): THREE.BufferGeometry {
+export function buildShell(L: ShellPlan): THREE.BufferGeometry {
   const [x0, z0, x1, z1] = L.box;
   const nx = Math.ceil((x1 - x0) / CELL) + 1, nz = Math.ceil((z1 - z0) / CELL) + 1;
   const sd = new Float32Array(nx * nz), pd = new Float32Array(nx * nz);
@@ -156,7 +171,7 @@ export function buildShell(L: Layout): THREE.BufferGeometry {
   return g;
 }
 
-function tint(g: THREE.BufferGeometry, hex: string) {
+export function tint(g: THREE.BufferGeometry, hex: string) {
   const out = g.index ? g.toNonIndexed() : g;
   for (const k of Object.keys(out.attributes)) if (k !== 'position' && k !== 'normal') out.deleteAttribute(k);
   const n = out.attributes.position.count, c = new THREE.Color(hex), a = new Float32Array(n * 3);
@@ -166,7 +181,7 @@ function tint(g: THREE.BufferGeometry, hex: string) {
 }
 
 const m4 = new THREE.Matrix4(), v3 = new THREE.Vector3(), s3 = new THREE.Vector3(), q4 = new THREE.Quaternion(), UP = new THREE.Vector3(0, 1, 0);
-const lathe = (pts: [number, number][], segs = 18) => new THREE.LatheGeometry(pts.map(([r, y]) => new THREE.Vector2(Math.max(r, 1e-3), y)), segs);
+export const lathe = (pts: [number, number][], segs = 18) => new THREE.LatheGeometry(pts.map(([r, y]) => new THREE.Vector2(Math.max(r, 1e-3), y)), segs);
 
 /**
  * A giant's hand of stone, about 10 m tall, standing up out of the ground at
@@ -279,7 +294,7 @@ export function buildRock(L: Layout): THREE.BufferGeometry {
 }
 
 /** The glowcaps' caps (they glow, so a mesh of their own). */
-export function buildCaps(L: Layout): THREE.BufferGeometry {
+export function buildCaps(L: { caps: Cap[] }): THREE.BufferGeometry {
   const parts: THREE.BufferGeometry[] = [];
   for (const c of L.caps) {
     const g = new THREE.SphereGeometry(c.r, 18, 9, 0, Math.PI * 2, 0, Math.PI * 0.56).scale(1, 0.62, 1).translate(0, c.h - c.r * 0.12, 0);
@@ -295,7 +310,7 @@ export function buildCaps(L: Layout): THREE.BufferGeometry {
  * ones. `aLit` (per vertex, the same for all of one lantern's) says which
  * show; `ranges[i]` is lantern i's run of vertices, for rewriting it.
  */
-export function buildLanterns(L: Layout): { geometry: THREE.BufferGeometry; ranges: [number, number][] } {
+export function buildLanterns(L: { lanterns: Lantern[] }): { geometry: THREE.BufferGeometry; ranges: [number, number][] } {
   const parts: THREE.BufferGeometry[] = [], ranges: [number, number][] = [];
   let count = 0;
   const prof: [number, number][] = [[0.02, 1.25], [0.45, 1.15], [0.8, 0.8], [0.95, 0.3], [0.98, -0.25], [0.9, -0.7], [0.7, -0.95], [0.02, -0.9]];

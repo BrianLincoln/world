@@ -41,6 +41,10 @@ export interface Mob {
   hop?: number;
   /** Lives down in a dungeon: it only thinks and is drawn while you're down there too (see Mobs.under). */
   below?: boolean;
+  /** Something else is its brain (a dungeon's creature at play): its species doesn't think for it, only animates it. */
+  puppet?: boolean;
+  /** Phasing with nobody on it (a glimmer): seconds of it left. Whoever drives it counts it down. */
+  ghost?: number;
 }
 
 export interface Flock {
@@ -123,4 +127,10 @@ export interface Species {
   readonly every?: [number, number];
   readonly verb?: string;
   settle?(f: Flock, at: THREE.Vector3, rnd: () => number): void;
+  /**
+   * Something far too big is coming, from `from` (the giant): a wild flock
+   * is off the other way and doesn't stop or settle again (`f.data.gone`;
+   * the manager drops it once it's out of sight). See Mobs.scare.
+   */
+  bolt?(f: Flock, from: THREE.Vector3, ctx: MobCtx): void;
 }

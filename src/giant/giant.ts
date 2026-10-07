@@ -47,8 +47,12 @@ const SINK = 43, SINK_TIME = 9, RISE_TIME = 9.5;
 const UP = { out: 0.45, squat: [0.3, 0.42], hip: 10, lean: 0.5, knee: 0.9, push: 0.28, hand: 3.5 };
 /** How far down it starts when it comes up out of the ground or the water (`emerge`): all of it (m). */
 const DEEP = 100;
-/** Asleep and solid: the rise a body steps up without being stopped, and how tall a body is (m). */
+/** It's solid: the rise a body steps up without being stopped, and how tall a body is (m). */
 const STEP = 0.6, TALL = 1.7;
+/** How near it has to be to bother (m, from its chest), how close to its stone feet are standing on it (under it, and over it: stone that drops away under you takes you along while you fall after it), and the most it carries them in one frame (more is it being put somewhere else). */
+const NEAR = 80, STAND = [0.4, 0.6], CARRY_MAX = 6;
+/** Its stone is sticky underfoot: the share of your own pace you keep on it. */
+const STICKY = 0.5;
 /** The pebble shapes' seeds; their lumps (see `pebbleRadius`) never reach past LUMP_MAX. */
 const PEBBLE_SEEDS = [11, 23, 37];
 const LUMP_MAX = 1.14;
@@ -64,12 +68,17 @@ const NECK: [number, number] = [26, 13.5];
 const HEAD_AT: [number, number, number] = [0, 4, 0], HEAD_R: [number, number, number] = [9, 9.4, 8.8];
 
 interface Stone {
+  bone: THREE.Object3D;
+  local: THREE.Matrix4;
+  /** Where it is now, and that undone. */
+  fwd: THREE.Matrix4;
   inv: THREE.Matrix4;
   lumps: Simplex;
   /** Its middle and how far it reaches along x and z, to skip it quickly. */
   x: number; z: number; rx: number; rz: number;
 }
 const span = [0, 0];
+const stoodAt = new THREE.Vector3();
 
 interface PartDef {
   bone: THREE.Object3D;
@@ -376,21 +385,22 @@ export class Giant {
 
   /**
    * It gets up again: no longer dormant, it comes back up out of the ground
-   * and stands, over RISE_TIME (see `UP`), and from this moment it isn't
-   * solid (`shell`). Its feet are put together under it where it lies, while
+   * and stands, over RISE_TIME (see `UP`); it stays solid, and takes
+   * whoever is standing on it up with it (`rider`). Its feet are put together under it where it lies, while
    * they're still deep under the ground, so it can be walked on from here
    * (`walkRoute`).
    */
   rise() {
     if (!this.dormant) return;
     const sink = this.sink;
+    const on = this.footing();
     this.route = null;
     this.pauseAt = null;
     this.place(this.pelvis.position.x, this.pelvis.position.z, this.pelvis.rotation.y);
     this.dormant = false;
     this.sink = sink;
-    this.solid = null;
     this.pose(0);
+    if (on) this.carry(on);
   }
   /** How far down it is (1: a hill; 0: up on its feet). */
   get sunk() { return this.sink; }
@@ -460,27 +470,81 @@ export class Giant {
     return out;
   }
 
-  // ------------------------------------------------------------ solid, once it's asleep
+  // ------------------------------------------------------------ solid, asleep or walking
 
   /**
    * Its boulders as they're drawn: ellipsoids (inverse matrices) with the
-   * pebbles' own lumps, kept while it lies still.
+   * pebbles' own lumps. They move with it: worked out again after every
+   * `pose`, but only when something near enough asks (`near`).
    */
   private solid: Stone[] | null = null;
+  private stale = true;
   private shell() {
-    if (!this.dormant || this.sink < 1) { this.solid = null; return null; }
     if (!this.solid) {
       this.solid = [];
-      const fwd = new THREE.Matrix4();
-      this.batches.forEach((b, gi) => b.parts.forEach((p, i) => {
-        const f = fwd.multiplyMatrices(p.bone.matrixWorld, b.local[i]).elements;
-        this.solid!.push({
-          inv: fwd.clone().invert(), lumps: PEBBLE_NOISE[gi], x: f[12], z: f[14],
-          rx: Math.hypot(f[0], f[4], f[8]) * LUMP_MAX, rz: Math.hypot(f[2], f[6], f[10]) * LUMP_MAX,
-        });
-      }));
+      this.batches.forEach((b, gi) => b.parts.forEach((p, i) => this.solid!.push({
+        bone: p.bone, local: b.local[i], fwd: new THREE.Matrix4(), inv: new THREE.Matrix4(), lumps: PEBBLE_NOISE[gi], x: 0, z: 0, rx: 0, rz: 0,
+      })));
+      this.stale = true;
+    }
+    if (this.stale) {
+      for (const st of this.solid) {
+        const f = st.fwd.multiplyMatrices(st.bone.matrixWorld, st.local).elements;
+        st.inv.copy(st.fwd).invert();
+        st.x = f[12];
+        st.z = f[14];
+        st.rx = Math.hypot(f[0], f[4], f[8]) * LUMP_MAX;
+        st.rz = Math.hypot(f[2], f[6], f[10]) * LUMP_MAX;
+      }
+      this.stale = false;
     }
     return this.solid;
+  }
+  private near(x: number, z: number) { return Math.hypot(x - this.centre.x, z - this.centre.z) < NEAR; }
+
+  /**
+   * Who it carries: a body standing on its stone goes where that boulder
+   * goes (main gives it the explorer's). Without this it would walk out
+   * from under you. And its stone is sticky: you keep your feet on it
+   * however it tips or drops away (the boulder you're on is never a wall
+   * to you, `grip`), and get about on it at half your pace (STICKY). A
+   * jump, or flying up, takes you off it.
+   */
+  rider: { pos: THREE.Vector3; vel: THREE.Vector3; grounded: boolean } | null = null;
+  /** The boulder the rider stood on as of the last `update`, and where they were then. */
+  private grip: Stone | null = null;
+  private gripAt = new THREE.Vector3();
+  /** The boulder the rider's feet are on, with where on it (into `stoodAt`, in the boulder's own space); null if on none. */
+  private footing(): Stone | null {
+    const r = this.rider, was = this.grip;
+    this.grip = null;
+    if (!r || r.vel.y > 1 || !this.near(r.pos.x, r.pos.z)) return null;
+    // (It hasn't moved since `gripAt`: what's between there and here is the rider's own going.)
+    if (was && Math.hypot(r.pos.x - this.gripAt.x, r.pos.z - this.gripAt.z) < 3) {
+      r.pos.x = this.gripAt.x + (r.pos.x - this.gripAt.x) * STICKY;
+      r.pos.z = this.gripAt.z + (r.pos.z - this.gripAt.z) * STICKY;
+    }
+    let on: Stone | null = null, best = Infinity, top = 0;
+    for (const st of this.shell()) {
+      if (!this.cut(st, r.pos.x, r.pos.z)) continue;
+      const d = r.pos.y - span[1];
+      if (d > -STAND[0] && d < STAND[1] && Math.abs(d) < best) { best = Math.abs(d); on = st; top = span[1]; }
+    }
+    if (on) {
+      r.pos.y = top;
+      if (r.vel.y <= 0) { r.vel.y = 0; r.grounded = true; }
+      stoodAt.copy(r.pos).applyMatrix4(on.inv);
+    }
+    return on;
+  }
+  private carry(on: Stone) {
+    const r = this.rider!;
+    this.shell();
+    va.copy(stoodAt).applyMatrix4(on.fwd);
+    if (va.distanceTo(r.pos) >= CARRY_MAX) return;
+    r.pos.copy(va);
+    this.grip = on;
+    this.gripAt.copy(va);
   }
 
   /** Where the vertical line through (x, z) goes into a boulder and comes out (into `span`); false if it misses. */
@@ -506,18 +570,19 @@ export class Giant {
     return span[1] > span[0];
   }
 
-  /** Asleep, it's a hill you can land on and walk over: the top of its stone under (x, z), at most `step` above the feet. */
+  /** It can be landed on and walked over (asleep it's a hill; walking, it carries you: `rider`): the top of its stone under (x, z), at most `step` above the feet. */
   surface(x: number, z: number, feetY: number, step: number): number {
+    if (!this.near(x, z)) return -Infinity;
     const sh = this.shell();
-    if (!sh || Math.hypot(x - this.centre.x, z - this.centre.z) > 80) return -Infinity;
     let best = -Infinity;
     for (const st of sh) if (this.cut(st, x, z) && span[1] <= feetY + step && span[1] > best) best = span[1];
     return best;
   }
 
   /** Stone in the way of a body standing at (x, z): above what it steps up, below its head. */
+  private held: Stone | null = null;
   private wall(sh: Stone[], x: number, z: number, feetY: number) {
-    for (const st of sh) if (this.cut(st, x, z) && span[1] > feetY + STEP && span[0] < feetY + TALL) return true;
+    for (const st of sh) if (st !== this.held && this.cut(st, x, z) && span[1] > feetY + STEP && span[0] < feetY + TALL) return true;
     return false;
   }
 
@@ -528,15 +593,17 @@ export class Giant {
    * within a body's reach.
    */
   push(pos: THREE.Vector3, vel: THREE.Vector3, r: number) {
+    if (!this.near(pos.x, pos.z)) return;
     const sh = this.shell();
-    if (!sh || Math.hypot(pos.x - this.centre.x, pos.z - this.centre.z) > 80) return;
+    // (The rider's own boulder is no wall to them: it's sticky.)
+    this.held = pos === this.rider?.pos ? this.grip : null;
     const out = (nx: number, nz: number, d: number) => {
       pos.x += nx * d;
       pos.z += nz * d;
       const vn = vel.x * nx + vel.z * nz;
       if (vn < 0) { vel.x -= nx * vn; vel.z -= nz * vn; }
     };
-    // Right inside it (something fast, or it settled on top of you): out by the nearest way.
+    // Right inside it (something fast, or it settled or trod on you): out by the nearest way.
     if (this.wall(sh, pos.x, pos.z, pos.y)) {
       search: for (let d = 0.5; d < 80; d += 0.5) for (let k = 0; k < 16; k++) {
         const nx = Math.sin(k * 0.3927), nz = Math.cos(k * 0.3927);
@@ -629,7 +696,9 @@ export class Giant {
       this.lookNow.y += (pitch - this.lookNow.y) * k;
     }
     this.chinNow = this.mouth > 0 ? Math.min(1, this.chinNow + dt / 2.2) : this.mouthNow > 0 ? this.chinNow : Math.max(0, this.chinNow - dt / 2.6);
+    const on = this.footing();
     this.pose(dt);
+    if (on) this.carry(on);
 
     // It never blinks (too animal); the lids never open far, and move slowly.
     this.lidNow += (this.lidWant() - this.lidNow) * (1 - Math.exp(-2.2 * dt));
@@ -796,5 +865,6 @@ export class Giant {
       b.parts.forEach((p, i) => { m4.multiplyMatrices(p.bone.matrixWorld, b.local[i]); m4.elements[13] -= gy; b.mesh.setMatrixAt(i, m4); });
       b.mesh.instanceMatrix.needsUpdate = true;
     }
+    this.stale = true;
   }
 }

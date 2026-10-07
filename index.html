@@ -3,12 +3,35 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
-    <title>Fjellheim — a storybook sandbox</title>
+    <title>Embla</title>
+    <!-- The loading veil is styled here, not in style.css, so it's there on the first paint (in dev the stylesheet arrives with the script). -->
+    <style>
+      html, body { margin: 0; height: 100%; overflow: hidden; background: #efd6c3; }
+      #veil {
+        position: fixed; inset: 0; display: grid; place-content: center; text-align: center;
+        background: #efd6c3; color: #5c3a3e; transition: opacity 0.8s ease; z-index: 10;
+        font: 600 34px/1.2 Georgia, 'Times New Roman', serif; letter-spacing: 0.04em;
+      }
+      #veil svg { width: 72px; height: 72px; animation: storyBreathe 1.6s ease-in-out infinite; }
+      #veil span { font: italic 15px/2 Georgia, serif; opacity: 0.75; }
+      #veil.gone { opacity: 0; pointer-events: none; }
+      /* Tips (ui/loadingTips.ts): hung below the middle, so the flame doesn't move when they arrive. */
+      #veil .tip {
+        position: absolute; left: 50%; top: calc(50% + 64px); width: min(26em, 86vw); margin: 0; transform: translateX(-50%);
+        font: italic 24px/1.35 'IM Fell English', Georgia, serif; letter-spacing: 0.01em; opacity: 0; transition: opacity 0.4s ease;
+      }
+      #veil .tip.on { opacity: 0.9; }
+      @keyframes storyBreathe { 0%, 100% { transform: scale(0.92); opacity: 0.8; } 50% { transform: scale(1.06); opacity: 1; } }
+    </style>
   </head>
   <body>
     <div id="app"></div>
-    <div id="veil"><div>Fjellheim</div><span>unrolling the map…</span></div>
-    <div id="help">WASD move · Shift sprint · Alt walk · Space jump (again in the air: parachute) · R / right-click lasso · E ride / bike · click/drag to look · wheel zoom · T +1h · H hide UI</div>
+    <!-- The flame of story/icons.ts (drawFlame), as paths. -->
+    <div id="veil"><svg viewBox="0 0 128 128" aria-hidden="true">
+      <path d="M64 18C78 46 98 62 92 84C88 104 40 104 36 84C32 64 54 52 64 18Z" fill="#f08a4b" stroke="#4a2e36" stroke-width="6" stroke-linejoin="round" />
+      <path d="M64 39.9C71.7 46 82.7 62 79.4 84C77.2 104 50.8 104 48.6 84C46.4 64 58.5 52 64 39.9Z" fill="#ffd36e" />
+    </svg></div>
+    <div id="help" hidden>WASD move · Shift sprint · Alt walk · Space jump (again in the air: parachute) · R / right-click lasso · E ride / bike · click/drag to look · wheel zoom · T +1h · H hide UI</div>
     <div id="aim"></div>
     <div id="prompt"></div>
     <script type="module" src="/src/main.ts"></script>

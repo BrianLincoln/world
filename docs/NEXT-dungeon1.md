@@ -66,8 +66,9 @@ Below ground (`src/dungeon/`; the plan is drawn at the top of `layout.ts`):
   stones and one long parachute fall, a gallery, a rockfall), the
   rockhopper's den, and a one-way balcony back into the fork.
 - Spirit lanterns that wake as you come near and stay lit (saved). The
-  nearest 16 pools of light are drawn. A parachute thought bubble after
-  three falls from the high stone.
+  nearest 16 pools of light are drawn. On the high stone the explorer
+  thinks of how the parachute is opened, every time (see NOTES.md,
+  "The parachute's hint").
 - Taking the light: a 5.4 s success beat (hops, a heart bubble, lanterns
   up), the violet veil, and `onWon` -> `leaveDungeon(true)` in `main.ts`.
 - `layout.at` names every place; `scripts/dungeon.mjs <dir> quest` plays
@@ -93,7 +94,7 @@ Above ground, after the light is taken (`src/giant/offering.ts`; NOTES.md,
   giant is still lying where it settled, arms down at its sides, awake
   (`awake`), eyes half open, a small smile, looking at the shrine. The
   crow that went in is gone. The other crows still roost in its trees
-  with the spirits' lights. Saved as `fjellheim.offer1.<seed>` = `given`.
+  with the spirits' lights. Saved as `embla.offer1.<seed>` = `given`.
 - The giant can wake, look, open its mouth and smile, but it **cannot
   rise**: there is `settle()` and the 9 s sink, and nothing that undoes
   them. (Its limbs now sink with it properly, which rising needs: see the
@@ -268,12 +269,10 @@ Answered after the owner played the offering (2026-10-01):
     Dungeon 2's offering shouldn't be this one again at full length.
 21. Bad dungeon sites: **fix them.** The search has a real fallback now.
 22. The crow that flew into the giant's mouth: **gone for good.**
-23. The stone hands about the world: **fine as placed for now** (the owner
-    hadn't come across one yet on their seed).
+
+The third version of the offering (cutscene, statue, the crow into its
+mouth, arms down): **good enough for now** (2026-10-02).
 
 Still open:
-- Does the third version of the offering (cutscene, statue, the crow into
-  its mouth, arms down) look right? Not yet played.
-- What the stone hands out in the world do (they're placed, and inert).
 - How the village's mending is shown (a step per dungeon finished, to
   start with). A first step is built; see `docs/NEXT-dungeon2.md`.

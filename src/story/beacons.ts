@@ -1904,7 +1904,7 @@ export class Beacons {
 
   // ------------------------------------------------------------ save
 
-  private key() { return `fjellheim.towers.${this.d.saveKey}`; }
+  private key() { return `embla.towers.${this.d.saveKey}`; }
 
   private save() {
     try { localStorage.setItem(this.key(), JSON.stringify([...this.lit])); } catch { /* private mode */ }

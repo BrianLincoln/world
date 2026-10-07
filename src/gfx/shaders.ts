@@ -280,7 +280,7 @@ uniform float uPrintHide;
 ${PRINT_GLSL}
 bool trodden(vec3 base) {
   if (uPrintHide < 0.5 || aI1.z > 5.0) return false;
-  return soleSdf(base.xz, printAt(base.xz)) < 1.0;
+  return printClears(base.xz);
 }
 float harvestScale(vec3 base) {
   if (uHarvestGrid <= 0.0 || aI1.z > 5.0) return 1.0;
@@ -813,7 +813,7 @@ uniform vec2 uLookRange;
 uniform float uEyeTilt;
 /** 0..1: a set brow. The top of each eye is cut on a slant, low at the inner corner (resolve, not anger: the eye stays wide). */
 uniform float uBrow;
-/** Grief: x = 0..1 heavy lids, cut on the other slant (low at the outer corner); y = a tear's fall from one eye, 0..1 (0 = none). */
+/** Grief: x = 0..1 brows (inner ends up), pupils grown big and glinting, tears welling along the lower lids; y = a tear's fall from one eye, 0..1 (0 = none). */
 uniform vec2 uSad;
 uniform vec3 uMouthOrigin;
 /** Mouth: (y centre, half width, curve), in radians around uMouthOrigin. */
@@ -877,6 +877,19 @@ void main() {
     }
     float ct = cos(uEyeTilt), st = sin(uEyeTilt);
     vec2 me = uEyePos + mat2(ct, st, -st, ct) * (m - uEyePos);
+    float sad = uSad.x;
+    if (sad > 0.0) {
+      // Brows: a short thin stroke over each eye, barely bowed, its inner end high.
+      float bhw = uEyeSize.x * 0.5, bth = lw * 0.75;
+      float bx = m.x - uEyePos.x + uEyeSize.x * 0.1;
+      float slope = -0.42 * sad, bow = -0.9;
+      float by = uEyePos.y + uEyeSize.y * 1.02 + 0.085;
+      float g = slope + 2.0 * bow * bx;
+      float brow = max(abs(m.y - (by + slope * bx + bow * bx * bx)) / sqrt(1.0 + g * g) - bth, abs(bx) - bhw);
+      float ey = by + bow * bhw * bhw;
+      brow = min(brow, min(length(vec2(bx + bhw, m.y - ey + slope * bhw)), length(vec2(bx - bhw, m.y - ey - slope * bhw))) - bth);
+      col = mix(col, uInk, fillE(brow, aa) * smoothstep(0.0, 0.4, sad));
+    }
     vec2 q = (me - uEyePos) / uEyeSize;
     float d = (length(q) - 1.0) * min(uEyeSize.x, uEyeSize.y);
     if (lids > 0.02 && uGloss > 0.0) {
@@ -906,18 +919,29 @@ void main() {
       vec2 r = vec2(uEyeSize.x, uEyeSize.y * lids);
       vec2 qq = (me - uEyePos) / r;
       d = (length(qq) - 1.0) * min(r.x, r.y);
-      if (uBrow > 0.0) d = max(d, (me.y - uEyePos.y) - uEyeSize.y * (1.05 - 0.8 * uBrow) - (me.x - uEyePos.x) * 0.55 * uBrow);
-      if (uSad.x > 0.0) d = max(d, (me.y - uEyePos.y) - uEyeSize.y * (1.05 - 0.85 * uSad.x) + (me.x - uEyePos.x) * 0.75 * uSad.x);
+      if (uBrow > 0.0) d = max(d, (me.y - uEyePos.y) - uEyeSize.y * (1.05 - 0.38 * uBrow) - (me.x - uEyePos.x) * 0.14 * uBrow);
       float white = fillE(d, aa);
       col = mix(col, uWhite * mix(uLightCol, vec3(1.0), 0.55 - 0.25 * uNight), white);
       // Pupils share one look direction so they never cross.
-      vec2 room = max(r - uPupil * vec2(1.0, lids) * 1.15, 0.0);
+      // (Sad: they're big and dark.)
+      vec2 pu = uPupil * (1.0 + 0.55 * sad);
+      vec2 room = max(r - pu * vec2(1.0, lids) * 1.15, 0.0);
       vec2 lk = clamp(vEye.xy * uLookRange, -room, room);
       vec2 pc = vec2(sign(p.x) * uEyePos.x, uEyePos.y) + lk;
-      vec2 pq = (p - pc) / (uPupil * vec2(1.0, max(lids, 0.2)));
-      float pd = (length(pq) - 1.0) * min(uPupil.x, uPupil.y);
+      vec2 pq = (p - pc) / (pu * vec2(1.0, max(lids, 0.2)));
+      float pd = (length(pq) - 1.0) * min(pu.x, pu.y);
       // A pupil of no size is no pupil (blank eyes), not a divide by zero.
       if (min(uPupil.x, uPupil.y) > 0.0) col = mix(col, uInk, fillE(max(pd, d), aa));
+      if (sad > 0.0) {
+        // A glint in each (the same side on both: one light), and tears
+        // welling along the lower lid, over the pupil.
+        float gl = length(pq - vec2(0.3, 0.36)) - 0.34 * sad;
+        col = mix(col, uWhite * mix(uLightCol, vec3(1.0), 0.7), fillE(max(gl * min(pu.x, pu.y), d), aa));
+        vec2 wq = (me - uEyePos) / r;
+        float well = max(wq.y + 0.46 + 0.22 * wq.x * wq.x + 0.5 * (1.0 - sad), length(wq) - 1.0) * min(r.x, r.y);
+        col = mix(col, mix(uWhite, vec3(0.62, 0.82, 0.98), 0.6) * mix(uLightCol, vec3(1.0), 0.6), fillE(well, aa));
+        col = mix(col, uInk, fillE(max(abs(wq.y + 0.46 + 0.22 * wq.x * wq.x + 0.5 * (1.0 - sad)) * min(r.x, r.y) - lw * 0.35, d), aa) * 0.55);
+      }
       col = mix(col, uInk, fillE(abs(d) - lw * 0.6, aa));
       keep = mix(keep, 0.95, white);
     } else if (lids < -0.02) {
@@ -1753,6 +1777,10 @@ uniform float uMark;
 uniform float uMarkOn;
 uniform vec3 cMarkDark;
 uniform float uGlint;
+// The Veil Cave: what the warm light falls on takes its colour outright (0: tinted by it, as dungeon 1).
+uniform float uWarmFlat;
+uniform vec3 cWarmHi;
+uniform vec3 cWarmLo;
 void main() {
   vec3 n = normalize(vN);
   vec3 lp = vWorld - uOrigin;
@@ -1800,6 +1828,7 @@ void main() {
   float em = 0.0;
   if (warm > 0.5) {
     col = base * (warm > 1.5 ? cWarm : mix(cWarm, cMid, 0.5));
+    if (uWarmFlat > 0.0) col = mix(col, (warm > 1.5 ? cWarmHi : cWarmLo) * (0.78 + 0.28 * dot(base, vec3(0.33))), uWarmFlat);
     em = -0.8;
   }
   if (mark == 1) col = base;
@@ -1874,15 +1903,18 @@ in vec3 vWorld;
 in vec3 vCol;
 uniform vec3 uOrigin;
 uniform float uR;
+uniform vec3 cPortA;
+uniform vec3 cPortB;
+uniform vec3 cPortLip;
 void main() {
   vec2 p = (vWorld - uOrigin).xz;
   float r = length(p) / uR;
   float a = atan(p.y, p.x);
   float swirl = step(0.5, fract(a * 0.477 - r * 2.2 + uTime * 0.07));
   float ring = step(0.5, fract(r * 3.0 + uTime * 0.11));
-  vec3 col = mix(vec3(0.5, 0.43, 0.82), vec3(0.72, 0.66, 0.97), 0.55 * swirl + 0.25 * ring);
+  vec3 col = mix(cPortA, cPortB, 0.55 * swirl + 0.25 * ring);
   float lip = smoothstep(0.9, 0.94, r);
-  col = mix(col, vec3(0.93, 0.9, 1.0), lip);
+  col = mix(col, cPortLip, lip);
   writeG(col, 0.62 + 0.3 * lip, vec3(0.0, -1.0, 0.0), vView);
 }
 `;
@@ -1902,5 +1934,169 @@ void main() {
   float t = texture(uNoise, vWorld.xz * vec2(0.03, 0.21) - vec2(uTime * 0.005, 0.2)).g;
   vec3 col = mix(cWater, cStreak, step(0.63, s) * step(0.42, t));
   writeG(col, -0.35, vec3(0.0, 1.0, 0.0), vView);
+}
+`;
+
+// ------------------------------------------------------------------ the Veil Cave's veils (src/dungeon/veilCave.ts)
+// A veil is a thin sheet of pale stone hung in folds from ceiling to floor.
+// From in front it is lit as the rock is, in pools. What tells it from rock
+// is that light shows through it: whatever glows behind it (glowcaps, the
+// warm light, daylight) is a flat patch of that colour on this side, a pale
+// heart in a halo (baked per vertex in aBack: x seen from the front face,
+// y from the back). The glimmer shows through as three small moving lights
+// (uShe: her ears, her spine, her tail). Ridden, she wakes a veil near by
+// (uWake: rings of her light run out across it), and going through she
+// opens a hole in it (uHole), which is how the camera follows her.
+
+export const VEIL_VERT = /* glsl */ `
+in vec2 aBack;
+in float aKind;
+in vec2 aPlane;
+out vec3 vN;
+out vec3 vView;
+out vec3 vWorld;
+out vec2 vBack;
+out float vKind;
+out vec2 vPlane;
+void main() {
+  vec4 w = modelMatrix * vec4(position, 1.0);
+  vWorld = w.xyz;
+  vN = normalize(mat3(modelMatrix) * normal);
+  vPlane = (mat3(modelMatrix) * vec3(aPlane.x, 0.0, aPlane.y)).xz;
+  vBack = aBack;
+  vKind = aKind;
+  vec4 vp = viewMatrix * w;
+  vView = vp.xyz;
+  gl_Position = projectionMatrix * vp;
+}
+`;
+
+export const VEIL_FRAG = /* glsl */ `
+${COMMON}
+${GBUF_OUT}
+in vec3 vN;
+in vec3 vView;
+in vec3 vWorld;
+in vec2 vBack;
+in float vKind;
+in vec2 vPlane;
+uniform vec4 uGlows[${DUNGEON_GLOWS}];
+uniform int uGlowN;
+uniform vec3 cLit;
+uniform vec3 cMid;
+uniform vec3 cShade;
+uniform vec3 cWarm;
+uniform vec3 cVeil;
+uniform vec3 cFold;
+uniform vec3 cGlow;
+uniform vec3 cCore;
+uniform vec3 cAmber;
+uniform vec3 cAmberCore;
+uniform vec3 cDay;
+uniform vec3 cDayCore;
+uniform vec3 cWarmHi;
+uniform vec3 cWarmLo;
+// xyz = where, w = how bright (0: not there).
+uniform vec4 uShe[3];
+// xyz = the rider, w = how awake (0..1).
+uniform vec4 uWake;
+// xyz = its middle, w = its radius (0: shut).
+uniform vec4 uHole[2];
+// xyz = the glimmer, w = how strongly her room shows (0: she isn't hidden).
+uniform vec4 uHer;
+// xyz = where she went through, w = how far the mark has opened (0..1).
+uniform vec4 uScar[3];
+void main() {
+  float wob = texture(uNoise, vec2(dot(vWorld.xz, vec2(0.71, 0.71)), vWorld.y) * 0.035).r;
+  float rim = 0.0;
+  for (int i = 0; i < 2; i++) {
+    float r = uHole[i].w;
+    if (r <= 0.0) continue;
+    float d = distance(vWorld, uHole[i].xyz) / (r * (0.84 + 0.32 * wob));
+    if (d < 1.0) discard;
+    rim = max(rim, 1.0 - smoothstep(1.0, 1.22, d));
+  }
+  float side = gl_FrontFacing ? 1.0 : -1.0;
+  vec3 n = normalize(vN) * side;
+  // The veil's own facing, toward whoever is looking.
+  vec3 pn = normalize(vec3(vPlane.x, 0.0, vPlane.y)) * side;
+  // Pale stone, its folds two flat tones: what faces you, and what turns away.
+  vec3 base = dot(n, pn) > 0.93 ? cVeil : cFold;
+  int level = 0;
+  float warm = 0.0;
+  for (int i = 0; i < ${DUNGEON_GLOWS}; i++) {
+    if (i >= uGlowN) break;
+    vec3 d = uGlows[i].xyz - vWorld;
+    float dist = length(d);
+    float k = dist / abs(uGlows[i].w) * (0.88 + 0.24 * wob);
+    // (The dungeon's own light reaches a veil whole, or not at all: at the edge of its reach it tore holes in it.)
+    if (uGlows[i].w < 0.0) k *= 0.72;
+    if (k > 1.0 || dot(pn, d) < 0.0) continue;
+    int lv = k < 0.45 ? 2 : 1;
+    if (uGlows[i].w < 0.0) warm = max(warm, float(lv));
+    level = max(level, lv);
+  }
+  // (Never as bright from in front as what shows through from behind: that is the brightest a veil gets.)
+  vec3 col = base * (level >= 1 ? cMid : cShade);
+  float em = 0.0;
+  if (warm > 0.5) { col = (warm > 1.5 ? cWarmHi : cWarmLo) * (base.g > 0.8 ? 1.0 : 0.9); em = -0.8; }
+  // Lit from behind: a heart and a halo, hard-edged, the edge wandering a little.
+  float back = (side > 0.0 ? vBack.x : vBack.y) + (wob - 0.5) * 0.16;
+  if (back > 0.2) {
+    bool heart = back > 0.8;
+    col = vKind > 1.5 ? (heart ? cDayCore : cDay) : vKind > 0.5 ? (heart ? cAmberCore : cAmber) : (heart ? cCore : cGlow);
+    // (Its folds still show, faintly, in the halo.)
+    if (!heart && dot(n, pn) <= 0.93) col *= 0.9;
+    // (A patch is big and flat: it glows a little at its heart and not at all in its halo, or the bloom whites it
+    // out. The amber keeps its colour through the grade.)
+    em = vKind > 1.5 ? (heart ? 0.4 : 0.14) : vKind > 0.5 ? (heart ? 0.62 : 0.5) : (heart ? 0.3 : 0.1);
+  }
+  // Hidden behind it, she lights the room she's in: a wide patch that beats, twice and a rest, like nothing else in the cave.
+  if (uHer.w > 0.0) {
+    vec3 d = uHer.xyz - vWorld;
+    float s = dot(d, pn);
+    if (s < -0.1) {
+      vec3 q = d - pn * s;
+      float ph = fract(uTime * 0.75);
+      float beat = 1.0 + 0.16 * (smoothstep(0.0, 0.07, ph) * (1.0 - smoothstep(0.07, 0.24, ph)) + smoothstep(0.26, 0.33, ph) * (1.0 - smoothstep(0.33, 0.55, ph)));
+      float rp = (2.0 + 0.42 * -s) * beat;
+      float k = uHer.w * (1.0 - smoothstep(10.0, 26.0, -s)) * (1.0 - dot(q, q) / (rp * rp)) + (wob - 0.5) * 0.12;
+      // (Big and flat: it hardly glows, or the bloom whites the veil out. Its folds show in it.)
+      float fold = dot(n, pn) > 0.93 ? 1.0 : 0.9;
+      if (k > 0.66) { col = cCore * fold; em = 0.14; }
+      else if (k > 0.1) { col = cGlow * fold; em = 0.06; }
+    }
+  }
+  // Her own light, behind it: her ears, her spots, the tip of her tail.
+  float she = 0.0;
+  for (int i = 0; i < 3; i++) {
+    if (uShe[i].w <= 0.0) continue;
+    vec3 d = uShe[i].xyz - vWorld;
+    float s = dot(d, pn);
+    if (s > -0.1) continue;
+    vec3 q = d - pn * s;
+    float rp = 0.5 + 0.32 * -s;
+    she = max(she, uShe[i].w * (1.0 - smoothstep(4.5, 10.0, -s)) * (1.0 - dot(q, q) / (rp * rp)));
+  }
+  she += (wob - 0.5) * 0.1;
+  if (she > 0.22) { col = she > 0.6 ? cCore : cGlow; em = she > 0.6 ? 0.5 : 0.28; }
+  // Ridden, she wakes it: rings of her light run out across the stone from where she is.
+  if (uWake.w > 0.0) {
+    float d = distance(vWorld, uWake.xyz);
+    float k = uWake.w * (1.0 - smoothstep(3.5, 9.0, d));
+    float ring = fract(d * 0.55 - uTime * 1.5 + wob * 0.12);
+    if (k > 0.05 && ring > 1.0 - 0.2 * k) { col = mix(col, cGlow, 0.9); em = max(em, 0.3); }
+  }
+  // Where she went through: a splash of her light left in the stone, a ring round a heart, seen from both sides.
+  for (int i = 0; i < 3; i++) {
+    if (uScar[i].w <= 0.0) continue;
+    float d = distance(vWorld, uScar[i].xyz) / (1.25 * uScar[i].w * (0.8 + 0.4 * wob));
+    if (d > 1.0) continue;
+    bool heart = d < 0.3 + 0.06 * sin(uTime * 3.1 + float(i) * 2.0);
+    bool ring = d > 0.76;
+    if (heart || ring) { col = cCore; em = 0.34; } else { col = cGlow * 0.82; em = 0.0; }
+  }
+  if (rim > 0.2) { col = rim > 0.66 ? cCore : cGlow; em = rim > 0.66 ? 0.42 : 0.22; }
+  writeG(col, em, n, vView);
 }
 `;

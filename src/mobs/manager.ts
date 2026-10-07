@@ -16,6 +16,9 @@ import type { Flock, Mob, MobCtx, PlayerView, Species } from './types';
 // newcomers arrive wherever you are.
 const DESPAWN_R = 500;
 const DRAW_R = 460;
+// A flock running from the giant (`data.gone`) is seen going for much further than that: until it's a speck in the fog.
+const GONE_R = 1100;
+const GONE_DRAW_R = 1000;
 /** Lasso reach (m). */
 export const LASSO_RANGE = 24;
 const LEAD_RANGE = 9;
@@ -73,6 +76,8 @@ export class Mobs {
   readonly flocks = new Map<string, Flock>();
   readonly tamed: Mob[] = [];
   private spawnT = 0;
+  /** The giant is about (see `scare`): nothing new turns up. */
+  private fright = false;
   private age = 0;
   private nextId = 0;
   private rnd: () => number;
@@ -116,6 +121,7 @@ export class Mobs {
     this.flocks.clear();
     this.tamed.length = 0;
     this.spawnT = 0;
+    this.fright = false;
     this.session = (Math.random() * 4294967296) >>> 0;
     this.rnd = mulberry32(this.session);
     this.resetClock();
@@ -139,10 +145,11 @@ export class Mobs {
     ctx.hidden = (x, y, z, r) => !this.frustum.intersectsSphere(this.sphere.set(v1.set(x, y, z), r));
     // Drop flocks that have wandered far off (they're replaced by newcomers).
     for (const [key, f] of this.flocks) {
-      if (Math.hypot(f.centre.x - p.x, f.centre.z - p.z) < DESPAWN_R) continue;
+      if (Math.hypot(f.centre.x - p.x, f.centre.z - p.z) < (f.data.gone ? GONE_R : DESPAWN_R)) continue;
       if (f.members.some((m) => m.state !== 'wild')) continue;
       this.flocks.delete(key);
     }
+    if (this.fright) return;
     const initial = this.age < 1.5;
     // Habitat searches cost terrain lookups: only a couple of the wilder
     // kinds look for a place per tick.
@@ -154,7 +161,7 @@ export class Mobs {
         if (searches <= 0) continue;
         const want = Math.round(sp.herds * this.settings.beastHerds * this.settings.density);
         let have = 0;
-        for (const f of this.flocks.values()) if (f.species === sp && !f.data.debug) have++;
+        for (const f of this.flocks.values()) if (f.species === sp && !f.data.debug && !f.data.gone) have++;
         if (have >= want) continue;
         searches--;
         const [lo, hi] = sp.every ?? [30, 60];
@@ -166,7 +173,7 @@ export class Mobs {
       const per = sp.name === 'crow' ? this.settings.crowFlocks : sp.name === 'stelk' ? this.settings.stelkHerds : this.settings.floofFlocks;
       const want = Math.round(per * this.settings.density);
       let have = 0;
-      for (const f of this.flocks.values()) if (f.species === sp && !f.data.debug && !f.data.passing) have++;
+      for (const f of this.flocks.values()) if (f.species === sp && !f.data.debug && !f.data.passing && !f.data.gone) have++;
       if (have >= want) continue;
       if (!this.launch(sp, ctx, initial)) {
         // Nowhere suitable out of view right now: try again shortly.
@@ -189,7 +196,7 @@ export class Mobs {
     this.cooldown.crowPass -= dt;
     if (crow && this.cooldown.crowPass <= 0 && this.settings.density > 0) {
       let crows = 0;
-      for (const f of this.flocks.values()) if (f.species === crow && !f.data.debug) crows++;
+      for (const f of this.flocks.values()) if (f.species === crow && !f.data.debug && !f.data.gone) crows++;
       if (crows >= this.settings.crowFlocks * this.settings.density + 2) {
         this.cooldown.crowPass = 5;
       } else if (this.launch(crow, ctx, false, undefined, undefined, true)) {
@@ -240,7 +247,7 @@ export class Mobs {
    * A creature that lives at the stable, back from a save: tamed, saddled
    * and standing at `at`, looking as it did (`tint`).
    */
-  adopt(name: string, id: string, at: THREE.Vector3, tint: THREE.Color, ctx: MobCtx): Mob | null {
+  adopt(name: string, id: string, at: THREE.Vector3, tint: THREE.Color | null, ctx: MobCtx): Mob | null {
     const sp = this.species.find((s) => s.name === name);
     if (!sp) return null;
     const rnd = mulberry32(hashInt(id.length, id.charCodeAt(id.length - 1), this.session, 711));
@@ -250,7 +257,7 @@ export class Mobs {
     sp.initMob(m, 0, f, ctx);
     m.pos.copy(at);
     m.flock = null;
-    m.tint.copy(tint);
+    if (tint) m.tint.copy(tint);
     m.state = 'tamed';
     m.stabled = true;
     this.tamed.push(m);
@@ -262,6 +269,39 @@ export class Mobs {
   spawnFlockAt(name: string, x: number, z: number, ctx: MobCtx, n?: number): Flock | null {
     const sp = this.species.find((s) => s.name === name);
     return sp ? this.launch(sp, ctx, true, new THREE.Vector3(x, this.gen.height(x, z), z), n) : null;
+  }
+
+  /**
+   * The giant is coming, from `from`: every wild flock about is off the other
+   * way for good (Species.bolt), the fliers seen going until they're specks,
+   * and nothing new turns up until `calm`. `flush`: this many more flocks of
+   * birds go up off the land between `seen` (where it's watched from: you,
+   * unless told) and it, so there is always something in the sky to see go.
+   * (Yours stay: anything tamed, on a rope, or the lesson's.)
+   */
+  scare(from: THREE.Vector3, ctx: MobCtx, flush = 0, seen = ctx.player.pos) {
+    this.fright = true;
+    const crow = this.species.find((sp) => sp.name === 'crow');
+    const p = seen, dx = from.x - p.x, dz = from.z - p.z, far = Math.hypot(dx, dz) || 1;
+    for (let k = 0, tries = 0; crow && k < flush && tries < 60; tries++) {
+      // Spread along the way to it and out to both sides of that, the nearest a little way off.
+      const t = Math.max(0.18 + this.rnd() * 0.6, 60 / far), side = (this.rnd() - 0.5) * Math.min(far, 420) * 0.9 * (0.4 + t);
+      const x = p.x + dx * t + (dz / far) * side, z = p.z + dz * t - (dx / far) * side, h = this.gen.height(x, z);
+      // Out of the trees, for choice: they come up through the canopy, and aren't seen turning up on open ground.
+      if (h < SEA_LEVEL + 1 || (tries < 40 && this.gen.forestDensity(x, z, h) < 0.2)) continue;
+      this.launch(crow, ctx, true, new THREE.Vector3(x, h, z), 5 + Math.floor(this.rnd() * 5));
+      k++;
+    }
+    for (const f of this.flocks.values()) {
+      if (f.data.gone || f.data.calm || !f.species.bolt || f.members.some((m) => m.state !== 'wild')) continue;
+      f.data.gone = true;
+      f.species.bolt(f, from, ctx);
+    }
+  }
+
+  /** It has been and gone: creatures turn up again as they always did (those that ran keep going). */
+  calm() {
+    this.fright = false;
   }
 
   // ------------------------------------------------------------ interaction
@@ -427,7 +467,7 @@ export class Mobs {
       n++;
       if (!live(m)) continue;
       const d = m.pos.distanceTo(camera.position);
-      if (d > DRAW_R && !m.ridden) continue;
+      if (d > (m.flock?.data.gone ? GONE_DRAW_R : DRAW_R) && !m.ridden) continue;
       centre(m, this.sphere.center);
       this.sphere.radius = m.species.radius * 2.6;
       if (!m.ridden && !this.frustum.intersectsSphere(this.sphere)) {

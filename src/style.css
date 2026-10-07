@@ -10,13 +10,7 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: #efd6c3; }
   font: 12px/1.4 ui-sans-serif, system-ui, sans-serif; color: #3d2a2a;
   background: rgba(250, 240, 228, 0.72); padding: 5px 12px; border-radius: 999px;
 }
-#veil {
-  position: fixed; inset: 0; display: grid; place-content: center; text-align: center;
-  background: #efd6c3; color: #5c3a3e; transition: opacity 0.8s ease; z-index: 10;
-  font: 600 34px/1.2 Georgia, 'Times New Roman', serif; letter-spacing: 0.04em;
-}
-#veil span { font: italic 15px/2 Georgia, serif; opacity: 0.75; }
-#veil.gone { opacity: 0; pointer-events: none; }
+/* #veil (the loading screen) is styled in index.html, so it is there on the first paint. */
 #prompt {
   position: fixed; left: 50%; bottom: 44px; transform: translateX(-50%); pointer-events: none;
   font: 13px/1.4 ui-sans-serif, system-ui, sans-serif; color: #3d2a2a; transition: opacity 0.2s;
@@ -77,6 +71,8 @@ body.touch #help, body.touch #prompt, body.touch #fps { display: none; }
   right: calc(24px + env(safe-area-inset-right)); bottom: calc(196px + env(safe-area-inset-bottom));
 }
 #touch .jump.climb { font-size: 22px; }
+#touch .jump.chute { background: rgba(250, 240, 228, 0.92) var(--chute) center / 62% no-repeat; border-color: #c8544a; }
+#touch .jump.chute.held { background-color: #f0c26a; }
 /* Dev: the checkpoint strip (` shows it). */
 #checkpoints {
   position: fixed; left: 50%; top: 10px; transform: translateX(-50%); z-index: 6; display: flex; gap: 4px;

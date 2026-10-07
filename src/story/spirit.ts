@@ -60,6 +60,9 @@ export interface Want {
   total?: number | null;
   /** Wait for the explorer to keep up while travelling. */
   lead: boolean;
+  /** Leading at a stride: no stops on the way to turn and wave, and it
+   *  only waits once you're this far behind, m (otherwise 10, with stops). */
+  lag?: number;
   /** Ushering you in: standing beside this doorway (a point in its
    *  opening), it sweeps an arm from you into it, "after you". */
   usher?: THREE.Vector3;
@@ -229,8 +232,9 @@ export class Spirit {
    * turned right down, eyes heavy. 'down' is what's left afterwards: heavy
    * eyes and a frown, but it gets on with things (and still brightens when
    * something good happens). 'brave' is its mind made up (the send-off,
-   * story/journey.ts): brows set, eyes wide open under them, mouth a firm
-   * line, stood up straight. Seeing you doesn't soften it.
+   * story/journey.ts): brows set (lightly: resolve, not a glare, and only
+   * while it looks at the trail; turned to you its eyes are simply wide),
+   * mouth a firm line, stood up straight.
    */
   mood: 'scared' | 'sad' | 'down' | 'brave' | null = null;
   private brow = 0;
@@ -241,16 +245,21 @@ export class Spirit {
    * ground, and isn't cheered by seeing you.
    *
    * The lowest it gets, below every `mood`: its fire sunk to ash (colour
-   * and glow, whatever its warmth), lids heavy and slanted, its lip
+   * and glow, whatever its warmth), brows up in the middle, eyes big and wet, its lip
    * trembling, a heaved sigh every so often, and tears.
    */
   sullen = false;
   /** `sullen`, eased in and out. */
   private gloom = 0;
+  /** A sad `mood`, eased in and out. */
+  private woe = 0;
   private mouthHalf = -1;
 
   /** Snatched up by one of the giant's crows: it hangs at this point (which moves), arms up, legs going. */
   carried: THREE.Vector3 | null = null;
+
+  /** How big it's drawn, where it stands (1: itself). Not `group.scale`: the group is the world's, and that would move it. */
+  size = 1;
 
   /** In a hurry (the village running from the giant): how fast it goes to where it's wanted, m/s. */
   haste: number | null = null;
@@ -592,10 +601,10 @@ export class Spirit {
       const dest = w.at;
       const far = this.pos.distanceTo(dest) > 0.6;
       if (far) {
-        const lag = w.lead && toPlayer > 10 && Math.hypot(this.player.x - dest.x, this.player.z - dest.z) > Math.hypot(this.pos.x - dest.x, this.pos.z - dest.z) - 2;
+        const lag = w.lead && toPlayer > (w.lag ?? 10) && Math.hypot(this.player.x - dest.x, this.player.z - dest.z) > Math.hypot(this.pos.x - dest.x, this.pos.z - dest.z) - 2;
         if (lag) this.waiting = true;
-        if (this.waiting && (toPlayer < 6 || !w.lead)) this.waiting = false;
-        const rc = w.rally && !this.waiting ? (this.rallyT += dt) % RALLY_GO : 9;
+        if (this.waiting && (toPlayer < (w.lag ? w.lag * 0.5 : 6) || !w.lead)) this.waiting = false;
+        const rc = w.rally && !w.lag && !this.waiting ? (this.rallyT += dt) % RALLY_GO : 9;
         if (rc < 1.3 && toPlayer < 30) {
           // A stop to turn and wave you on, with a hop.
           this.vel.multiplyScalar(Math.exp(-10 * dt));
@@ -763,6 +772,7 @@ export class Spirit {
     this.root.position.copy(this.pos);
     this.root.position.x += Math.sin(this.t * 55) * 0.008 * shiver;
     this.root.rotation.y = this.heading + this.spin * Math.PI * 2;
+    this.root.scale.setScalar(this.size);
     const breathe = Math.sin(this.t * 2.1) * 0.02;
     const sy = 1 + sq + breathe - this.sit * 0.08 - gloom * 0.05 + sigh * 0.055;
     this.body.scale.set(1 / Math.sqrt(sy), sy, 1 / Math.sqrt(sy));
@@ -856,10 +866,11 @@ export class Spirit {
     if (shiver > 0.5 && lids > 0.5) lids = 0.55;
     if (happy || this.happyT > 0) lids = -1;
     if (mood === 'scared' && lids > 0.5) lids = 1;
-    if ((mood === 'sad' || mood === 'down') && lids > 0.5) lids = 0.62;
+    if ((mood === 'sad' || mood === 'down') && lids > 0.5) lids = 0.88;
     const brave = mood === 'brave' && !happy;
     if (brave && lids !== 1) lids = this.t > this.blinkAt ? 0.05 : 1;
-    this.brow += ((brave ? 1 : 0) - this.brow) * e(7);
+    // The set brow is for the trail, never for you: turned to you, its eyes are just wide.
+    this.brow += ((brave && lookAt !== this.player ? 1 : 0) - this.brow) * e(7);
     this.bodyB.material.uniforms.uBrow.value = this.brow;
     let lx = 0, ly = 0;
     if (lookAt) {
@@ -872,10 +883,12 @@ export class Spirit {
     }
     // Eyes down, unless it's looking round at you.
     if (low && lookAt !== this.player) { ly = Math.min(ly, -0.9); if (walking) lx = 0; }
-    if (low && lids > 0.5) lids = 0.8;
+    if (low && lids > 0.5) lids = 0.88;
     const sad = this.bodyB.material.uniforms.uSad.value as THREE.Vector2;
     const tp = ((this.t + 1.3) % TEAR) / 2.4;
-    sad.set(gloom, low && tp < 1 ? Math.max(tp, 0.001) : 0);
+    // (Its sad face is the same one, whichever way it's sad: only despair has the tear that falls.)
+    this.woe += ((mood === 'sad' ? 1 : mood === 'down' ? 0.8 : 0) - this.woe) * e(4);
+    sad.set(Math.max(gloom, this.woe), low && tp < 1 ? Math.max(tp, 0.001) : 0);
     this.look.x += (lx - this.look.x) * e(low ? 4 : 10);
     this.look.y += (ly - this.look.y) * e(10);
     this.eye.set(this.look.x, this.look.y, lids, 0);

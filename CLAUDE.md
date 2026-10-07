@@ -12,10 +12,12 @@ count.** Keep this file lean. Depth lives in:
   mount-gated puzzle dungeons. Decided, not built. Read its "Conflicts to
   settle" before touching the story, and don't resolve one unasked.
   Dungeon 1 is built through all three slices of `docs/NEXT-dungeon1.md`
-  (slice C, the homecoming, not yet played by the owner). What comes next
-  is `docs/NEXT-dungeon2.md`: the open questions from slice C, and what
-  dungeon 2 can assume. The giant's trail ends at a second ring with
-  nothing under it.
+  (slice C, the homecoming, not yet played by the owner). Dungeon 2, the
+  Veil Cave (its creature the glimmer), is built under the second ring and
+  **not yet played by the owner**: `docs/NEXT-dungeon2.md` has what it is,
+  the defaults taken and the questions to answer after playing it. After
+  it a second spirit is flown home and the giant walks on to a third ring
+  (2026-10-06): bare stones, nothing under it yet. Dungeon 3 is not designed.
   No combat, no text. Spooky is fine where the story wants it (the
   giant's crows); nothing gory or cruel.
 - `docs/BRIEF.md`: the original request, verbatim, plus how to read `/inspo`.
@@ -93,10 +95,13 @@ npm run shots    # build + headless GPU screenshots -> shots/   (look at them!)
 - `src/giant/giant.ts`: the giant (skeleton, gait, IK, instanced boulders).
   Drawn by `GIANT_FRAG`; fogged as one card via `uGiant` in `post.ts`.
   Dev: `?giant=600,walk`. In the story, `visit.ts` drives it.
+  It's solid whatever it's doing (`shell`: its boulders, worked out again each frame something near asks), carries
+  whoever stands on it (`rider`), and its stone is sticky underfoot (half pace, never shed; a jump comes off): check with `scripts/giant-solid.mjs <dir> [spot=hump]`.
   `trail.ts`: what a footfall leaves (print, flattened trees, steam).
   `visit.ts`: the giant's visit to the village once the hearth is lit
   (its footfalls, the smashing, the taking, the camera, restore from save).
   `birds.ts`: its flock of black crows, which snatch the spirits and carry their lights.
+  Just after the village bolts every wild creature about runs or flies off for good (`Mobs.scare`, each species' `bolt`; check with `scripts/visit.mjs <dir> tower mobs fine`).
   `ring.ts`: the dungeon ring once open (forcefield, dark spirit, the two
   arms that pull you down and lift you back out), and shutting for good
   (`seal`).
@@ -104,11 +109,11 @@ npm run shots    # build + headless GPU screenshots -> shots/   (look at them!)
   cutscene with your hands off (the shrine the ring becomes, the crow that
   takes the light and flies into the giant's open mouth: the whole
   sequence and its camera are the table `T` and `cinematic()`; saved as
-  `fjellheim.offer1.<seed>`). No guide in it. The giant's side of it is
+  `embla.offer1.<seed>`). No guide in it. The giant's side of it is
   `awake` / `mouth` / `gulp` / `grin` / `look` in `giant.ts`; its open
   mouth is a real hole into the hollow of its head (`throat`, `uHeadInv`).
   It has no breath clouds (removed 2026-10-02); the only puffs off it are
-  the dust of its footfalls. The steam off its prints shows only while it walks.
+  the dust of its footfalls. The steam off its prints shows only while it walks, and their glow goes out a few seconds after it stops (`Prints.cool`).
   Dev: `?fresh=1&cp=offer`, `__ow.winDungeon()`,
   `__ow.offering().debug('held'|'placed'|'given')`; check a change with
   `scripts/offering.mjs <dir> play,reload,views,mouth` and look at the frames.
@@ -118,10 +123,14 @@ npm run shots    # build + headless GPU screenshots -> shots/   (look at them!)
   is the spirit, `Village.comeHome`; the two meet; its house is left a wreck, step 0;
   the cut back; `Giant.rise` (it stands up: `UP`),
   and the walk to the second ring, `onwardRoute` in `visit.ts`). Saved as
-  `fjellheim.home1.<seed>` once the spirit is home; a reload after that
+  `embla.home1.<seed>` once the spirit is home; a reload after that
   replays nothing and finds the giant asleep by the second ring. Check
   with `scripts/offering.mjs <dir> home` (and `sandbox`, which walks the
   whole way), `scripts/rise.mjs <dir>` and `scripts/sites.mjs [map.png] <seeds>`.
+  There are two of them: `homecoming2` in main is the same class after
+  dungeon 2's offering (`who: 1, leg: 2, name: 'home2'`: the second spirit
+  taken, the walk from ring 2 to ring 3, its veil teal). Check with
+  `scripts/veil.mjs <dir> home2 [sandbox]`.
 - `src/dungeon/`: dungeon 1 inside, its own scene, drawn instead of the
   world while `dungeon.inside` (main swaps the `WorldQuery` over to it).
   `layout.ts` (the cave's plan as functions of the seed, drawn at its top:
@@ -129,7 +138,9 @@ npm run shots    # build + headless GPU screenshots -> shots/   (look at them!)
   lights; `layout.at` names its places), `shell.ts` (meshes from the plan),
   `dungeon.ts` (scene, collision, camera, light, being let down and lifted,
   and what you do there: the wrong-way ledge, the stones, the rockfall, the
-  shut-in rockhopper, the warm light). Its creature is a `Mob` with `below`,
+  shut-in rockhopper, the thought on the high stone of how the parachute is
+  opened: `chuteHintCanvas`, check with `scripts/chute-hint.mjs <dir> [touch]`; the warm light: a dark light, violet, `darkLight.ts`;
+  orange is only ever a spirit). Its creature is a `Mob` with `below`,
   run through `Mobs.under`. Slices A and B of `docs/NEXT-dungeon1.md` are
   built (taking the light: a success beat, then out on the surface on the
   rockhopper: `leaveDungeon(true)`, `dungeonWon`, `bringUp` in main; the
@@ -137,15 +148,37 @@ npm run shots    # build + headless GPU screenshots -> shots/   (look at them!)
   `scripts/dungeon-plan.mjs` (the plan from above, what can reach what) and
   `scripts/dungeon.mjs <dir> quest` (plays it through by the keys, the
   offering included).
+  Dungeon 2, the Veil Cave, under the second ring (`ring2`, `cave`,
+  `offering2` in main; `den()` is whichever dungeon you're in):
+  `veilPlan.ts` (the plan, drawn at its top: a honeycomb of cells, rock
+  piers at its corners, veils hung between them; `at` names its places,
+  `route` is the glimmer's way), `veilShell.ts` (the veils' mesh, with what
+  glows behind each baked in; the rock is `shell.ts`'s, which takes either
+  plan), `veilCave.ts` (scene, collision: `collide(.., ghost)` lets a
+  phasing glimmer through veils and nothing else; the camera: `clampCamera`
+  and the holes she opens; hide and seek: `playHer`, the glimmer a `puppet`
+  mob: she runs veil to veil, looks back before each, waits in the room beyond till you're in its doorway, never comes back for you; two veils' ends, then into the shut cell `HIDE` and her head back out; `LEAD`;
+  `pawTrail.ts` is her prints on the floor, `uScar` her mark in a veil,
+  `uHer` her room alight behind one; the way out). Veils are `VEIL_FRAG`. Saved as
+  `embla.dungeon2.<seed>` (`round`, `taken`), its ending as `offer2`
+  and `home2`. Its offering is dungeon 1's `Offering` with `OfferOpts`
+  (`OFFER_SHORT`, a glimmer statue). Dev: `?dungeon=2[,x,z]`,
+  `?fresh=1&cp=ring2` / `cp=offer2`, `__ow.cave()`, `__ow.winDungeon(2)`,
+  `__ow.firstDone()`; check a change with `scripts/veil-plan.mjs` (proves on
+  foot / riding reach and that no dash crosses two veils) and
+  `scripts/veil.mjs <dir> quest,dash,stall,reload,story,arrive` (look at the
+  `dash-*` frames for the camera). Build to your own folder and pass
+  `DIST=<folder>`: other sessions rebuild `dist/`.
   `WorldGen.dungeons`: every dungeon's ring and the way to it, a list
-  (two so far; `dungeon` is the first). Slow to find: found in order on
-  the main thread, cached per seed (`fjellheim.dungeon.v8`; when the land moves, bump `WORLD_VERSION` in main, which wipes every save) and handed to
+  (three so far, the third with nothing under it; `dungeon` is the first). Slow to find: found in order on
+  the main thread, cached per seed (`embla.dungeon.v9`; when the land moves, bump `WORLD_VERSION` in main, which wipes every save) and handed to
   the workers, which never search (`primeDungeon` in main). Adding one must
   not move the ones before it: `scripts/sites.mjs` prints a fingerprint.
   `src/world/hands.ts`: stone hands standing about the world on islands
   and summits (seeded, one at most per 1.1 km cell; inert so far).
   `src/world/prints.ts`: the prints themselves, as a texture the terrain and
   prop shaders read (`PRINT_GLSL`), plus the same maths in TS for walking.
+  Nothing is left standing between the outer edges of the trail: a second texture, the clear mask (`CLEAR_TEX`, `Prints.clears`).
 - `src/audio/ambience.ts`: the music. One loop for outdoor exploration
   (a test of the musical language: no biome beds, air, night layer or
   plucks until asked), faded in and out over `FADE`, hushed in cutscenes

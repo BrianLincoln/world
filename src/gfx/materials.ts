@@ -3,7 +3,7 @@ import { PRINT_U } from '../world/prints';
 import * as THREE from 'three';
 import { BIOME } from './palette';
 import {
-  CASTER_FRAG, CASTER_VERT, CLOUD_FRAG, CLOUD_VERT, CREATURE_FRAG, CREATURE_VERT, DUNGEON_FRAG, DUNGEON_GLOWS, DUNGEON_VERT, LANTERN_FRAG, LANTERN_VERT, FACE_FRAG, FACE_PARAMS, FACE_VERT, FS_VERT, GIANT_FRAG, GIANT_VERT, POOL_FRAG, PORTAL_FRAG, PROP_FRAG, PROP_VERT, SKY_FRAG, SOLID_FRAG, SOLID_VERT,
+  CASTER_FRAG, CASTER_VERT, CLOUD_FRAG, CLOUD_VERT, CREATURE_FRAG, CREATURE_VERT, DUNGEON_FRAG, DUNGEON_GLOWS, DUNGEON_VERT, VEIL_FRAG, VEIL_VERT, LANTERN_FRAG, LANTERN_VERT, FACE_FRAG, FACE_PARAMS, FACE_VERT, FS_VERT, GIANT_FRAG, GIANT_VERT, POOL_FRAG, PORTAL_FRAG, PROP_FRAG, PROP_VERT, SKY_FRAG, SOLID_FRAG, SOLID_VERT,
   TERRAIN_FRAG, TERRAIN_VERT, WATER_FRAG, WATER_VERT,
 } from './shaders';
 
@@ -302,7 +302,7 @@ export function makeGiantMaterial(inside = false) {
     uInside: { value: inside ? 1 : 0 },
     uGlowAt: { value: new THREE.Vector4() },
     uHeadInv: { value: new THREE.Matrix4() },
-    cWarm: { value: col('#f08a3c') },
+    cWarm: { value: col('#a45cff') },
   }, inside ? { side: THREE.BackSide } : {});
 }
 
@@ -338,26 +338,64 @@ export const DUNGEON_U = {
   cCeil: { value: col('#4f4674') },
   cMark: { value: col('#d9d2f2') },
   cMarkDark: { value: col('#2a2140') },
-  cWarm: { value: col('#ffd9a8') },
+  // (What the dark light falls on: the ring's violet, pinker than the rock's own.)
+  cWarm: { value: col('#e6b8ff') },
+  uWarmFlat: { value: 0 },
+  cWarmHi: { value: col('#e2bcff') },
+  cWarmLo: { value: col('#a877e0') },
   cLit: { value: col('#ffffff') },
   cMid: { value: col('#ffffff') },
   cShade: { value: col('#ffffff') },
 };
 
 /** The cave itself (`shell`), or the rock standing in it (vertex colours in aCol). */
-export function makeDungeonMaterial(shell: boolean) {
-  return mat(DUNGEON_VERT, DUNGEON_FRAG, { ...U, ...DUNGEON_U, uIsProp: { value: shell ? 0 : 1 }, uShell: { value: shell ? 1 : 0 }, uGlint: { value: 0 } });
+/** (`rock`: its own stone colours in place of dungeon 1's violet, by uniform name.) */
+export function makeDungeonMaterial(shell: boolean, rock?: Record<string, string | number>) {
+  const own = Object.fromEntries(Object.entries(rock ?? {}).map(([k, x]) => [k, { value: typeof x === 'number' ? x : col(x) }]));
+  return mat(DUNGEON_VERT, DUNGEON_FRAG, { ...U, ...DUNGEON_U, ...own, uIsProp: { value: shell ? 0 : 1 }, uShell: { value: shell ? 1 : 0 }, uGlint: { value: 0 } });
+}
+
+/** The Veil Cave's rock: teal where dungeon 1 is violet, teal moss in patches on a pale floor. */
+export const VEIL_ROCK = {
+  cFloor: '#b9dcd6', cFloor2: '#7fc4b4', cWallA: '#4c7480', cWallB: '#426975', cWallC: '#5a8490', cCeil: '#39606c',
+  cMark: '#d2f2ec', cMarkDark: '#173038', cWarm: '#e6b8ff', uWarmFlat: 0.85,
+};
+
+/** What the veils share: the glimmer's lights behind them, the rider who wakes them, the holes she opens. */
+export const VEIL_U = {
+  uShe: { value: [new THREE.Vector4(), new THREE.Vector4(), new THREE.Vector4()] },
+  uWake: { value: new THREE.Vector4() },
+  uHole: { value: [new THREE.Vector4(), new THREE.Vector4()] },
+  /** Her whole glow, for a veil she's behind: xyz where, w how strong (0: not hidden from you). */
+  uHer: { value: new THREE.Vector4() },
+  /** Where she went through a veil: xyz where, w how wide open the mark is (0..1). */
+  uScar: { value: [new THREE.Vector4(), new THREE.Vector4(), new THREE.Vector4()] },
+};
+
+/** The veils (one mesh; see VEIL_FRAG). Seen from both sides. */
+export function makeVeilMaterial() {
+  const D = DUNGEON_U;
+  return mat(VEIL_VERT, VEIL_FRAG, {
+    ...U, ...VEIL_U, uGlows: D.uGlows, uGlowN: D.uGlowN, cLit: D.cLit, cMid: D.cMid, cShade: D.cShade, cWarm: D.cWarm, uIsProp: { value: 1 },
+    cVeil: { value: col('#e4f3ee') }, cFold: { value: col('#bcd9d6') },
+    cGlow: { value: col('#56c9bb') }, cCore: { value: col('#bdf6e8') },
+    cAmber: { value: col('#9a5cf0') }, cAmberCore: { value: col('#dcb4ff') },
+    cDay: { value: col('#9fdfe2') }, cDayCore: { value: col('#e6fbf6') },
+    cWarmHi: D.cWarmHi, cWarmLo: D.cWarmLo,
+  }, { side: THREE.DoubleSide });
 }
 
 /** The spirit lanterns (one mesh; see LANTERN_FRAG). */
-export function makeLanternMaterial() {
-  return mat(LANTERN_VERT, LANTERN_FRAG, { ...U, uIsProp: { value: 1 }, cDark: { value: col('#4d4884') }, cGlow: { value: col('#d6efff') }, cInk: { value: col('#1c1630') }, cLid: { value: col('#b3abe0') } });
+export function makeLanternMaterial(c = { dark: '#4d4884', glow: '#d6efff', ink: '#1c1630', lid: '#b3abe0' }) {
+  return mat(LANTERN_VERT, LANTERN_FRAG, { ...U, uIsProp: { value: 1 }, cDark: { value: col(c.dark) }, cGlow: { value: col(c.glow) }, cInk: { value: col(c.ink) }, cLid: { value: col(c.lid) } });
 }
 
-export function makePortalMaterial(r: number) {
-  return mat(DUNGEON_VERT, PORTAL_FRAG, { ...U, uIsProp: { value: 0 }, uOrigin: DUNGEON_U.uOrigin, uR: { value: r } });
+/** (`c`: two bands and the lip. Dungeon 1's violet unless given.) */
+export function makePortalMaterial(r: number, c?: { a: string; b: string; lip: string }) {
+  const k = c ? [col(c.a), col(c.b), col(c.lip)] : [new THREE.Color(0.5, 0.43, 0.82), new THREE.Color(0.72, 0.66, 0.97), new THREE.Color(0.93, 0.9, 1.0)];
+  return mat(DUNGEON_VERT, PORTAL_FRAG, { ...U, uIsProp: { value: 0 }, uOrigin: DUNGEON_U.uOrigin, uR: { value: r }, cPortA: { value: k[0] }, cPortB: { value: k[1] }, cPortLip: { value: k[2] } });
 }
 
-export function makePoolMaterial() {
-  return mat(DUNGEON_VERT, POOL_FRAG, { ...U, uIsProp: { value: 0 }, cWater: { value: col('#4b4a86') }, cStreak: { value: col('#aaa6da') } });
+export function makePoolMaterial(water = '#4b4a86', streak = '#aaa6da') {
+  return mat(DUNGEON_VERT, POOL_FRAG, { ...U, uIsProp: { value: 0 }, cWater: { value: col(water) }, cStreak: { value: col(streak) } });
 }

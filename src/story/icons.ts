@@ -760,6 +760,31 @@ export function slotCanvas(name: IconName, filled: boolean): HTMLCanvasElement {
   return c;
 }
 
+/** The thought bubble's shape: a scalloped cloud and the two blobs trailing down from it. */
+function bubble(g: CanvasRenderingContext2D) {
+  const blob = (x: number, y: number, r: number) => {
+    g.beginPath();
+    g.arc(x, y, r, 0, Math.PI * 2);
+    g.fillStyle = '#fbf3e4';
+    g.fill();
+    ink(g, 5);
+  };
+  blob(30, 118, 5);
+  blob(42, 104, 8);
+  // Cloud-ish bubble: a circle with soft scallops.
+  g.beginPath();
+  for (let i = 0; i <= 40; i++) {
+    const a = (i / 40) * Math.PI * 2;
+    const r = 46 + 3 * Math.cos(a * 7);
+    const x = 68 + Math.cos(a) * r, y = 54 + Math.sin(a) * r * 0.9;
+    if (i === 0) g.moveTo(x, y); else g.lineTo(x, y);
+  }
+  g.closePath();
+  g.fillStyle = '#fbf3e4';
+  g.fill();
+  ink(g, 6);
+}
+
 /** The spirit's thought bubble with an icon inside, and "×n" beside it when
  *  it wants several of something. */
 export function bubbleCanvas(name: IconName, count = 0): HTMLCanvasElement {
@@ -767,27 +792,7 @@ export function bubbleCanvas(name: IconName, count = 0): HTMLCanvasElement {
   let c = cache.get(key);
   if (!c) {
     const [cc, g] = canvas();
-    const blob = (x: number, y: number, r: number) => {
-      g.beginPath();
-      g.arc(x, y, r, 0, Math.PI * 2);
-      g.fillStyle = '#fbf3e4';
-      g.fill();
-      ink(g, 5);
-    };
-    blob(30, 118, 5);
-    blob(42, 104, 8);
-    // Cloud-ish bubble: a circle with soft scallops.
-    g.beginPath();
-    for (let i = 0; i <= 40; i++) {
-      const a = (i / 40) * Math.PI * 2;
-      const r = 46 + 3 * Math.cos(a * 7);
-      const x = 68 + Math.cos(a) * r, y = 54 + Math.sin(a) * r * 0.9;
-      if (i === 0) g.moveTo(x, y); else g.lineTo(x, y);
-    }
-    g.closePath();
-    g.fillStyle = '#fbf3e4';
-    g.fill();
-    ink(g, 6);
+    bubble(g);
     g.save();
     if (count > 0) {
       g.translate(52, 54);
@@ -807,6 +812,95 @@ export function bubbleCanvas(name: IconName, count = 0): HTMLCanvasElement {
       g.fillText('×' + count, count > 9 ? 91 : 89, 57);
     }
     cache.set(key, (c = cc));
+  }
+  return c;
+}
+
+/**
+ * How the parachute is opened, as four frames of one thought (drawn twice the size: it's read up
+ * close): standing on a stone; a press, and she's jumped; falling; a second press, and the canopy is
+ * open. What's pressed is the thing under your thumb: a blank space bar, or on a touch screen a finger.
+ */
+export function chuteHintCanvas(step: number, touch: boolean): HTMLCanvasElement {
+  const key = `c:${step}:${touch}`;
+  let c = cache.get(key);
+  if (!c) {
+    c = document.createElement('canvas');
+    c.width = c.height = SIZE * 2;
+    const g = c.getContext('2d')!;
+    g.lineJoin = 'round';
+    g.lineCap = 'round';
+    g.scale(2, 2);
+    bubble(g);
+    g.translate(68, 53);
+    g.scale(0.78, 0.78);
+    const press = step === 1 || step === 3;
+    // The stone she's on.
+    g.beginPath();
+    g.moveTo(-50, 17);
+    g.lineTo(-51, 4);
+    g.quadraticCurveTo(-50, -1, -45, -1);
+    g.lineTo(-30, -1);
+    g.quadraticCurveTo(-25, -1, -25, 4);
+    g.lineTo(-28, 17);
+    g.closePath();
+    g.fillStyle = '#9d94a8';
+    g.fill();
+    ink(g, 4);
+    // Where she is, and the way she came through the air.
+    const at = [[-38, -15], [-23, -30], [-6, -25], [16, -6]][step];
+    if (step > 0) {
+      g.beginPath();
+      g.moveTo(-38, -24);
+      if (step === 1) g.quadraticCurveTo(-34, -29, -30, -31);
+      else g.quadraticCurveTo(-26, -46, -11, -30);
+      if (step === 3) g.quadraticCurveTo(-2, -24, 2, -16);
+      g.setLineDash([2, 7]);
+      g.globalAlpha = 0.55;
+      ink(g, 3.5);
+      g.globalAlpha = 1;
+      g.setLineDash([]);
+    }
+    if (step === 3) {
+      g.save();
+      g.translate(at[0] - 64 * 0.4, at[1] - 106 * 0.4);
+      g.scale(0.4, 0.4);
+      drawParachute(g);
+      g.restore();
+    }
+    g.beginPath();
+    g.arc(at[0], at[1], 5.5, 0, Math.PI * 2);
+    g.roundRect(at[0] - 4.5, at[1] + 3, 9, 12, 4);
+    g.fillStyle = INK;
+    g.fill();
+    // What's pressed.
+    if (touch) {
+      g.translate(4, 24);
+      g.scale(0.27, 0.27);
+      g.translate(-64, -64);
+      drawFinger(g, press);
+    } else {
+      const y = press ? 27 : 23;
+      g.beginPath();
+      g.roundRect(-24, 29, 54, 11, 5);
+      g.fillStyle = INK;
+      g.fill();
+      ink(g, 3.5);
+      g.beginPath();
+      g.roundRect(-24, y, 54, 11, 5);
+      g.fillStyle = press ? '#f0c26a' : '#fbf3e4';
+      g.fill();
+      ink(g, 3.5);
+      if (press) {
+        g.beginPath();
+        for (const s of [-1, 1]) {
+          g.moveTo(3 + s * 39, 22); g.lineTo(3 + s * 34, 25);
+          g.moveTo(3 + s * 41, 32); g.lineTo(3 + s * 34, 32);
+        }
+        ink(g, 3);
+      }
+    }
+    cache.set(key, c);
   }
   return c;
 }

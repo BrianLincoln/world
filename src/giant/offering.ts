@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { mulberry32 } from '../core/rng';
+import { makeDarkLight } from '../dungeon/darkLight';
 import { makeSolidMaterial } from '../gfx/materials';
 import { rockhopperStatue } from '../mobs/rockhopper';
 import type { Body } from '../player/movement';
@@ -59,13 +60,28 @@ export interface OfferDeps {
  * a second or so before; the mouth starts to shut behind it at `shut` and
  * is shut at `closed`; the smile comes at `smile`; `end`.
  */
-const T = (() => {
-  const set = 1.7, come = 1.2, dive = 4.3, walk = 2.8, take = 1.6;
+const timing = (set: number, come: number, dive: number, walk: number, take: number, gaps: [number, number, number, number], climb: number, smileAfter: number, hold: number) => {
   const landed = come + dive, atBowl = landed + walk, has = atBowl + take;
-  const wake = has + 0.4, cut = wake + 1.0, open = cut + 1.7, fly = open + 1.4, climb = 4.8;
-  const gone = fly + climb, shut = gone - 0.7, closed = shut + 0.75, smile = gone + 1.8, end = smile + 3.4;
+  const wake = has + gaps[0], cut = wake + gaps[1], open = cut + gaps[2], fly = open + gaps[3];
+  const gone = fly + climb, shut = gone - 0.7, closed = shut + 0.75, smile = gone + smileAfter, end = smile + hold;
   return { set, come, dive, landed, walk, atBowl, take, has, wake, cut, open, fly, climb, gone, shut, closed, smile, end };
-})();
+};
+const T = timing(1.7, 1.2, 4.3, 2.8, 1.6, [0.4, 1.0, 1.7, 1.4], 4.8, 1.8, 3.4);
+export type OfferTiming = typeof T;
+/**
+ * The same, told quickly (dungeon 2's: the owner found the first at risk of
+ * wearing thin): about 16 s from the light leaving you, 20 from coming up.
+ */
+export const OFFER_SHORT: OfferTiming = timing(1.3, 0.4, 3.0, 1.6, 1.4, [0.2, 0.8, 1.0, 0.9], 3.6, 1.2, 2.2);
+
+/** What differs from one dungeon's offering to the next. Left out: dungeon 1's. */
+export interface OfferOpts {
+  /** Its save key's name (`embla.<name>.<seed>`). */
+  name?: string;
+  /** The creature of the dungeon in stone, for the shrine: position and normal, feet at y = 0. */
+  statue?: THREE.BufferGeometry;
+  timing?: OfferTiming;
+}
 /** A beat after the shrine is up before the light leaves you (s). */
 const PAUSE = 0.7;
 /** The shrine: its plinth's radius (what you can't walk through) and height, how big the stone rockhopper is beside a live one, and how far over the ground the light sits in the bowl on its back. */
@@ -134,7 +150,7 @@ export class Offering {
   private shrine = new THREE.Group();
   private statue: THREE.Mesh;
   private orb: THREE.Mesh;
-  private orbMat = makeSolidMaterial('#f08a3c', 0.95, { keep: 1 });
+  private orbMat: THREE.ShaderMaterial;
   private orbAt = new THREE.Vector3();
   private orbFrom = new THREE.Vector3();
   private orbSize = ORB;
@@ -168,7 +184,12 @@ export class Offering {
   /** Where the orbit camera should be looking from once this hands it back (a yaw), once. */
   afterYaw: number | null = null;
 
-  constructor(private d: OfferDeps, seed: number) {
+  private T: OfferTiming;
+  private name: string;
+
+  constructor(private d: OfferDeps, seed: number, opts: OfferOpts = {}) {
+    this.T = opts.timing ?? T;
+    this.name = opts.name ?? 'offer1';
     const s = d.site;
     this.centre = new THREE.Vector3(s.x, d.ground(s.x, s.z), s.z);
     this.bowl = this.centre.clone().setY(this.centre.y + BOWL_Y);
@@ -180,11 +201,14 @@ export class Offering {
     const bowlY = BOWL_Y - 0.42 - 0.06;
     const bowl: [number, number][] = [[0.3, bowlY - 0.22], [0.5, bowlY - 0.1], [0.66, bowlY + 0.1], [0.6, bowlY + 0.13], [0.42, bowlY], [0.02, bowlY - 0.06]];
     const lathe = (pr: [number, number][]) => new THREE.Mesh(new THREE.LatheGeometry(pr.map(([r, y]) => new THREE.Vector2(r, y)), 26), stone);
-    this.statue = new THREE.Mesh(rockhopperStatue(), stone);
+    this.statue = new THREE.Mesh(opts.statue ?? rockhopperStatue(), stone);
     this.statue.scale.setScalar(STATUE);
     this.statue.position.y = PLINTH;
     this.shrine.add(lathe(plinth), this.statue, lathe(bowl));
-    this.orb = new THREE.Mesh(new THREE.SphereGeometry(1, 20, 14), this.orbMat);
+    // (A dark light, the ring's violet: not one of the spirits' orange ones.)
+    const dark = makeDarkLight(1.15);
+    this.orb = dark.mesh;
+    this.orbMat = dark.glow;
     this.shrine.traverse((o) => { o.frustumCulled = false; });
     for (const m of [this.paving, this.shrine, this.orb]) { m.frustumCulled = false; m.visible = false; }
     this.group.add(this.paving, this.shrine, this.orb, this.crow.group);
@@ -234,7 +258,7 @@ export class Offering {
   /** A save from after the light was taken: the ring already shut, and everything as it was left. */
   restore() {
     let st: OfferState = 'held';
-    try { const raw = localStorage.getItem(`fjellheim.offer1.${this.d.saveKey}`); if (raw === 'placed' || raw === 'given') st = raw; } catch { /* no storage: you still have it */ }
+    try { const raw = localStorage.getItem(`embla.${this.name}.${this.d.saveKey}`); if (raw === 'placed' || raw === 'given') st = raw; } catch { /* no storage: you still have it */ }
     this.state = st;
     this.plan();
     this.d.ring.seal(true);
@@ -259,7 +283,7 @@ export class Offering {
   }
 
   private save() {
-    try { localStorage.setItem(`fjellheim.offer1.${this.d.saveKey}`, this.state); } catch { /* ignore */ }
+    try { localStorage.setItem(`embla.${this.name}.${this.d.saveKey}`, this.state); } catch { /* ignore */ }
   }
 
   /** The shrine is a thing you can't walk through. */
@@ -333,6 +357,7 @@ export class Offering {
 
   /** `mode`: how you're getting about. */
   update(dt: number, mode: string) {
+    const T = this.T;
     this.time += dt;
     const ring = this.d.ring, b = this.d.body, c = this.centre;
     const up = this.state !== 'none' && ring.sealed;
@@ -402,6 +427,7 @@ export class Offering {
 
   /** One frame of the sequence. */
   private play(dt: number, g: Giant) {
+    const T = this.T;
     const t0 = this.t, t = (this.t += dt), fx = this.d.sfx, crow = this.crow, bird = crow.birds[0], b = this.d.body;
     const passed = (k: number) => t0 < k && t >= k;
     this.d.halt();
@@ -500,6 +526,7 @@ export class Offering {
   /** The camera for this frame while the offering has it. */
   cinematic(): { pos: THREE.Vector3; at: THREE.Vector3; fov: number } | null {
     if (this.t < 0) return null;
+    const T = this.T;
     const t = this.t, g = this.d.giant(), bird = this.crow.birds[0];
     if (!g) return null;
     let fov = FOV;
@@ -543,7 +570,7 @@ export class Offering {
 
   /** Dev: the sequence's clock (seconds since the light left you, -1 when it isn't playing), and its cues. */
   get clock() { return this.t; }
-  get cues() { return T; }
+  get cues() { return this.T; }
   /** Dev: where the shrine is, and the light. */
   get shrineAt() { return this.centre; }
   get lightAt() { return this.orbAt; }

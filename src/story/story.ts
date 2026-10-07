@@ -1656,7 +1656,7 @@ export class Story {
 
   // ------------------------------------------------------------ save
 
-  private key() { return `fjellheim.story.${this.d.saveKey}`; }
+  private key() { return `embla.story.${this.d.saveKey}`; }
 
   save() {
     if (!this.d.active) return;

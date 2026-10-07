@@ -35,14 +35,19 @@ import { Puffs } from '../gfx/puffs';
 //
 // The send-off (sendOff(), within `done`): once a creature lives at the
 // stable and you're at home (the village, or the pasture where you've just
-// brought it in), the spirit comes over to you and walks you (waving you on, the `prints`
-// bubble up all the way) to
-// the edge of the village, to the rim of the giant's first print beyond the
-// houses, and stands there hopping and pointing down the trail, its face set:
+// brought it in), the spirit comes over to you and then goes on ahead (the
+// `prints` bubble up all the way; it doesn't stop or wait for you) to
+// the edge of the village, to the middle of the giant's trail just beyond the
+// houses, and stands there hopping and pointing down the trail (its face set on the
+// way out, its own again once it's there):
 // go that way, bring them back. It stays there. When you're well on your
 // way it goes home; if you come back without having found the ring (or just
 // wander back to the yard and leave it pointing), it takes you out and
-// points again.
+// points again. If you've walked out there with it (no bike under you, no
+// creature), it makes you a bike on the spot, as it did the first one, and
+// the first one is gone from wherever it stood. Then, bike or no bike, the
+// camera takes a look for you (hands off): up and back, the prints laid out
+// ahead (trailShot(); once per load).
 //
 // (ride2, lock2 and enter2 were a second guided ride to the next tower; the
 // giant's trail goes that way instead. Old saves can still be in them.)
@@ -64,10 +69,14 @@ export interface JourneyDeps {
   saveKey: string;
   /** The bike you're riding, if any. */
   cycling(): Bike | null;
+  /** On a creature's back. */
+  mounted(): boolean;
   /** Stand the explorer at (x, z) facing `heading`, the camera behind. */
   place(x: number, z: number, heading: number): void;
   /** Climb onto a bike (dev jumps). */
   mount(k: Bike): void;
+  /** A tree stands within r of (x, z), or one the giant flattened lies across it. */
+  trees(x: number, z: number, r: number): boolean;
   /** The giant's prints, in the order it made them. */
   prints(): Print[];
 }
@@ -81,7 +90,7 @@ const AHEAD = 10, WAIT_AT = 24;
 /** Seconds at a stage without progress before the spirit comes and tugs your coat (as at home), and within what distance (m). */
 const HINT_AFTER = 20, HINT_NEAR = 40;
 /** The walk home after the giant: its pace (m/s), and how far from you it has to be to make up ground unseen (from, to full speed; m). */
-const TRUDGE = 2.4, UNSEEN = [95, 130] as const, UNSEEN_PACE = 14;
+const TRUDGE = 3.4, UNSEEN = [95, 130] as const, UNSEEN_PACE = 14;
 /** Its pace from house to house in the village afterwards (m/s). */
 const MOPE = 1.8;
 /** How long after the giant it keeps to itself before it has anything to ask of you (s, from setting off home: a long walk back isn't followed by a long wait). */
@@ -93,7 +102,7 @@ const COMPANY_R = 3, COMPANY = 6;
 /** The send-off: seconds at home with the creature in before it starts. */
 const SEND_AFTER = 6;
 /** The village ends this far from the lane and the cabin (m): the first print past that is where it points from. */
-const TOWN_EDGE = 55;
+const TOWN_EDGE = 20;
 /** This far from it and out of the village (m), you're on your way: it goes home. Within this of the ring (m), you've found it. */
 const SENT = 90, RING_FOUND = 70;
 /** You're "in the village" within this of the cabin or of the lane (m). */
@@ -101,9 +110,15 @@ const VILLAGE_R = 32;
 /** ...and "at home" there or within this of the pasture fence (m): the stable stands well out from the yard. */
 const PASTURE_R = 16;
 /** Left standing at the trail's edge with you back at home for this long (s), it comes and gets you. */
-const SEND_LEFT = 8;
+const SEND_LEFT = 20;
 /** It sets off with you from within this of you (m). */
 const SEND_NEAR = 7;
+/** Going out along the trail: its pace (m/s). (The lag only marks the walk as a stride, no stops to wave: it isn't leading, so it never waits.) */
+const SEND_PACE = 5.4, SEND_LAG = 24;
+/** At the trail on foot within this of it (m), it makes you a bike. */
+const SEND_BIKE = 12;
+/** The trail shot: how long the camera has it (s). */
+const LOOK = 8.5;
 
 /** Rides the spirit's bike along a path, keeping a little ahead of you. */
 class Leader {
@@ -220,7 +235,15 @@ export class Journey {
   private leftT = 0;
   /** You've been to the ring (saved): nothing more to point at. */
   private found = false;
-  private edge: { n: number; at: THREE.Vector3; on: THREE.Vector3 } | null = null;
+  private edge: { n: number; at: THREE.Vector3; on: THREE.Vector3; way: THREE.Vector3[]; far: THREE.Vector3 } | null = null;
+  /** How far along `edge.way` the spirit has led (-1: not yet on it). */
+  private wayK = -1;
+  /** Seconds you've stood by it on foot at the trail (the bike it makes you there). */
+  private bikeT = 0;
+  /** Seconds into the trail shot (the camera up and back over the prints); < 0 = not running. Once per load (`looked`). */
+  private look = -1;
+  private lookT = 0;
+  private looked = false;
   private tmp = new THREE.Vector3();
 
   constructor(private d: JourneyDeps) {
@@ -292,6 +315,7 @@ export class Journey {
     this.t += dt;
     this.sparks.update(dt);
     this.updateConjure(dt);
+    if (this.look >= 0) this.look = this.send === 'lead' && this.edge && this.look < LOOK ? this.look + dt : -1;
     if (this.shot >= 0) this.shot = this.stage === 'gift' && this.shot < SHOT_LEAD + CONJURE + SHOT_HOLD ? this.shot + dt : -1;
     // A saved journey never outlives the story it belongs to (a fresh start).
     if (!story.done && this.stage !== 'wait') {
@@ -458,26 +482,55 @@ export class Journey {
   }
 
   /**
-   * Where the trail leaves the village: on the heel rim of the giant's first
-   * print beyond the houses (found from the far end back, since it walked in
-   * as well as out), and the print after next to point at.
+   * Where the trail leaves the village: in the middle of it, between the
+   * giant's first two prints beyond the houses (found from the far end back,
+   * since it walked in as well as out), and the middle of the trail a few
+   * prints on to point at.
    */
   private trailEdge() {
     const ps = this.d.prints();
     if (this.edge?.n === ps.length) return this.edge;
     let i = ps.length - 1;
     while (i >= 0 && this.fromVillage(ps[i].x, ps[i].z) > TOWN_EDGE) i--;
-    const p = ps[i + 1], q = ps[Math.min(i + 3, ps.length - 1)];
-    if (!p || i < 0) return (this.edge = null);
-    const at = new THREE.Vector3(p.x - Math.sin(p.heading) * 13.4, 0, p.z - Math.cos(p.heading) * 13.4);
-    at.y = this.d.gen.height(at.x, at.z);
-    return (this.edge = { n: ps.length, at, on: new THREE.Vector3(q.x, this.d.gen.height(q.x, q.z) + 1, q.z) });
+    if (i < 0 || !ps[i + 2]) return (this.edge = null);
+    // The middle of the trail: halfway between a left print and the right one after it.
+    const mid = (k: number) => {
+      const a = ps[Math.min(k, ps.length - 2)], b = ps[Math.min(k, ps.length - 2) + 1];
+      const x = (a.x + b.x) / 2, z = (a.z + b.z) / 2;
+      return new THREE.Vector3(x, this.d.gen.height(x, z), z);
+    };
+    // Not among the houses, where it turned about and went back and forth: the first place past them
+    // where it's simply walking (two even strides, straight on) and no tree stands in the middle.
+    const step = (k: number) => Math.hypot(ps[k + 1].x - ps[k].x, ps[k + 1].z - ps[k].z);
+    const strides = ps.slice(i + 1, -1).map((_, k) => step(i + 1 + k)).sort((a, b) => a - b);
+    const stride = strides[strides.length >> 1] ?? 0;
+    const turn = (a: number, b: number) => Math.abs(Math.atan2(Math.sin(a - b), Math.cos(a - b)));
+    const steady = (k: number) => {
+      if (!ps[k + 3]) return false;
+      const m = mid(k), n = mid(k + 2), h = Math.atan2(n.x - m.x, n.z - m.z);
+      for (let q = k; q < k + 3; q++) if (step(q) < stride * 0.6 || step(q) > stride * 1.4 || turn(ps[q].heading, h) > 0.4) return false;
+      return !this.d.trees(m.x, m.z, 7);
+    };
+    let e = i + 1;
+    for (let k = i + 1; k < Math.min(i + 16, ps.length - 3); k++) if (steady(k)) { e = k; break; }
+    const at = mid(e), on = mid(e + 3);
+    on.y += 1;
+    // The way there: down the middle of the trail all the way from the middle of the village
+    // (the giant's nearest print to the cabin), wherever it went among the houses.
+    const st = this.d.gen.story, from = (k: number) => Math.hypot(ps[k].x - st.x, ps[k].z - st.z);
+    let s = e - 1;
+    for (let k = e - 2; k >= 0; k--) if (from(k) < from(s)) s = k;
+    const way: THREE.Vector3[] = [];
+    for (let k = Math.max(s, 0); k < e; k++) way.push(mid(k));
+    way.push(at);
+    return (this.edge = { n: ps.length, at, on, way, far: mid(e + 12) });
   }
 
   /** The send-off is over (or broken off): the spirit is the house's again, and walks home. */
   private sendHome() {
     const story = this.d.story, sp = this.spirit;
     if (sp.mood === 'brave') sp.mood = null;
+    sp.haste = null;
     story.lent = false;
     sp.home = new THREE.Vector3(this.d.gen.story.x, 0, this.d.gen.story.z);
     sp.want = { at: story.anchor('hearthSeat').clone(), face: story.anchor('hearth'), pose: 'sit', icon: null, lead: false, settled: true };
@@ -524,6 +577,7 @@ export class Journey {
         }
         // Straight to it: the grieving's done, there's a job on.
         this.send = 'lead';
+        this.wayK = -1;
         this.hintT = 0;
         this.leftT = 0;
         return true;
@@ -533,11 +587,36 @@ export class Journey {
         // Well on your way (or off somewhere else): it goes home.
         const gone = !here && Math.min(sp.pos.distanceTo(b.pos), e ? e.at.distanceTo(b.pos) : Infinity) > SENT;
         if (!e || gone) { this.sendHome(); this.send = 'sent'; this.away = true; return false; }
-        sp.mood = 'brave';
-        if (sp.want.at.distanceTo(e.at) > 0.5 || sp.want.icon !== 'prints') sp.want = { at: e.at.clone(), face: e.on, pose: 'point', icon: 'prints', lead: true, rally: true };
-        if (sp.arrived) this.nudge(dt, e.at, e.on);
+        sp.haste = SEND_PACE;
+        // Onto the trail at its nearest point, then down the middle of it at a stride: no stops to wave,
+        // and no waiting for you (it goes on ahead and hops there until you turn up, by whatever way you like).
+        const flat = (p: THREE.Vector3) => Math.hypot(p.x - sp.pos.x, p.z - sp.pos.z);
+        if (this.wayK < 0) { this.wayK = 0; for (let k = 1; k < e.way.length; k++) if (flat(e.way[k]) < flat(e.way[this.wayK])) this.wayK = k; }
+        while (this.wayK < e.way.length - 1 && flat(e.way[this.wayK]) < 3) this.wayK++;
+        const to = e.way[this.wayK], there = this.wayK === e.way.length - 1 && sp.arrived;
+        // Its face is set for the walk out; at the spot it's its usual self (set, there, it read as "be off with you").
+        sp.mood = this.wayK === e.way.length - 1 && flat(e.at) < 1.5 ? null : 'brave';
+        if (sp.want.at.distanceTo(to) > 0.5 || sp.want.icon !== 'prints') sp.want = { at: to.clone(), face: e.on, pose: 'point', icon: 'prints', lead: false, rally: true, lag: SEND_LAG };
+        if (there) this.nudge(dt, e.at, e.on);
+        // You've come out on foot: a bike for the road, out of its heart as before, beside it and
+        // pointing down the trail (the one it gave you goes from wherever it was left).
+        const old = this.d.bikes.bikes.get('gift');
+        const afoot = there && !this.conj && !this.d.cycling() && !this.d.mounted() && b.grounded && sp.pos.distanceTo(b.pos) < SEND_BIKE
+          && !(old && Math.hypot(old.pos.x - e.at.x, old.pos.z - e.at.z) < 30);
+        this.bikeT = afoot ? this.bikeT + dt : 0;
+        // Then (bike or no bike) the camera takes a look for you: up and back, the prints laid out ahead.
+        const ready = there && !this.looked && !this.conj && !afoot && b.grounded && sp.pos.distanceTo(b.pos) < SEND_BIKE;
+        this.lookT = ready ? this.lookT + dt : 0;
+        if (this.lookT > 0.7) { this.looked = true; this.look = 0; }
+        if (this.bikeT > 1.5) {
+          this.bikeT = 0;
+          const h = Math.atan2(e.on.x - e.at.x, e.on.z - e.at.z);
+          // On the side you're not standing on.
+          const side = (b.pos.x - e.at.x) * Math.cos(h) - (b.pos.z - e.at.z) * Math.sin(h) > 0 ? -1 : 1;
+          this.conjure(this.d.bikes.placeNear('gift', e.at.x + Math.cos(h) * 2 * side, e.at.z - Math.sin(h) * 2 * side, h, 0, 4), 1);
+        }
         // Pointing at nobody (you've gone back to the yard or the stable): it comes for you and starts over.
-        this.leftT = sp.arrived && here && sp.pos.distanceTo(b.pos) > HINT_NEAR ? this.leftT + dt : 0;
+        this.leftT = there && here && sp.pos.distanceTo(b.pos) > HINT_NEAR ? this.leftT + dt : 0;
         if (this.leftT > SEND_LEFT) { this.sendHome(); this.send = 'idle'; this.sendT = 0; return false; }
         return true;
       }
@@ -623,7 +702,7 @@ export class Journey {
   }
 
   /** The gift shot is running: hands off, the camera is the spirit's. */
-  get busy() { return this.shot >= 0; }
+  get busy() { return this.shot >= 0 || this.look >= 0; }
 
   /**
    * The gift shot: side on to the spirit and where the bike will stand, from
@@ -631,6 +710,7 @@ export class Journey {
    * with the ball of light and settling on the bike.
    */
   cinematic(): { pos: THREE.Vector3; at: THREE.Vector3 } | null {
+    if (this.look >= 0 && this.edge) return this.trailShot(this.edge);
     if (this.shot < 0) return null;
     const g = this.giftSpot(), st = this.d.gen.story, sp = this.spirit.pos;
     const gy = this.d.gen.height(g.x, g.z);
@@ -649,6 +729,24 @@ export class Journey {
     const pitch = 0.2, dist = 7.5 - 1 * onBike;
     const pos = at.clone().add(new THREE.Vector3(Math.sin(yaw) * Math.cos(pitch), Math.sin(pitch), Math.cos(yaw) * Math.cos(pitch)).multiplyScalar(dist));
     pos.y = Math.max(pos.y, this.d.gen.height(pos.x, pos.z) + 0.8);
+    return { pos, at };
+  }
+
+  /**
+   * The trail shot: from behind the spirit, looking down the trail, the
+   * camera lifts up and back until the prints are a line of them going off
+   * across the country, holds, and comes back down to you (main eases it
+   * in and out).
+   */
+  private trailShot(e: NonNullable<Journey['edge']>): { pos: THREE.Vector3; at: THREE.Vector3 } {
+    const dx = e.on.x - e.at.x, dz = e.on.z - e.at.z, dl = Math.hypot(dx, dz) || 1;
+    const u = THREE.MathUtils.smootherstep(this.look, 0.4, 4.3);
+    const pos = new THREE.Vector3(e.at.x - (dx / dl) * (9 + 46 * u), e.at.y + 4 + 58 * u, e.at.z - (dz / dl) * (9 + 46 * u));
+    pos.y = Math.max(pos.y, this.d.gen.height(pos.x, pos.z) + 3);
+    // ...and once it's up, it tips up and round to follow the trail on into the distance.
+    const pan = THREE.MathUtils.smootherstep(this.look, 2.6, LOOK - 1.2);
+    const at = e.at.clone().lerp(e.far, 0.1 + 0.16 * u + 0.5 * pan);
+    at.y = this.d.gen.height(at.x, at.z);
     return { pos, at };
   }
 
@@ -1085,7 +1183,7 @@ export class Journey {
 
   // ------------------------------------------------------------ save
 
-  private key() { return `fjellheim.journey.${this.d.saveKey}`; }
+  private key() { return `embla.journey.${this.d.saveKey}`; }
   private save() { try { localStorage.setItem(this.key(), this.stage); if (this.found) localStorage.setItem(this.key() + '.ring', '1'); } catch { /* private mode */ } }
   private load() {
     try {

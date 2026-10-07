@@ -39,7 +39,12 @@ await W(1500);
 await ev(() => { const o = window.__ow; o.setHour(11); o.manual(true); o.advance(120, 1 / 60); });
 console.log('creature home:', await where());
 /** Keep her a few metres behind the guide as it goes (it waits for you otherwise). */
-const follow = async (frames) => ev((n) => { const o = window.__ow, sp = o.story().spirit; for (let i = 0; i < n; i += 30) { const h = sp.heading; o.body.pos.set(sp.pos.x - Math.sin(h) * 4, sp.pos.y, sp.pos.z - Math.cos(h) * 4); o.advance(30, 1 / 30); } }, frames);
+// And the walk itself, a sample every half second: how far it's gone, how far off the middle of the trail, and whether it stopped.
+const walk = [];
+const follow = async (frames) => walk.push(...await ev((n) => { const o = window.__ow, sp = o.story().spirit, out = []; for (let i = 0; i < n; i += 15) { const h = sp.heading, x0 = sp.pos.x, z0 = sp.pos.z; o.body.pos.set(sp.pos.x - Math.sin(h) * 4, sp.pos.y, sp.pos.z - Math.cos(h) * 4); o.advance(15, 1 / 30);
+  const way = o.journey().edge?.way ?? []; let off = Infinity;
+  for (let k = 0; k + 1 < way.length; k++) { const a = way[k], b = way[k + 1], dx = b.x - a.x, dz = b.z - a.z; const t = Math.min(1, Math.max(0, ((sp.pos.x - a.x) * dx + (sp.pos.z - a.z) * dz) / (dx * dx + dz * dz))); off = Math.min(off, Math.hypot(sp.pos.x - a.x - dx * t, sp.pos.z - a.z - dz * t)); }
+  if (o.journey().send === 'lead' && way.length && Math.hypot(sp.pos.x - way[way.length - 1].x, sp.pos.z - way[way.length - 1].z) > 1) out.push({ v: Math.hypot(sp.pos.x - x0, sp.pos.z - z0) * 2, off }); } return out; }, frames));
 await ev(() => { const o = window.__ow, j = o.gen().journey.toHome[0]; o.manual(false); o.teleport(j[0], j[1]); });
 await ready();
 await ev(() => { const o = window.__ow; o.manual(true); });
@@ -52,12 +57,34 @@ await follow(150);
 console.log('leading:', await where());
 await close('leading', 4);
 for (let i = 0; i < 40 && !(await where()).arrived; i++) await follow(90);
+// The trail shot: let it start (un-manual so main's camera runs), and shoot it on the way up and at the top.
+console.log('trail shot running:', await ev(() => { const o = window.__ow; for (let i = 0; i < 240 && !o.journey().busy; i++) o.advance(2, 1 / 30); return o.journey().busy; }));
+for (const [name, t] of [['shot1', 2.2], ['shot2', 4.6], ['shot3', 7.2]]) { await ev((t) => { const o = window.__ow, j = o.journey(); while (j.look >= 0 && j.look < t) o.advance(1, 1 / 30); }, t); await W(100); await page.screenshot({ path: `${out}/${name}.png` }); }
+await ev(() => { const o = window.__ow; o.advance(210, 1 / 30); });
+console.log('and over:', await ev(() => !window.__ow.journey().busy));
 await ev(() => window.__ow.advance(120, 1 / 30));
 console.log('at the edge:', await where());
+{ const on = walk.findIndex((w) => w.off < 1); const rest = walk.slice(on < 0 ? 0 : on);
+  console.log(`the walk: ${(walk.length / 2).toFixed(1)} s, on the trail after ${(on / 2).toFixed(1)} s, then at most ${Math.max(...rest.map((w) => w.off)).toFixed(1)} m off its middle; stopped ${walk.filter((w) => w.v < 1).length} of ${walk.length} samples; ${(walk.reduce((a, w) => a + w.v, 0) / walk.length).toFixed(1)} m/s`); }
+// Its face at the spot, both ways (down the trail, round at you): no set brow there.
+const brow = async (want) => { for (let i = 0; i < 80; i++) { const b = await ev(() => { const o = window.__ow; o.advance(3, 1 / 30); return o.story().spirit.bodyB.material.uniforms.uBrow.value; }); if (want ? b > 0.95 : b < 0.05) return; } console.log('brow never', want ? 'set' : 'eased'); };
+await ev(() => window.__ow.advance(60, 1 / 30));
 await close('face', 2.2);
 await close('edge', 5);
+// The other half of its turn (down the trail / round to you), and the spot from above: in the middle of the trail.
+await brow(false);
+await close('toyou', 2.2);
+await ev(() => { const o = window.__ow, sp = o.story().spirit, w = sp.want; o.focusAt(sp.pos.x, sp.pos.y, sp.pos.z); o.view(Math.atan2(w.face.x - sp.pos.x, w.face.z - sp.pos.z) + Math.PI, 1.1, 70); o.advance(2, 1 / 60); });
+await W(100);
+await page.screenshot({ path: `${out}/above.png` });
+await ev(() => window.__ow.focusAt(null));
 // As you see it: her beside it, looking down the trail over its shoulder.
 await ev(() => { const o = window.__ow, sp = o.story().spirit, w = sp.want; const h = Math.atan2(w.face.x - sp.pos.x, w.face.z - sp.pos.z); o.body.pos.set(sp.pos.x - Math.sin(h) * 3 + Math.cos(h) * 2, sp.pos.y, sp.pos.z - Math.cos(h) * 3 - Math.sin(h) * 2); o.body.heading = h; o.view(h + Math.PI + 0.25, 0.22, 9); o.advance(60, 1 / 30); });
+await W(100);
+const bike = () => ev(() => { const o = window.__ow, k = o.journey().d.bikes.bikes.get('gift'), sp = o.story().spirit; return k ? { fromSpirit: +Math.hypot(k.pos.x - sp.pos.x, k.pos.z - sp.pos.z).toFixed(1), scale: +k.scale.toFixed(2) } : null; });
+console.log('the gift bike, before you stand by it on foot:', await bike());
+await ev(() => window.__ow.advance(170, 1 / 30));
+console.log('and after:', await bike());
 await W(100);
 await page.screenshot({ path: `${out}/seen.png` });
 // Off down the trail: it goes home.

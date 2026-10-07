@@ -169,7 +169,7 @@ export class WorldGen {
 
   /**
    * Every dungeon's site, in the order the giant comes to them: the first
-   * (above), and the one it walks on to when the first is done (`nextSite`).
+   * (above), and the ones it walks on to as each is done (`nextSite`): three so far.
    * Found one after another, each with the ones before it already standing,
    * so the first is exactly what it was when it was the only one.
    */
@@ -184,9 +184,13 @@ export class WorldGen {
       this.know([first]);
       const t1 = Date.now();
       const second = this.nextSite(first);
-      this.searchMs = [t1 - t0, Date.now() - t1];
+      this.know([first, second]);
+      const t2 = Date.now();
+      // The third: where it walks on to when the second is done. (Nothing is under it yet: bare stones.)
+      const third = this.nextSite(second, [first]);
+      this.searchMs = [t1 - t0, t2 - t1, Date.now() - t2];
       this.dungeonBusy = false;
-      this.presetDungeons([first, second]);
+      this.presetDungeons([first, second, third]);
     }
     return this._dungeons!;
   }
@@ -211,14 +215,16 @@ export class WorldGen {
    * 0.9-1.5 km on, by a dry way a bike can take from where it lay (the end of
    * the way to `prev`), round `prev`'s ring and not through it. On, not back:
    * the further side of `prev` from the village is preferred, and nowhere
-   * within 900 m of the yard will do.
+   * within 900 m of the yard will do. `older`: the rings before `prev`; it
+   * goes nowhere near them either (700 m), and its way keeps off them.
    */
-  private nextSite(prev: DungeonSite): DungeonSite {
+  private nextSite(prev: DungeonSite, older: DungeonSite[] = []): DungeonSite {
     const st = this.story;
     const yard = st.village?.lane[0] ?? { x: st.x, z: st.z };
     const from = prev.way[prev.way.length - 1] ?? [prev.x, prev.z];
     const ol = Math.hypot(prev.x - yard.x, prev.z - yard.z) || 1, ox = (prev.x - yard.x) / ol, oz = (prev.z - yard.z) / ol;
     const off = [prev.x, prev.z, prev.r + 30];
+    for (const o of older) off.push(o.x, o.z, o.r + 30);
     // (Nor by a tower's feet: the giant treads 14 m either side of the line. Seen on `hildaz2` once the land moved.)
     for (const t of this.towers.towers) if (Math.hypot(t.x - prev.x, t.z - prev.z) < 2400) off.push(t.x, t.z, 75);
     const short = (c: DungeonSite): [number, number] => { const l = Math.hypot(c.x - from[0], c.z - from[1]) || 1; return [c.x - ((c.x - from[0]) / l) * 48, c.z - ((c.z - from[1]) / l) * 48]; };
@@ -227,7 +233,7 @@ export class WorldGen {
       for (const r of [1200, 1050, 1350, 900, 1500]) for (let ai = 0; ai < 48; ai++) {
         const a = (ai / 48) * Math.PI * 2 + hash01(Math.round(r), 1, this.seed, 954);
         const x = prev.x + Math.cos(a) * r, z = prev.z + Math.sin(a) * r;
-        if (Math.hypot(x - yard.x, z - yard.z) < 900) continue;
+        if (Math.hypot(x - yard.x, z - yard.z) < 900 || older.some((o) => Math.hypot(x - o.x, z - o.z) < 700)) continue;
         const c = this.ringFits(x, z, lax);
         if (!c) continue;
         const on = (Math.cos(a) * ox + Math.sin(a) * oz);

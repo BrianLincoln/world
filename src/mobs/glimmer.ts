@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { Beast, clamp, collarGeometry, lerp, saddleGeometry, type Anim, type BeastData, type LegSet } from './beast';
+import { Beast, clamp, collarGeometry, LEG4, lerp, saddleGeometry, type Anim, type BeastData, type LegSet } from './beast';
 import type { PartBatch } from './parts';
 import { colored, ellipsoid, furBall, hoof, lathe, limb, merge, sculpt, smooth } from './shapes';
 import type { Mob } from './types';
@@ -93,6 +93,56 @@ function legGeometry(hind: boolean, upper: boolean) {
   return merge([limb([[0, 0.05], [0.05, 0.02], [0.04, -0.2], [0.035, -L + 0.08], [0, -L + 0.05]], PAW), hoof(L, 0.055, '#e2ddeb', 1.5)]);
 }
 
+/**
+ * One at play (the Veil Cave's, src/dungeon/veilCave.ts): what its driver
+ * asks of its body, each 0..1. In `BeastData.s.act`; unset, nothing changes.
+ */
+export interface GlimmerAct {
+  /** Down on folded legs: flat among the glowcaps (with `low`), or offering its back. */
+  crouch: number;
+  /** Head down and ears flat: hiding. */
+  low: number;
+  /** The tail giving it away. */
+  twitch: number;
+  /** A shake of the head: no. */
+  shake: number;
+}
+
+/** A glimmer in stone, standing, head up (the shrine the second ring becomes): position and normal, feet at y = 0, facing +z. */
+export function glimmerStatue(): THREE.BufferGeometry {
+  const pos: number[] = [], nor: number[] = [];
+  const m = new THREE.Matrix4(), n3 = new THREE.Matrix3(), v = new THREE.Vector3();
+  const add = (g: THREE.BufferGeometry, at: THREE.Matrix4) => {
+    const flat = g.index ? g.toNonIndexed() : g;
+    const p = flat.getAttribute('position'), n = flat.getAttribute('normal');
+    n3.getNormalMatrix(at);
+    for (let i = 0; i < p.count; i++) {
+      v.fromBufferAttribute(p, i).applyMatrix4(at);
+      pos.push(v.x, v.y, v.z);
+      v.fromBufferAttribute(n, i).applyMatrix3(n3).normalize();
+      nor.push(v.x, v.y, v.z);
+    }
+  };
+  const rx = (a: number) => new THREE.Matrix4().makeRotationX(a);
+  const body = new THREE.Matrix4().makeTranslation(0, 1.0, 0);
+  add(bodyGeometry(), body);
+  const neck = body.clone().multiply(m.makeTranslation(0, 0.12, 0.52)).multiply(rx(0.4));
+  add(neckGeometry(), neck);
+  const head = neck.clone().multiply(m.makeTranslation(0, 0.46, 0.02)).multiply(rx(-0.3));
+  add(headGeometry(), head);
+  for (const s of [1, -1]) add(earGeometry(), head.clone().multiply(m.makeTranslation(s * 0.1, 0.13, -0.04)).multiply(new THREE.Matrix4().makeRotationFromEuler(new THREE.Euler(-0.1, s * 0.2, -s * 0.28))));
+  add(tailGeometry(), body.clone().multiply(m.makeTranslation(0, 0.12, -0.66)).multiply(rx(-0.15)));
+  for (const hind of [false, true]) for (const s of [1, -1]) {
+    const hip = body.clone().multiply(m.makeTranslation(s * (hind ? 0.15 : 0.14), hind ? -0.02 : -0.14, hind ? -0.48 : 0.44));
+    add(legGeometry(hind, true), hip);
+    add(legGeometry(hind, false), hip.clone().multiply(m.makeTranslation(0, -(hind ? 0.5 : 0.42), 0)));
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  g.setAttribute('normal', new THREE.Float32BufferAttribute(nor, 3));
+  return g;
+}
+
 export class Glimmer extends Beast {
   private bodyB: PartBatch; private neckB: PartBatch; private headB: PartBatch; private earB: PartBatch; private tailB: PartBatch;
   private legB: PartBatch[]; private saddleB: PartBatch; private collarB: PartBatch;
@@ -158,15 +208,27 @@ export class Glimmer extends Beast {
   protected pose(m: Mob, d: BeastData, a: Anim) {
     const t = a.t;
     const g = this.gaitMix(d, a, 3, 9);
-    const phase = a.gs?.phase ?? 0;
+    const phase = Math.max(a.gs?.phase ?? 0, m.ghost ?? 0);
+    const act = (d.s.act ?? null) as GlimmerAct | null;
     const pitch = d.pitch.step(-a.slope + g.rock - a.joy * 0.25 + (a.caught ? Math.max(0, Math.sin(m.stateT * 5)) * 0.3 : 0), 60, 12, a.dt) + (a.air > 0.5 ? clamp(-a.vy * 0.04, -0.3, 0.3) : 0);
     d.body.position.y += g.bounce + a.air * 0.05 - a.graze * 0.06 + a.joy * 0.15;
     d.body.rotation.set(pitch, 0, a.bank);
-    // Phasing: stretched thin, flickering in and out.
-    const stretch = phase > 0 ? 1 : 0;
+    // Phasing: stretched thin (eased in and out), and under a rider flickering in and out. By herself in the
+    // Veil Cave (`ghost`) she doesn't flicker: going through a veil in front of you it read as a fault.
+    const stretch = (d.s.thin = ((d.s.thin as number) ?? 0) + ((phase > 0 ? 1 : 0) - ((d.s.thin as number) ?? 0)) * (1 - Math.exp(-16 * a.dt)));
     d.body.scale.set(1 - 0.2 * stretch, 1 - 0.15 * stretch, 1 + 0.35 * stretch);
-    d.hidden = phase > 0 && Math.floor(t * 30) % 2 === 0;
+    d.hidden = (a.gs?.phase ?? 0) > 0 && Math.floor(t * 30) % 2 === 0;
     this.poseLegs(d.s.legs, a, g.offs, g.duty, g.sweep, g.flex, pitch);
+    if (act && act.crouch > 0.01) {
+      // Down on folded legs, the body let down between them.
+      const th = act.crouch * (0.75 + 0.4 * act.low), legs = d.s.legs as LegSet;
+      d.body.position.y -= 0.9 * (1 - Math.cos(th));
+      for (let k = 0; k < 4; k++) {
+        const sg = LEG4[k].hind ? 1 : -1;
+        legs.up[k].rotation.x = lerp(legs.up[k].rotation.x, sg * th, act.crouch);
+        legs.lo[k].rotation.x = lerp(legs.lo[k].rotation.x, -sg * 2 * th, act.crouch);
+      }
+    }
     // Head: low and stretched at a run, sniffing the ground when idle, ears
     // swivelling; a curious tilt when it watches you.
     const run = g.wG * clamp((a.speed - 9) / 8, 0, 1);
@@ -174,14 +236,20 @@ export class Glimmer extends Beast {
     const sniff = a.graze * (1.1 + Math.sin(t * 4) * 0.05);
     neck.rotation.set(0.45 + run * 0.6 + sniff - pitch, a.lookYaw * 0.5, 0);
     d.head.rotation.set(-0.35 - run * 0.4 + sniff * 0.2 + Math.sin(a.stride * Math.PI * 4) * 0.04 * a.moving, a.lookYaw * 0.5, a.alert * Math.sin(t * 0.7) * 0.22);
+    if (act) {
+      neck.rotation.x += act.low * 0.85;
+      d.head.rotation.x -= act.low * 0.3;
+      d.head.rotation.y += Math.sin(t * 21) * 0.5 * act.shake;
+    }
     for (let k = 0; k < 2; k++) {
       const s = k ? -1 : 1;
-      const back = Math.max(run, phase > 0 ? 1 : 0);
+      const back = Math.max(run, phase > 0 ? 1 : 0, act?.low ?? 0);
       const flick = Math.max(0, Math.sin(t * 0.9 + k * 2.1) - 0.93) * 6;
       d.n[`ear${k}`].rotation.set(-0.1 - back * 0.9 + flick * 0.3, s * (0.2 + a.lookYaw * 0.2), -s * (0.28 - back * 0.15));
     }
     // The tail: streams out behind at speed, swishes at rest.
     const tail = d.n.tail;
     tail.rotation.set(lerp(-0.15 + Math.sin(t * 1.3) * 0.08, 0.5, run) + a.joy * -0.4, Math.sin(t * (a.moving > 0.5 ? 6 : 1.6)) * lerp(0.3, 0.1, a.moving), 0);
+    if (act && act.twitch > 0.01) { tail.rotation.x -= 0.5 * act.twitch; tail.rotation.y += Math.sin(t * 14) * 0.55 * act.twitch; }
   }
 }

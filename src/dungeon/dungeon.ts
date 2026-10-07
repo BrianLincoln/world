@@ -5,9 +5,10 @@ import type { Mob } from '../mobs/types';
 import type { Body } from '../player/movement';
 import type { Sfx } from '../story/audio';
 import { Arm } from '../story/beacons';
-import { bubbleCanvas, tex } from '../story/icons';
+import { bubbleCanvas, chuteHintCanvas, tex } from '../story/icons';
 import { Billboard } from '../story/overlay';
 import type { DungeonSite } from '../world/worldgen';
+import { makeDarkLight } from './darkLight';
 import { ARM_R, LANTERN_R, Layout, LIFT_R } from './layout';
 import { buildCaps, buildLanterns, buildRock, buildShell, buildStone } from './shell';
 
@@ -49,6 +50,8 @@ export interface DungeonDeps {
   /** A creature of the dungeon's own, standing at `at` (it lives by the dungeon's floor and walls). */
   adopt(at: THREE.Vector3): Mob | null;
   saveKey: string;
+  /** Played by touch (the thought of the parachute shows a finger, not a key). */
+  touch(): boolean;
 }
 
 /** How far under the ring it lies (m). */
@@ -71,8 +74,8 @@ const WAKE_R = 12, WAKE = 0.7;
 const STRAY = 38, STRAY_T = 2.5;
 /** The freed rockhopper's hops for gladness: when each leaves the ground after the rockfall breaks (s) and how high it goes (m), and how long one lasts (s). */
 const GLAD_HOPS = [[0.5, 0.7], [1.05, 0.7], [1.6, 1.25]], GLAD_HOP = 0.5;
-/** How many falls from the high stone before the explorer thinks of the parachute. */
-const HINT_AFTER = 3;
+/** The explorer's thought on the high stone, how the parachute is opened: how long each of its four frames is held (s: standing, a press and the jump, falling, a press and the canopy), and the last two turn about this fast once she's off the stone and falling. */
+const HINT_HOLD = [0.7, 0.36, 0.42, 1.3], HINT_QUICK = 0.2;
 /** Taking the light: how long the gladness lasts before the veil (s), when the three hops come, and the veil's length. */
 const WIN = 5.4, WIN_HOPS = [0.55, 1.5, 2.45], WIN_VEIL = 0.9;
 
@@ -161,14 +164,14 @@ export class Dungeon {
   private glowOrder: number[];
   /** How well lit the explorer is (0..1), eased. */
   private inLight = 0;
-  /** The stepping stone you last stood on (-1: none since the pit's floor), and falls from the high one. */
+  /** The stepping stone you last stood on (-1: none since the pit's floor). */
   private lastTop = -1;
-  falls = 0;
-  /** Across the long gap at least once: no more hints. */
+  /** Across the long gap at least once: she's not reminded in the air any more. */
   private crossed = false;
-  /** The explorer's own thought: a parachute, over her head on the high stone once she's fallen enough. */
-  private thought = new Billboard(tex(bubbleCanvas('parachute')), 1.05, 52);
+  /** The explorer's own thought, over her head whenever she's on the high stone: how the parachute is opened (HINT_HOLD). */
+  private thought = new Billboard(tex(chuteHintCanvas(0, false)), 1.6, 88);
   private thoughtA = 0;
+  private thoughtT = 0;
   private strayT = 0;
   private bleatT = 4;
   /** How long the plan and its meshes took to build (ms): the hitch on first entry. */
@@ -200,7 +203,8 @@ export class Dungeon {
     add(buildCaps(L), makeSolidMaterial('#9fd0e6', 0.5, { keep: 1 }));
     add(new THREE.CircleGeometry(site.r - 2.4, 56).rotateX(Math.PI / 2).translate(0, L.rooms[0].clear - 0.06, 0), makePortalMaterial(site.r - 2.4));
     add(new THREE.CircleGeometry(L.pool.r + 3, 40).rotateX(-Math.PI / 2).translate(L.pool.x, L.pool.y, L.pool.z), makePoolMaterial());
-    this.ember = add(new THREE.SphereGeometry(0.34, 20, 14), makeSolidMaterial('#f08a3c', 0.95, { keep: 1 }));
+    this.ember = makeDarkLight(0.4).mesh;
+    this.root.add(this.ember);
     this.ember.position.set(L.ember.x, L.ember.y, L.ember.z);
     const lanterns = buildLanterns(L);
     this.lanternGeo = lanterns.geometry;
@@ -218,7 +222,7 @@ export class Dungeon {
     this.overlay.add(this.thought.mesh, this.heart.mesh);
     this.scene.add(this.root);
     try {
-      const sv = JSON.parse(localStorage.getItem(`fjellheim.dungeon1.${d.saveKey}`) ?? '{}');
+      const sv = JSON.parse(localStorage.getItem(`embla.dungeon1.${d.saveKey}`) ?? '{}');
       this.freed = !!sv.freed;
       this.taken = !!sv.taken;
       this.crossed = !!sv.crossed;
@@ -300,6 +304,9 @@ export class Dungeon {
     U.uShadeCol.value.copy(k.dark[2]).lerp(k.near[2], this.inLight);
     U.uNight.value = 0;
   }
+
+  /** Its creature can be got on (main asks whichever dungeon you're in). */
+  get mountable() { return this.freed; }
 
   /** What the feet rest on: the floor, or a stone no more than a step up. */
   floorAt(x: number, z: number, feetY = -Infinity): number {
@@ -463,7 +470,7 @@ export class Dungeon {
   }
 
   private save() {
-    try { localStorage.setItem(`fjellheim.dungeon1.${this.d.saveKey}`, JSON.stringify({ freed: this.freed, taken: this.taken, crossed: this.crossed, lit: this.lit.flatMap((on, i) => (on ? [i] : [])) })); } catch { /* ignore */ }
+    try { localStorage.setItem(`embla.dungeon1.${this.d.saveKey}`, JSON.stringify({ freed: this.freed, taken: this.taken, crossed: this.crossed, lit: this.lit.flatMap((on, i) => (on ? [i] : [])) })); } catch { /* ignore */ }
   }
 
   /** Dev: the rockfall gone and the creature free, with no ceremony. */
@@ -683,7 +690,8 @@ export class Dungeon {
       if (this.strayT > STRAY_T) this.fetch(m);
     } else this.strayT = 0;
     // The stepping stones: the long fall is from the high stone (the last) to the far lip, and only
-    // the parachute makes it. Fall from the high stone three times and she thinks of it herself, standing there.
+    // the parachute makes it. Nothing before here has asked for it, so standing on the high stone she thinks
+    // of how it's done, every time; and the first time across, falling off it with nothing open, of the press.
     {
       const [px, pz] = this.local(b.pos.x, b.pos.z), y = b.pos.y - this.origin.y, T = L.tops, high = T.length - 1;
       if (grounded && mode === 'walk') {
@@ -693,17 +701,23 @@ export class Dungeon {
           // Down on the far side: you know how, now.
           this.crossed = true;
           this.save();
-        } else if (L.pitSd(px, pz) < 0 && y < L.ground(px, pz) - 2) {
-          if (this.lastTop === high) this.falls++;
-          this.lastTop = -1;
         } else this.lastTop = -1;
       }
-      const show = !this.crossed && this.falls >= HINT_AFTER && this.lastTop === high && mode === 'walk' ? 1 : 0;
-      if (show && this.thoughtA < 0.02) this.d.sfx.call();
+      // Off it: past its edge or below its top (a hop on the spot isn't).
+      const o = T[high], off = !grounded && (Math.hypot(px - o.x, pz - o.z) > o.r || y < o.y! - 0.3);
+      const show = this.lastTop === high && mode === 'walk' && !(off && this.crossed) ? 1 : 0;
+      if (show && this.thoughtA < 0.02) { this.d.sfx.call(); this.thoughtT = 0; }
+      this.thoughtT += dt;
+      let frame = 2 + (Math.floor(this.thoughtT / HINT_QUICK) & 1);
+      if (!off) {
+        let u = this.thoughtT % HINT_HOLD.reduce((a, h) => a + h, 0);
+        for (frame = 0; u >= HINT_HOLD[frame]; frame++) u -= HINT_HOLD[frame];
+      }
+      if (show) this.thought.texture = tex(chuteHintCanvas(frame, this.d.touch()));
       this.thoughtA += (show - this.thoughtA) * (1 - Math.exp(-(show ? 6 : 10) * dt));
       this.thought.alpha = this.thoughtA;
       this.thought.scale = 0.6 + 0.4 * this.thoughtA;
-      this.thought.pos.set(b.pos.x, b.pos.y + 2.75 + 0.05 * Math.sin(this.time * 2), b.pos.z);
+      this.thought.pos.set(b.pos.x, b.pos.y + 2.95 + 0.05 * Math.sin(this.time * 2), b.pos.z);
     }
     DUNGEON_U.uFeet.value.set(b.pos.x, this.floorAt(b.pos.x, b.pos.z, b.pos.y), b.pos.z);
     if (this.seq || mode === 'carried') DUNGEON_U.uFeet.value.y = -1e4;

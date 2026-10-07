@@ -28,6 +28,8 @@ export class Trail {
   private treeGeo = [buildConifer(7, 1), buildConifer(31, 1)];
   private treeMat = makePropMaterial({ heightRef: TREE_HEIGHT, toneVar: 0.22, doubleSide: true });
   private steamT = 0;
+  /** It has walked since the page loaded (if not, what's here was laid from a save: cold already). */
+  private walked = false;
 
   constructor(private d: { ground: (x: number, z: number) => number; colliders: Colliders }) {
     this.group.add(this.steam.group);
@@ -43,8 +45,8 @@ export class Trail {
     const trees = this.d.colliders.treesNear(x, z, 18);
     const p = this.prints.add(x, z, yaw);
     for (const r of trees) {
-      const s = soleSdf(r[0], r[2], p);
-      if (s > 1.2) continue;
+      // (Only what was under the sole lies there flat. The rest of what stood in its way, between its feet, is simply gone.)
+      if (soleSdf(r[0], r[2], p) > 1.2) continue;
       // Laid flat, crown away from the middle of the sole, pressed like a flower in a book.
       by.set(r[0] - x, 0, r[2] - z);
       if (by.lengthSq() < 0.5) by.set(Math.sin(yaw), 0, Math.cos(yaw));
@@ -65,6 +67,11 @@ export class Trail {
     // Whatever stood here is no longer solid.
     for (let dz = -24; dz <= 24; dz += 12) for (let dx = -24; dx <= 24; dx += 12) this.d.colliders.invalidate(x + dx, z + dz);
     return true;
+  }
+
+  /** A flattened tree lies within r of (x, z) (measured from its root: they're some 10 m long). */
+  littered(x: number, z: number, r: number) {
+    return this.flat.some((m) => Math.hypot(m.position.x - x, m.position.z - z) < r);
   }
 
   /** The print at (x, z), if there is one, is filled in: level ground again. */
@@ -90,6 +97,9 @@ export class Trail {
         this.steam.emit(v.set(x, this.height(x, z) + 0.3, z), 1, 0.45 + 0.55 * w, 0.3, undefined, { life: 3.4, rise: 0.9, drag: 0.8, up: 1.4 });
       }
     }
+    // Once it stops, the glow goes out of its last prints over a few seconds.
+    if (walking) this.walked = true;
+    else this.prints.cool(this.walked ? dt * 1.6 : 99);
     this.steam.update(dt);
   }
 

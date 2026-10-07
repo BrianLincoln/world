@@ -463,6 +463,27 @@ export class Stelk implements Species {
     return false;
   }
 
+  /** The herd runs from it (see `thinkFlock`: on and on, by whatever way is dry). */
+  bolt(f: Flock, from: THREE.Vector3, ctx: MobCtx) {
+    const fd = f.data;
+    fd.mode = 'flee';
+    fd.from = from.clone();
+    fd.fleeT = 4;
+    fd.alarm = false;
+    f.target.copy(f.centre);
+    this.onward(f, ctx);
+  }
+
+  /** Running from the giant: the next stretch, away from it over good ground. With none (the shore, a cliff) the herd stops there. */
+  private onward(f: Flock, ctx: MobCtx) {
+    const fd = f.data;
+    if (this.findSpot(ctx.gen, f.centre, fd.from, fd.rnd, f.target, 60, 110)) return;
+    const a = Math.atan2(f.centre.x - fd.from.x, f.centre.z - fd.from.z);
+    const x = f.centre.x + Math.sin(a) * 70, z = f.centre.z + Math.cos(a) * 70;
+    if (ctx.surface(x, z) - ctx.gen.height(x, z) < 0.3) f.target.set(x, 0, z);
+    else { fd.gone = false; f.target.copy(f.centre); }
+  }
+
   initMob(m: Mob, i: number, f: Flock, ctx: MobCtx) {
     const r = m.rnd;
     const o = () => new THREE.Object3D();
@@ -542,7 +563,7 @@ export class Stelk implements Species {
     // A calm one (the stable's lasso lesson, story/herd.ts) lets you come
     // right up, and if you do startle it, it only trots a few steps off.
     const scare = fd.calm ? (fast ? 6 : 3) : fast ? 20 : 10;
-    if (fd.alarm || near < scare) {
+    if (!fd.gone && (fd.alarm || near < scare)) {
       if (fd.mode !== 'flee') {
         fd.mode = 'flee';
         // Away from you, onto good ground if there is some.
@@ -560,6 +581,7 @@ export class Stelk implements Species {
       tv.subVectors(f.target, f.centre).setY(0);
       const dist = tv.length();
       if (dist > 1) f.centre.addScaledVector(tv.normalize(), Math.min(dist, 13 * dt));
+      if (fd.gone) { if (dist < 14) this.onward(f, ctx); if (fd.gone) return; }
       if (fd.fleeT < 0 && (dist < 6 || near > 45)) {
         fd.mode = 'graze';
         fd.spot.copy(f.centre);

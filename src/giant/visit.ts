@@ -10,6 +10,7 @@ import type { Cue } from '../audio/ambience';
 import { Birds, GRIP } from './birds';
 import type { Giant } from './giant';
 import type { Trail } from './trail';
+import { soleSdf } from '../world/prints';
 
 // The giant's visit (giant slice 1, step 4): once the hearth is lit it comes
 // up the lane, half asleep, treading on the other spirits' houses (never
@@ -33,6 +34,8 @@ const TRACK = 14.5, STEP = 21;
 const SOLE = 3.4;
 /** Footfalls before the first house, and after the last. */
 const LEAD_IN = 10, LEAD_OUT = 4;
+/** No print's edge comes nearer your cabin's walls than this (m). */
+const KEEP = 10;
 /** Seconds per step during the visit. */
 const STEP_TIME = 2.0;
 /**
@@ -76,6 +79,11 @@ const BULK = { w: 44, d: 27 };
  * after the first house goes.
  */
 const SEEN = 2.6, FRIGHT = 3.15, RUN = 13, REACT = [0.25, 1.5];
+/**
+ * The creatures round about go this many steps after the village does: just after the cut to the village
+ * running, so the birds are going up behind them in that shot and still in the sky when it's back on the giant.
+ */
+const BOLT = 0.35;
 /** The camera runs with them for the first this many seconds of that, and then leaves them to it. */
 const CHASE = 6;
 /** A crow comes in level along the ground from this far short of its mark, and goes on level this far past it. */
@@ -128,8 +136,29 @@ export function visitRoute(gen: WorldGen): VisitRoute | null {
     const side = far.right * (j % 2 ? -1 : 1);
     falls.push(fall(far.c.x + ox * STEP * j + Math.cos(far.yaw) * side * TRACK, far.c.z + oz * STEP * j - Math.sin(far.yaw) * side * TRACK, far.yaw, -1));
   }
+  // Your cabin's walls, and how far a print's edge is from them (m).
+  const walls: { x: number; z: number }[] = [];
+  for (const lx of [-0.5, -0.25, 0, 0.25, 0.5]) for (const lz of [-0.5, 0, 0.5]) walls.push(siteLocal(site, lx * CAB.W, lz * CAB.D));
+  const gap = (f: Footfall) => {
+    const p = { x: f.x + Math.sin(f.yaw) * SOLE, z: f.z + Math.cos(f.yaw) * SOLE, heading: f.yaw, n: 0 };
+    let g = Infinity;
+    for (const w of walls) g = Math.min(g, soleSdf(w.x, w.z, p));
+    return g;
+  };
   const firstHouse = falls.length + 1;
-  for (const k of order) falls.push(fall(at[k].p.x, at[k].p.z, at[k].yaw, k));
+  for (const k of order) {
+    // On the house, square to the lane; a house by the yard is trodden askew or off its middle, as little
+    // as keeps the print off your cabin (the house is still well under the sole).
+    let f = fall(at[k].p.x, at[k].p.z, at[k].yaw, k), best = gap(f), cost = 0;
+    if (best < KEEP) {
+      for (const a of [0, 0.15, -0.15, 0.3, -0.3, 0.45, -0.45]) for (let d = -7; d <= 7; d++) for (const w of [0, 1.5, -1.5, 3, -3]) {
+        const yaw = at[k].yaw + a, c = Math.abs(a) * 12 + Math.abs(d) + Math.abs(w) * 2;
+        const t = fall(at[k].p.x + Math.sin(yaw) * d + Math.cos(yaw) * w, at[k].p.z + Math.cos(yaw) * d - Math.sin(yaw) * w, yaw, k), g = gap(t);
+        if (best < KEEP ? g > best : g >= KEEP && c < cost) { best = g; cost = c; f = t; }
+      }
+    }
+    falls.push(f);
+  }
   const lastHouse = falls.length;
 
   const home = gen.towers.home;
@@ -155,31 +184,40 @@ export function visitRoute(gen: WorldGen): VisitRoute | null {
   let join = 0;
   while (join < dg.way.length - 2 && Math.hypot(dg.way[join][0] - lane[0].x, dg.way[join][1] - lane[0].z) < 170) join++;
   const toward = { x: dg.way[join][0], z: dg.way[join][1] };
-  let best: Footfall[] = [], bestScore = -Infinity, bestEnd = { x: near.c.x, z: near.c.z, h: near.yaw, side: near.right };
-  for (const turn of [0, 0.2, -0.2, 0.35, -0.35, 0.5, -0.5, 0.7, -0.7]) {
+  // The long walk from there: on to that way, rounded off, then a footfall every STEP along it.
+  // (The line starts a step behind where the village steps ended, so the turn on to it is rounded too.)
+  // On dry ground, clear of your cabin, the towers' rock and the ring: a foot that wouldn't be is drawn in toward the line.
+  const walk = (cx: number, cz: number, h: number, side: number) => stride([[cx - Math.sin(h) * STEP, cz - Math.cos(h) * STEP], [cx, cz], ...dg.way.slice(join)], side,
+    (x, z, sx, sz) => Math.min(ground(x, z), ground(sx, sz)) > 1.5 && Math.hypot(sx - site.x, sz - site.z) > 18 + KEEP && (!tw || Math.hypot(sx - tw.x, sz - tw.z) > 55) && Math.hypot(sx - home.x, sz - home.z) > 55 && Math.hypot(sx - dg.x, sz - dg.z) > dg.r + 16);
+  let best: Footfall[] = [], bestScore = -Infinity, bestWorst = -Infinity;
+  // `turn` at each of its first `n` steps, and straight on after.
+  const bear = (turn: number, n: number) => {
     const out: Footfall[] = [];
     let cx = near.c.x, cz = near.c.z, h = near.yaw, side = near.right, worst = Infinity;
     for (let m = 1; m <= LEAD_OUT; m++) {
-      h += turn;
+      if (m <= n) h += turn;
       cx += Math.sin(h) * STEP; cz += Math.cos(h) * STEP;
       side = -side;
       const x = cx + Math.cos(h) * side * TRACK, z = cz - Math.sin(h) * side * TRACK;
       worst = Math.min(worst, clear(x, z));
       out.push(fall(x, z, h, -1));
     }
-    // Clear of what's yours first; then the way that leaves it facing where it's going.
+    // (And as it turns on to the way: that can bring it back round past the yard.)
+    const on = walk(cx, cz, h, side);
+    let cabin = Infinity;
+    for (const f of out) cabin = Math.min(cabin, gap(f) - KEEP);
+    for (const f of on.slice(0, 12)) cabin = Math.min(cabin, gap(f) - KEEP);
+    worst = Math.min(worst, cabin);
+    // Clear of your cabin before anything; then of what else is yours; then the way that leaves it facing where it's going.
     let off = Math.atan2(toward.x - cx, toward.z - cz) - h;
     off = Math.abs(Math.atan2(Math.sin(off), Math.cos(off)));
-    const score = Math.min(worst, 0) * 10 - off * 1.5 - Math.abs(turn) * 0.3;
-    if (score > bestScore) { bestScore = score; best = out; bestEnd = { x: cx, z: cz, h, side }; }
-  }
+    const score = Math.min(cabin, 0) * 100 + Math.min(worst, 0) * 10 - off * 1.5 - Math.abs(turn) * 0.3;
+    if (score > bestScore) { bestScore = score; bestWorst = worst; best = [...out, ...on]; }
+  };
+  for (const turn of [0, 0.2, -0.2, 0.35, -0.35, 0.5, -0.5, 0.7, -0.7]) bear(turn, LEAD_OUT);
+  // Nothing gentle keeps off it: it turns sharply as it leaves the yard.
+  if (bestWorst < 0) for (const n of [2, 1, 3]) for (const turn of [0.5, -0.5, 0.8, -0.8, 1.1, -1.1, 1.4, -1.4]) bear(turn, n);
   falls.push(...best);
-
-  // The long walk: on to that way, rounded off, then a footfall every STEP along it.
-  // (The line starts a step behind where the village steps ended, so the turn on to it is rounded too.)
-  // On dry ground, clear of the towers' rock and the ring: a foot that wouldn't be is drawn in toward the line.
-  falls.push(...stride([[bestEnd.x - Math.sin(bestEnd.h) * STEP, bestEnd.z - Math.cos(bestEnd.h) * STEP], [bestEnd.x, bestEnd.z], ...dg.way.slice(join)], bestEnd.side,
-    (x, z, sx, sz) => Math.min(ground(x, z), ground(sx, sz)) > 1.5 && (!tw || Math.hypot(sx - tw.x, sz - tw.z) > 55) && Math.hypot(sx - home.x, sz - home.z) > 55 && Math.hypot(sx - dg.x, sz - dg.z) > dg.r + 16));
   const j = lead + 1;
   return { start: { x: far.c.x + ox * STEP * (j - 0.5), z: far.c.z + oz * STEP * (j - 0.5), heading: far.yaw }, falls, firstHouse, lastHouse };
 }
@@ -330,6 +368,9 @@ export interface VisitDeps {
   ring(): { free(from: THREE.Vector3): void; setOpen(): void } | null;
   /** Is a point inside tower rock? The camera on the guide at the tower keeps out of it. */
   solid(p: THREE.Vector3): boolean;
+  /** Every wild creature about runs or flies from a point, for good (`seen`: where it's being watched from the ground); and `calm`, once it has gone (mobs/manager.ts). */
+  scare(from: THREE.Vector3, seen: THREE.Vector3): void;
+  calm(): void;
 }
 
 const v1 = new THREE.Vector3(), v2 = new THREE.Vector3(), v3 = new THREE.Vector3();
@@ -360,6 +401,7 @@ export class Visit {
   private laneTo = 0;
   private via: THREE.Vector3[] = [];
   private fled = false;
+  private bolted = false;
   /** Who has furthest to run (the camera goes with it), which way it's going, and the camera that does. */
   private tail = 0;
   private runDir = new THREE.Vector3();
@@ -505,6 +547,7 @@ export class Visit {
     this.jt = -1;
     this.filming = false;
     this.fled = false;
+    this.bolted = false;
     this.running = false;
     // The guide comes out into the yard, where it can see down the lane (the house leaves it alone meanwhile).
     const st = this.d.story;
@@ -561,6 +604,7 @@ export class Visit {
         this.tail = v.panic(this.gather, this.watch, this.front, this.laneTo, this.via, RUN);
         this.d.sound('squeak');
       }
+      if (this.fled && !this.bolted && g.steps >= FRIGHT + BOLT) { this.bolted = true; this.d.scare(g.centre, this.gather); }
       if (this.fled && this.jt < 0) this.chase(dt);
       if (g.paused && this.jt < 0) { this.jt = 0; this.placeGuide(); }
       // (The journey has it by the doorway, facing in: for this it's out in front of it, watching.)
@@ -637,6 +681,7 @@ export class Visit {
       }
       if (!this.busy) {
         this.state = 'gone';
+        this.d.calm();
         st.lent = this.wasLent;
         if (this.stage) sp.haste = null;
         this.stage = null;

@@ -291,6 +291,24 @@ export class Sfx {
     }
   }
 
+  /** A glimmer through a veil: a quick glassy sweep and a small chime left ringing. */
+  shimmer() {
+    if (!this.ok) return;
+    const t = this.ctx!.currentTime + 0.005;
+    const k = 0.95 + Math.random() * 0.1;
+    this.tone('sine', 1250 * k, 2500 * k, t, { a: 0.006, d: 0.16, peak: 0.13 }, { echo: true });
+    this.tone('triangle', 2500 * k, 3700 * k, t, { a: 0.004, d: 0.1, peak: 0.03 });
+    this.tone('sine', 1568 * k, 1568 * k, t + 0.09, { a: 0.01, d: 0.55, peak: 0.07 }, { echo: true });
+  }
+
+  /** A glimmer asked to go where it can't: two small notes down. Not sad; just no. */
+  nope() {
+    if (!this.ok) return;
+    const t = this.ctx!.currentTime + 0.005;
+    this.tone('sine', 640, 520, t, { a: 0.008, d: 0.09, peak: 0.2 }, { echo: true });
+    this.tone('sine', 520, 410, t + 0.13, { a: 0.008, d: 0.12, peak: 0.2 }, { echo: true });
+  }
+
   /** Taken down by a ring's dark arms (or brought back `up`): a low swallow. No chimes: this isn't the hearth. */
   sink(up = false) {
     if (!this.ok) return;
