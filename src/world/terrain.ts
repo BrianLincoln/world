@@ -1,4 +1,5 @@
 import type { DungeonSite } from './worldgen';
+import type { StorySite } from './storySite';
 import * as THREE from 'three';
 import { CHUNK_RES, INST_STRIDE, type ChunkRequest, type ChunkResult } from './chunkBuilder';
 import ChunkWorker from './chunk.worker.ts?worker';
@@ -184,6 +185,8 @@ export class Terrain {
 
   /** Handed to the workers with every request (see WorldGen.dungeons: found once, on the main thread). */
   dungeons: DungeonSite[] | null = null;
+  /** The start site, the same way (see WorldGen.presetStory). */
+  story: StorySite | null = null;
 
   setSeed(seed: number) {
     if (seed === this.seed) return;
@@ -340,7 +343,7 @@ export class Terrain {
       const req = this.queue.shift()!;
       const w = this.idle.pop()!;
       (w as Worker & { gen?: number }).gen = this.generation;
-      w.postMessage(this.dungeons ? { ...req, dungeons: this.dungeons } : req);
+      w.postMessage(this.dungeons || this.story ? { ...req, dungeons: this.dungeons, story: this.story } : req);
     }
   }
 

@@ -195,8 +195,10 @@ to stay inside the art direction (`docs/BRIEF.md`) and "nothing scary".
   and walks to a third ring and lies down; under it is dungeon 3 (below).
   After dungeon 3 the same again (owner, 2026-10-07): the third spirit
   taken is flown home, and the giant walks to a fourth ring and lies down.
-  **The trail ends there for now**: the fourth ring is bare stones, with
-  nothing under it yet.
+  Under it is dungeon 4. After dungeon 4 the same again (owner,
+  2026-10-08): the fourth spirit taken is flown home, and the giant walks
+  to a fifth ring and lies down. **The trail ends there for now**: the
+  fifth ring is bare stones, with nothing under it yet.
   `docs/NEXT-dungeon2.md`.)*
 - **Rescued spirits mend the village as you go** (owner, 2026-10-01): you
   see them working on it and clearing up, and it steps on at each
@@ -210,13 +212,21 @@ to stay inside the art direction (`docs/BRIEF.md`) and "nothing scary".
   solid, never a frame or an outline: nothing may look like it's yours to
   build. The building isn't seen happening; the spirit only potters at the
   plot. (Later, maybe: seen picking up debris, hammering, sawing.)
-  *(Built as geometry for all three huts, `Village.setStep`; steps 1 to 5
-  are wired to nothing yet. Which houses step on and when is undecided. Once a spirit is home, the guide and the explorer are no
+  *(**Superseded 2026-10-08.** The owner: it's "more about vibe than
+  actual logical progress": cabins in various states of repair, debris
+  cleared over time, footprints filled in over time, and no need to dictate
+  the details. So the rule now is only that every dungeon finished leaves
+  the village visibly further on: the houses go up one after another down
+  the lane, a few stages apart, so there's always a footing, some walls
+  and a bare roof to see at once; the strewn boards and stones thin out;
+  the giant's prints along the lane fill in; and whoever's home is found
+  shovelling the next print full. The pace is ours to tune by eye. The
+  five stages themselves (solid, never a frame) stand.** Once a spirit is home, the guide and the explorer are no
   longer downcast. A rescued spirit gives you nothing yet: the dungeon's
   mount is the reward. `docs/NEXT-dungeon2.md`. This answers conflict 9's "awaiting a yes"
   differently.)*
 - **There is a list of dungeon sites** (2026-10-02): `WorldGen.dungeons`,
-  four so far, each a ring of stones found from the seed, each
+  five so far, each a ring of stones found from the seed, each
   0.9-1.5 km on from the one before by a way a bike can take (and never
   within 700 m of an older one). Where the only
   way on is back the way it came, the giant treads in its own prints.
@@ -336,7 +346,83 @@ to stay inside the art direction (`docs/BRIEF.md`) and "nothing scary".
   Orange is only ever a spirit. See NOTES.md, "the dungeon's light is a
   dark light".
 
-### The cold country (decided 2026-10-07, not built)
+### The opening, reordered (tried and left, 2026-10-07)
+**Unwound the evening it was built** (owner). The opening is the cabin
+fix-up again (phase 1 below), then the bike, the towers and the giant. Why:
+with the country warm and the village whole there was nothing that needed
+your hands, and both things tried in its place (a jar taken door to door;
+mending the well's rim and watching the village drop sparks down it) were
+thinner than repairing the guide's house and seeing it light up, which is
+"a vibe, and sort of a story" (owner). What follows is what was built, kept
+for the record; the code is the git ref `refs/backup/reordered-opening`.
+Still open, and the owner's: why a run-down cabin stands in a warm village
+(one answer offered, not taken up: it's an empty house and you're moving
+in, its spirit grey because its hearth is out).
+
+The country starts **warm**, and the cold is the giant's doing. This
+replaces "cold from the first", the warm circles round the village houses,
+and the order of phases 1 and 2 below (repair, then bike, then tower).
+1. **A happy, warm village.** The home tower is already lit: it is why the
+   land is warm. No circles in town.
+2. **The well.** (Changed the same day, owner: going door to door with a
+   jar had no life in it, and you couldn't tell who had yet to give.) The
+   **well** in the middle of the lane is the village's reserve, and some
+   of its rim has come down. You put the stones back. Then the whole
+   village comes down the lane, each holding its spark up over its head,
+   stands round the well, and one after another they drop them in. The
+   well is deep: what's in it lies far down and only glows up out of the
+   dark; it never looks full. The guide slides its stone lid shut. (At
+   night a faint glow shows through the lid's cracks; it warms nothing.)
+3. **The bike**, and the ride up to the home tower for the view. No lock
+   on it: it's open.
+4. **The giant comes** while you're in the head. The village is smashed,
+   the spirits are taken, and the crows take the tower's light last: the
+   eyes you're looking through go dark. The cold starts here and creeps
+   in, it doesn't snap.
+5. **Repair the guide's house** and light its hearth (phase 1's steps).
+   The hearth warms no ground; it lights the guide, who was dim in the
+   cold and couldn't lead you.
+6. **The well.** The guide takes you to it, has a **jar** for you there,
+   and slides the lid off. Down on one knee with the jar held out, you
+   fill it: exactly the jarful the village put in.
+7. **Relight the tower** with it. The warmth rolls out. One jarful is what
+   a tower costs, here and after.
+8. The well is empty: from here sparks are found in warm land (the loop
+   as built), and the jar is what you carry them in.
+
+Why the village offered at all, never explained: the towers are giants
+that stand still and keep the land warm, and the well is where their share
+is kept. The walking giant is one nobody fed.
+
+Settled (owner, 2026-10-07): the guide's house is **whole at the start**
+and the giant breaks it, "more smashed than run down", not to
+smithereens. The run-down cabin (moss, flaking paint) goes from the
+story; its look and its repair quest are kept for cabins out in the world.
+
+Defaults taken in building it, and what's still open (the well's look, how
+the tower goes out, the padlock now first met at the second tower): see
+`docs/NEXT-opening.md`.
+
+### The cold country (decided 2026-10-07, and set aside the same day: for now it is only the mountain tops)
+**Where it stands** (owner, 2026-10-07, late): the story was changed to
+this for a day and changed back. **For now the cold is only the land above
+200 m**: pale, fogged, snowing, always, whatever is lit. No tower is a cold
+tower, none wants sparks, nothing is warmed. Before that, the same evening,
+it was seeded regions away from the start (kept in the code, switched off).
+**Everything in the list below is the idea as it was agreed, kept for when
+it's picked up again: none of it is how the game is now, and none of it is
+to be built unasked.** The one piece of it that was kept and built is the
+tower that comes up out of a dungeon's ring, which is now part of every
+dungeon's ending for its own sake (see "Dungeons").
+
+
+*(Built so far, and the owner's answers after the mock: the cold look as
+mocked, a cold sky over cold land, fog near, a hard edge with a rim of
+light, night with dark sky and trees over pale ground, no warmth carried
+on the ground (your face and the guide's show the cold instead), fewer
+towers (900 m apart) and a tower warming its patch, the land nearer it
+than any other, so nothing can be left cold. Sparks in a first form.
+`docs/NEXT-warmth.md` has what's built, the defaults and what isn't.)*
 What you do in the open world, and why. The whole of the talk it came out
 of, what was tried and left, and what it collides with in the built game
 are in `docs/ROADMAP-openworld.md`; the first thing to build is in
@@ -354,7 +440,8 @@ are in `docs/ROADMAP-openworld.md`; the first thing to build is in
   opens, where it's warm.
 - **No tower stands near a dungeon's ring. When the dungeon is won a tower
   rises out of the sealed ring** and warms that country for nothing. The
-  story alone warms a chain of regions along the trail.
+  story alone warms a chain of regions along the trail. *(The tower is
+  built, 2026-10-07, without the warming: "Dungeons", step 3.)*
 - **The giant is a tower whose light has gone out** (the direction for the
   lore; details open). Cold and empty, it took the hearth spirits to fill
   its head; they're too small. The dark lights under the rings are pieces
@@ -406,14 +493,24 @@ are in `docs/ROADMAP-openworld.md`; the first thing to build is in
      somewhere else in the dungeon first. The creature comes up too: under
      you if you were riding it when you took the light, standing beside
      you if you weren't.
-  3. **The offering.** Hands off: the ring shuts into a shrine, you get
-     down, hold the light up, a crow takes it into the giant's mouth.
+  3. **The offering, and a tower.** Hands off: the ring shuts into a
+     shrine, you get down, hold the light up, and it settles in the
+     shrine's bowl. Then **a beacon tower comes up out of the ring under
+     the shrine and carries it up on its head** (owner, 2026-10-07): the
+     ground heaves, you're knocked back and run out through the stones,
+     and turn to watch it rise. Its spirit wakes as it stands. A crow
+     takes the light from up there into the giant's mouth, as before.
+     The tower is a real one from then on: lit, no lock, a spirit in it
+     (implied: you never free it), and you can go up into its head and
+     fly between it and home. So every dungeon won leaves a way back to
+     the trail. The shrine stays on its head for good.
   4. **A spirit comes home.** A crow leaves with a light, the cut to the
      village, the spirit lands and is met, the cut back, and the giant gets
      up and walks on to the next ring.
 
-  *(Steps 1 to 3 are built in all three; step 4 in dungeons 1 and 2, not
-  yet in 3. Dungeon 2 first had the glimmer run you out through a veil,
+  *(Steps 1 to 3 are built in all four; step 4 in dungeons 1 to 3, not
+  yet in 4. The tower in step 3 is built and not yet played by the owner;
+  what was taken as a default is in NOTES.md "A tower out of the ring". Dungeon 2 first had the glimmer run you out through a veil,
   and dungeon 3 the moth fly you up its well with a cut to put you on her:
   played, both read as a teleport, and were taken out.)*
 - Each dungeon teaches one ability. Later ones combine them.
@@ -432,7 +529,7 @@ are in `docs/ROADMAP-openworld.md`; the first thing to build is in
   dark but for the lantern you're to land by and the one you stand by, and
   dust comes up past you. The last landing is a long ledge out of the mouth
   of a burrow; in the burrow the wurm, who clings: she goes out along the
-  ledge and climbs the cavern's own far face to the light. No other way up. Its ring and its offering are built; nothing follows yet. What
+  ledge and climbs the cavern's own far face to the light. No other way up. Its ring and its offering are built, and the fourth homecoming after it: a fourth spirit flown home, the giant up and on to a fifth ring (bare stones; dungeon 5 isn't built). What
   was taken as a default and what's to be asked: `docs/NEXT-dungeon4.md`.
 - **Generated backward from an ability chain** so they're solvable by
   construction, using room templates per ability.
@@ -691,6 +788,13 @@ it is "The cold country" above; the rest is a pool, not worked out, in
 ## Player Sequence
 
 The objective sequence is built as data, like phase 1.
+
+**The order of the opening changed on 2026-10-07** ("The opening,
+reordered", under Decided): the jar and the well, then the bike and the
+home tower (alight already), then the giant, then the repairs, then the
+tower relit. Phases 1 and 2 below are written in the old order (repair,
+bike, tower, giant) and with the giant sparing the guide's house; their
+steps are otherwise as built.
 
 **The main path (new direction, not built).** How phases 1–3 below fold into
 it is Conflict 2; this is the shape once that's settled.

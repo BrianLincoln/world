@@ -42,9 +42,18 @@ change goes through this loop:
   side, close up, and (`prints`) the footprints it leaves walking off from
   the cabin. It shoots from just over the treetops on open ground.
   `__ow.trail.prints.list` is every print so far.
+- `scripts/story.mjs <dir>`: the opening (the cabin fix-up) by the keys, from a
+  fresh start to the hearth lit. `DIST=<folder>` to serve another build.
 - `scripts/mill.mjs <dir>`: the village milling about (one in at its door and
   out again, two talking in the lane, then the lane left to itself with what
   each is doing printed). It drives `Village`'s private `go` / `meet`.
+- `scripts/mend.mjs <dir> [seed=..] [t=..]`: the village after 1 to 5
+  dungeons (the lane, the houses, the print being shovelled full, and the
+  digging close to); prints each house's step.
+- `scripts/chores.mjs <dir> [seed=..] [t=..] [only=yard,saw,nail,haul,mill]`:
+  the chores at a part-built house after three dungeons: each yard as it's
+  found, then one spirit put to sawing, nailing and hauling close up (a
+  frame every 0.4 s), then everyone left to it; prints who's at what stage.
 - `scripts/rebuild.mjs <dir> [seed=..] [t=..]`: a house being built again,
   steps 0 to 5 of each of the three huts, from the lane and from above, and
   `sheet.png` with all of them; prints what's underfoot at each step.
@@ -185,6 +194,21 @@ change goes through this loop:
   `.play`, `.she`, `.debugRound(n)`, `.debugYours()`, `.goTo(name)`,
   `.debug`), `__ow.enterCave()`, `leaveCave()`, `winDungeon(2)`,
   `firstDone()` (dungeon 1 behind you, as a save has it), `goToRing(1)`.
+- `scripts/warmth.mjs <dir> [seed=..] [t=9.5] [shots=valley,roll,tower,above,night,light,face,story] [at=x,z,yaw,pitch,dist] [tower=id] [cp=ranch,ring]`:
+  the cold country (sandbox with `?cold=1`). `roll` lights the tower of the
+  patch you stand in and shoots the warming at seven moments; `light` does
+  it the real way (lock, spirit, the camera up and back), a frame a
+  second; `night` is dusk and night, cold beside warm; `story` loads
+  checkpoints from after the giant and prints how cold it is.
+  `__ow.warmth` (`.force = true|false|null`, `.snap()`, `.warmAt(x, z)`,
+  `.patch(x, z)`, `.share`); the panel's "Cold" folder does the same.
+- `scripts/towermap.mjs <out.png> [seeds]`: the towers and their patches
+  from above, and the numbers (count, nearest pair, links, patch sizes).
+- `scripts/sparks.mjs <dir> [seeds]`: sparks. Proves the purse can't run
+  dry (every patch pays for its dearest neighbour; the worst order of
+  lighting reaches every tower), then in the page takes one in the warm,
+  fails to in the cold, and pays a tower's price. `__ow.sparks`
+  (`.count`, `.give(n)`, `.price(id)`, `.left`).
 - Perf with extra URL params: `Q='&mobs=0' node scripts/shots.mjs --no-build --only none --perf --uncapped`.
 
 ### Page hooks (`window.__ow`)

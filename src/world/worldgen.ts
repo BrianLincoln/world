@@ -1,7 +1,7 @@
 import { Simplex } from '../core/noise';
 import { clamp, hash01, hashInt, lerp, mulberry32, smoothstep } from '../core/rng';
 import { brookQuery, findStorySite, PASTURE_D, PASTURE_W, pasturePlane, PLOT_EASE, PLOT_R, RUIN_D, RUIN_W, siteToLocal, type StorySite } from './storySite';
-import { buildTowerNet, HOME_VIEW, type Tower, type TowerNet } from './towers';
+import { buildTowerNet, HOME_VIEW, ringTower, type Tower, type TowerNet } from './towers';
 
 // The world is a pure function of (seed, x, z). Nothing here touches three.js
 // so it runs identically inside chunk workers and on the main thread.
@@ -110,6 +110,15 @@ export class WorldGen {
     return (this._story ??= findStorySite(this.seed, { base: (x, z) => this.baseHeight(x, z), forest: (x, z, h) => this.forestBase(x, z, h) }));
   }
 
+  /**
+   * Use a start site found earlier (the search takes a couple of seconds:
+   * the main thread does it once per seed and hands the answer to the chunk
+   * workers and to later loads, as with `presetDungeons`).
+   */
+  presetStory(site: StorySite) {
+    this._story = site;
+  }
+
   /** The beacon tower network (see towers.ts). Lazily built from the base height field. */
   get towers(): TowerNet {
     if (!this._towers) {
@@ -132,6 +141,7 @@ export class WorldGen {
    */
   presetDungeons(list: DungeonSite[]) {
     this._dungeons = list;
+    this._ringTowers = null;
     this.know(list);
   }
 
@@ -169,7 +179,7 @@ export class WorldGen {
 
   /**
    * Every dungeon's site, in the order the giant comes to them: the first
-   * (above), and the ones it walks on to as each is done (`nextSite`): four so far.
+   * (above), and the ones it walks on to as each is done (`nextSite`): five so far (nothing is under the fifth yet: bare stones).
    * Found one after another, each with the ones before it already standing,
    * so the first is exactly what it was when it was the only one.
    */
@@ -190,14 +200,39 @@ export class WorldGen {
       const third = this.nextSite(second, [first]);
       this.know([first, second, third]);
       const t3 = Date.now();
-      // The fourth: where it walks on to when the third is done. (Nothing is under it yet: bare stones.)
+      // The fourth: where it walks on to when the third is done.
       const fourth = this.nextSite(third, [first, second]);
-      this.searchMs = [t1 - t0, t2 - t1, t3 - t2, Date.now() - t3];
+      this.know([first, second, third, fourth]);
+      const t4 = Date.now();
+      // The fifth: where it walks on to when the fourth is done. (Nothing is under it yet: bare stones.)
+      const fifth = this.nextSite(fourth, [first, second, third]);
+      this.searchMs = [t1 - t0, t2 - t1, t3 - t2, t4 - t3, Date.now() - t4];
       this.dungeonBusy = false;
-      this.presetDungeons([first, second, third, fourth]);
+      this.presetDungeons([first, second, third, fourth, fifth]);
     }
     return this._dungeons!;
   }
+
+  /**
+   * The tower that comes up out of each dungeon's ring when its light is
+   * given (see `ringTower`): after the network's in the numbering, and not
+   * in it. Each faces away from where the giant lies, out through a gap in
+   * the ring's stones, at whoever made the offering. Main thread only: the
+   * chunk workers place nothing by them.
+   */
+  get ringTowers(): Tower[] {
+    if (!this._ringTowers) {
+      const net = this.towers, f = { base: (x: number, z: number) => this.baseHeight(x, z), forest: (x: number, z: number, h: number) => this.forestBase(x, z, h) };
+      this._ringTowers = this.dungeons.map((d, i) => {
+        const q = d.way[Math.max(0, d.way.length - 2)] ?? [d.x + 1, d.z];
+        const turn = (Math.PI * 2) / 9, back = Math.atan2(d.z - q[1], d.x - q[0]);
+        const gap = 0.2 + (Math.round((back - 0.2) / turn - 0.5) + 0.5) * turn;
+        return ringTower(this.seed, net.towers.length + i, d, Math.atan2(Math.cos(gap), Math.sin(gap)), f, net);
+      });
+    }
+    return this._ringTowers;
+  }
+  private _ringTowers: Tower[] | null = null;
 
   /** Can a ring stand at (x, z)? Level (`lax`: how much less so will do), dry, not high, with dry ground about it and no tower near. */
   private ringFits(x: number, z: number, lax: number): DungeonSite | null {

@@ -1,10 +1,20 @@
 # Roadmap: the open world (the cold country, sparks, and what hangs off them)
 
 Written 2026-10-07 over one long brainstorm with the owner, and rewritten
-at its end round the idea that came out of it. **Nothing here is built.**
-What the owner agreed to is in DESIGN.md ("The cold country") and marked
-**agreed** below; everything else is a proposal or a pool of ideas, and
-says so. The first thing to build is in `docs/NEXT-warmth.md`.
+at its end round the idea that came out of it.
+
+**Set aside the same day.** A first form of all this was built (warmth,
+sparks, snow, a reordered opening), played, and the owner changed back:
+the opening is the cabin fix-up again, and the cold is only the mountain
+tops. This file is kept as the record of the idea and the pool of what
+hangs off it. **It is not the plan, and nothing in it is to be built
+unasked.** Where things actually stand: CLAUDE.md, and the last entries of
+the log in `docs/NEXT-warmth.md`. What was kept from it and built for its
+own sake: the tower that comes up out of a dungeon's ring (DESIGN.md
+"Dungeons", step 3), with no warming.
+
+What the owner agreed to at the time is marked **agreed** below;
+everything else was a proposal or a pool of ideas, and says so.
 
 ## What the owner wants
 
@@ -216,6 +226,10 @@ To be settled with the owner as each is reached, not before:
 
 ## Order of work
 
+*(As planned on 2026-10-07. Steps 1 to 3 were built in a first form and
+then switched off; of step 4 only the tower rising after a dungeon was
+built, for every dungeon, without the rest. Step 5 hasn't been started.)*
+
 | # | What | Session |
 |---|---|---|
 | 1 | **Mock the look**: a valley cold, the warming part-way across it, a tower's head with one region lit. Throwaway. Everything rests on the cold being beautiful. | new; `docs/NEXT-warmth.md` |
@@ -229,7 +243,7 @@ Each session ends by writing what it built, decided and left open into its
 
 ## Questions waiting for the owner
 
-1. How big is a swath? (Towers stand at least 560 m apart.)
+1. How big is a swath? (Towers stood at least 560 m apart then; 900 m since 2026-10-07.)
 2. What does the first tower cost, and how fast does the price climb?
 3. Are creatures gone from cold land, or there but grey?
 4. Do cold cabins warm a pocket of their own?

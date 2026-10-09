@@ -31,7 +31,7 @@ export const CHECKPOINTS: Checkpoint[] = [
   // Both done and the giant walked on again: by the third ring, opened; and that one done too.
   { id: 'ring3', label: '6.1 ring (dungeon 3)', kind: 'ring', giantGone: true },
   { id: 'offer3', label: '6.2 offering (dungeon 3 done)', kind: 'ring', giantGone: true },
-  // All three done and the giant walked on again: by the fourth ring, opened; and that one done too. (Nothing follows its offering yet.)
+  // All three done and the giant walked on again: by the fourth ring, opened; and that one done too. (After it: the fourth homecoming, and the giant on to a fifth ring.)
   { id: 'ring4', label: '7.1 ring (dungeon 4)', kind: 'ring', giantGone: true },
   { id: 'offer4', label: '7.2 offering (dungeon 4 done)', kind: 'ring', giantGone: true },
 ];

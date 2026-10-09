@@ -25,11 +25,15 @@ export interface DebugHooks {
   faceCam(on: boolean): void;
   mobs: { settings: { enabled: boolean; density: number; freeze: boolean; stelkHerds: number; beastHerds: number }; species: readonly { name: string; herds?: number }[] };
   bikes: { settings: { enabled: boolean } };
+  /** Stand the explorer at home (the cabin's doorstep). */
+  goHome(): void;
   /** Drop a flock of `species` in front of the explorer. */
   spawnFlock(species: string): void;
   /** Crow shape, 0 sleek .. 1 round. */
   crowPlump: { get(): number; set(v: number): void };
   towers: { settings: { links: boolean; map: boolean; index: number }; count(): number; go(i: number): void; overview(): void; light(which: 'all' | 'none' | 'break' | number): void };
+  /** The cold country: as the story has it, or forced cold / warm; and light or put out the tower whose patch you're in. */
+  warmth: { mode(): string; setMode(m: string): void; light(on: boolean): void };
   /** Phase 2's journey: its steps, jump to one. */
   journey: { stages: string[]; jump(stage: string): void };
 }
@@ -47,6 +51,7 @@ export class DebugUI {
     this.gui.close();
     this.gui.domElement.style.setProperty('--width', '270px');
     const world = { seed: h.getSeed(), regenerate: () => h.setSeed(world.seed), random: () => { h.randomSeed(); world.seed = h.getSeed(); this.gui.controllersRecursive().forEach((c) => c.updateDisplay()); } };
+    this.gui.add({ home: () => h.goHome() }, 'home').name('teleport home');
     const fw = this.gui.addFolder('Seed');
     fw.add(world, 'seed').name('seed').onFinishChange((v: string) => h.setSeed(v));
     fw.add(world, 'regenerate');
@@ -96,6 +101,23 @@ export class DebugUI {
     ff.add(postSettings, 'fogFalloff', 5, 200, 1).name('mist height x4');
     ff.add(postSettings, 'fogMax', 0, 1, 0.01).name('max');
     ff.add(postSettings, 'fogStart', 0, 400, 1).name('start');
+
+    // The cold country (story/warmth.ts; the look is `postSettings.cold`).
+    const cold = postSettings.cold;
+    const fk = this.gui.addFolder('Cold');
+    const coldCtl = { mode: h.warmth.mode(), light: () => h.warmth.light(true), out: () => h.warmth.light(false) };
+    fk.add(coldCtl, 'mode', ['story', 'cold', 'warm']).name('country').onChange((v: string) => h.warmth.setMode(v));
+    fk.add(coldCtl, 'light').name('light the tower here');
+    fk.add(coldCtl, 'out').name('put it out');
+    fk.add(cold, 'tintAmt', 0, 1, 0.01).name('frost colour');
+    fk.add(cold, 'lift', 0, 1, 0.01).name('paleness');
+    fk.add(cold, 'fogMul', 1, 16, 0.1).name('fog nearness ×');
+    fk.add(cold, 'mist', 0, 1, 0.01).name('mist bank');
+    fk.add(cold, 'snow', 0, 100, 0.5).name('snow (1 = quiet)');
+    fk.add(cold, 'top', 0, 400, 5).name('cold above (m)');
+    fk.add(cold, 'gloom', 0, 1, 0.01).name('dark sky');
+    fk.add(cold, 'sky', 0, 1, 0.01).name('cold sky');
+    fk.add(cold, 'rim', 0, 1, 0.01).name('rim of light');
 
     const fo = this.gui.addFolder('Outline');
     fo.add(postSettings, 'outline').name('enabled');

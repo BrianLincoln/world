@@ -4,7 +4,7 @@ import { makePropMaterial } from '../gfx/materials';
 import { Puffs } from '../gfx/puffs';
 import { propMesh } from '../story/props';
 import type { Colliders } from '../world/colliders';
-import { Prints, soleSdf } from '../world/prints';
+import { Prints, soleSdf, type Print } from '../world/prints';
 
 // What the giant leaves behind: wherever a foot comes down, a permanent
 // print (world/prints.ts), the trees under the sole pressed flat and fanned
@@ -79,7 +79,21 @@ export class Trail {
     const p = this.prints.at(x, z);
     if (!p) return;
     this.prints.erase(p);
+    this.bury(p);
     for (let dz = -24; dz <= 24; dz += 12) for (let dx = -24; dx <= 24; dx += 12) this.d.colliders.invalidate(p.x + dx, p.z + dz);
+  }
+
+  /** The print at (x, z) is part filled: `keep` of its depth is left (one print at a time: `Prints.part`). */
+  part(x: number, z: number, keep: number) {
+    const p = this.prints.at(x, z);
+    if (!p) return;
+    this.prints.part(p, keep);
+    this.bury(p);
+  }
+
+  /** What lay pressed flat in print `p` is under the earth. */
+  private bury(p: Print) {
+    this.flat = this.flat.filter((m) => { if (soleSdf(m.position.x, m.position.z, p) > 1.5) return true; this.group.remove(m); return false; });
   }
 
   /** `walking`: the giant is on the move. (Stood or sat on its last prints, their steam was a cloud round it for good.) */

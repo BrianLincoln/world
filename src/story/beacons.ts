@@ -30,6 +30,11 @@ import { TowerView, type ViewTower } from './towerView';
 // until you take the way out (the down badge, E, a click or Esc) and it
 // slurps you back down and out of the door. Which towers are lit is saved
 // per seed.
+//
+// A tower can also be *out* (`snuff`): open, its spirit gone and its head
+// dark, warming nothing and taking nobody up. That's the home tower after the
+// giant has been. A jarful of sparks at its doorway lights it again
+// (`kindle`): they fly up its face into the eyes, and it blazes.
 
 /** Draw towers this far away (m); nearer than NEAR_LOD gets the detailed meshes. */
 const DRAW = 5200;
@@ -49,12 +54,27 @@ const LOCK_STAND = 1.5;
 const T_BURST = 0.95, T_EMERGE = 1.3, T_OUT = 2.9, T_LOOK = 3.4, T_HAPPY = 4.2, T_TURN = 6.1, T_REACH = 6.7;
 /** Up into the head: arms arcing up to the eyehole, a tug on the grip, yanked up to it, popping in (the arms gone in a puff), and a beat after (s). */
 const ARMS_UP = 1.2, ARMS_HOLD = 0.5, PULL = 1.9, INTO = 0.35, AFTER = 2.2;
+/**
+ * In a cold country the beat after is longer and the camera leaves the tower's face for the land: up and
+ * back over `rise` s to `high` m above the head and `back` m out (plus the tower's own height, times `tall`),
+ * looking down at the ground round its foot, then drifting on round by `drift` rad, while the warmth runs out
+ * from the tower across the country (story/warmth.ts). (s)
+ */
+const WARM_AFTER = 9.5;
+/** Lighting a tower that's out: how near its doorway you stand (m); how long the sparks take up its face, and the beat after if no warming is shown (s). */
+const KINDLE_REACH = 7, KINDLE = { fly: 2.2, each: 0.14, after: 2.4 };
+const WARM_CAM = { rise: 2.2, high: 110, back: 210, tall: 1.5, drift: 0.3, pitch: 0.5 };
 /** How far through the pull the arms go in a puff (they'd crumple as it closes on the eye). */
 const POOF = 0.9;
 /** Hanging arms reach this far at most (body units), and the spirit floats this high (m). */
 const ARM_HANG = 1.6, HOVER = 0.35;
 /** Tower rock collides within this distance of a tower's centre (m). */
 const SOLID_R = 90;
+/** How far up a head (in its heights from its middle) something set on its crown sits. */
+const SEAT = 0.9;
+const v0 = new THREE.Vector3();
+/** A ring's tower as it was made, standing (the tower itself is moved while it comes up). */
+const STANDING = new WeakMap<Tower, Tower>();
 /** Rock tops steeper than this (rise over run) aren't floor: you slide off. */
 const WALK_SLOPE = 1.15;
 /** How far up the feet can step onto rock, and the body's height, for walls (m). */
@@ -77,7 +97,13 @@ export interface BeaconDeps {
   /** localStorage key suffix (the seed text). */
   saveKey: string;
   /** Can you break locks yet (do you have the pick)? */
-  canSmash(): boolean;
+  /** May this tower's lock be smashed now (the pick in hand; and in a cold country, sparks enough for it)? */
+  canSmash(t: Tower): boolean;
+  /** Its lock has come off: what that costs is paid. */
+  paid?(t: Tower): void;
+  /** Have you the jarful it takes to light a tower that's out? And it's been poured: that's paid. */
+  canKindle?(t: Tower): boolean;
+  kindled?(t: Tower): void;
   /** Draw the pick into the mitten for a swing. */
   showPick(): void;
   /** The overlay scene (drawn over the finished frame): the tower camera's markers. */
@@ -495,7 +521,9 @@ class TowerSpirit {
     const s = this.s;
     const c = Math.cos(this.yaw), sn = Math.sin(this.yaw);
     const w = GHOST_R * 0.95 * s / Math.sqrt(this.squash);
-    return out.set(this.pos.x + c * side * w, this.pos.y + 1.3 * s * this.squash, this.pos.z - sn * side * w);
+    // Leaning with the body (it tips about its hem: see place()).
+    const h = 1.3 * s * this.squash, lean = h * Math.sin(this.tilt);
+    return out.set(this.pos.x + c * side * w + sn * lean, this.pos.y + h * Math.cos(this.tilt), this.pos.z - sn * side * w + c * lean);
   }
 
   place() {
@@ -523,7 +551,7 @@ interface ClimbPlan {
   /** How far out in front of the face (from the tower's centre line) the arms arc. */
   out: number;
 }
-interface Freeing { tower: Tower; lock: Lock; t: number; spot: THREE.Vector3; lit: boolean; camYaw: number; side: number; plan?: ClimbPlan }
+interface Freeing { tower: Tower; lock: Lock; t: number; spot: THREE.Vector3; lit: boolean; camYaw: number; side: number; plan?: ClimbPlan; /** The warming is shown (the country was cold when it began). */ warm?: boolean }
 interface Slurp {
   tower: Tower;
   phase: 'reach' | 'pull' | 'rise' | 'view' | 'fly';
@@ -539,6 +567,13 @@ export class Beacons {
   readonly group = new THREE.Group();
   private towers: Tower[] = [];
   private lit = new Set<number>();
+  /** Towers that aren't the network's: one under each dungeon's ring (`WorldGen.ringTowers`). They have no lock, and aren't there at all (`under`) until they come up. */
+  private extra = new Set<number>();
+  private under = new Set<number>();
+  /** Each of those as it stands when it's up (the towers themselves are moved as they rise), and how far down it starts. */
+  private rest = new Map<number, { t: Tower; depth: number }>();
+  /** A head kept facing front (the shrine rides up on it). */
+  private still = -1;
   private state = new Map<number, HeadState>();
   private stoneMat = makePropMaterial({ toneVar: 0.2 });
   private homeMat = makePropMaterial({ toneVar: 0.2 });
@@ -564,6 +599,9 @@ export class Beacons {
   private chunkGeo = buildBoulder(41, 1);
   private lock: Lock | null = null;
   private free: Freeing | null = null;
+  /** Towers that are open but out (`snuff`), and the one being lit again (`t`: seconds into it; `n`: how many sparks go up). */
+  private out = new Set<number>();
+  private kin: { tower: Tower; t: number; side: number; warm: boolean; lit: boolean; from: THREE.Vector3; n: number } | null = null;
   private slurp: Slurp | null = null;
   private swingT = -1;
   private swingCd = 0;
@@ -625,13 +663,24 @@ export class Beacons {
   setGen(gen: WorldGen, saveKey: string) {
     this.d.gen = gen;
     this.d.saveKey = saveKey;
-    this.towers = gen.towers.towers;
+    this.towers = [...gen.towers.towers, ...gen.ringTowers];
+    this.extra.clear(); this.under.clear(); this.rest.clear();
+    this.still = -1;
+    for (const t of gen.ringTowers) {
+      this.extra.add(t.id);
+      this.under.add(t.id);
+      // (Its head's top starts just under the ground at the ring's middle.)
+      if (!STANDING.has(t)) STANDING.set(t, structuredClone(t));
+      this.rest.set(t.id, { t: STANDING.get(t)!, depth: STANDING.get(t)!.head.y + t.head.sy * SEAT - (gen.height(t.x, t.z) - 0.4) });
+    }
     this.rocks.clear();
     this.state.clear();
     for (const t of this.towers) this.state.set(t.id, { lit: 0, home: t.home ? 1 : 0, tilt: 0, look: 0, hl: 0, bob: 0, litT: 99 });
     this.lit.clear();
+    this.out.clear();
     this.dropLock();
     this.free = null;
+    this.kin = null;
     if (this.slurp) { this.d.hidePlayer(false); this.slurp = null; }
     for (const c of this.rubble) this.group.remove(c.mesh);
     this.rubble = [];
@@ -642,16 +691,103 @@ export class Beacons {
   }
 
   /** Something's happening that the explorer should just watch (input off). */
-  get busy() { return !!this.free || !!this.slurp; }
+  get busy() { return !!this.free || !!this.slurp || !!this.kin; }
   /** You're the head of this tower (or on your way in or out). */
   get inside(): Tower | null { return this.slurp?.tower ?? null; }
+  /** The sealed tower whose lock you're near enough to see (null if none). */
+  get sealed(): Tower | null { return this.lock && !this.lock.broken && !this.free ? this.lock.tower : null; }
   /** Settled in a tower's head, looking out (not on the way up, down or across). */
   get onTop(): boolean { return this.slurp?.phase === 'view'; }
   isLit(id: number) { return this.lit.has(id); }
+  /** Lit, and its spirit in the head (a tower being freed isn't yet): from then it warms the land. */
+  isAlight(id: number) { return this.lit.has(id) && !this.out.has(id) && !(this.free?.tower.id === id && !this.free.lit); }
+  /** Open, but its light gone. */
+  isOut(id: number) { return this.out.has(id); }
+
+  /** Tower `id`'s light goes out (the giant's doing): its head dark, its land cold, nobody taken up. Whoever's in its head stays till they come down. */
+  snuff(id: number) {
+    if (!this.lit.has(id) || this.out.has(id)) return;
+    this.out.add(id);
+    this.save();
+  }
+
+  /** Dev, and restoring: tower `id` is out, or alight again, at once. */
+  setOut(id: number, on: boolean) {
+    if (on) { this.lit.add(id); this.out.add(id); } else this.out.delete(id);
+    const s = this.state.get(id);
+    if (s) { s.lit = on ? 0 : this.lit.has(id) ? 1 : 0; s.litT = 99; }
+    this.dropLock();
+    this.save();
+  }
+  /** How long ago tower `id` was lit (s; large if long since or by no ceremony). */
+  litAge(id: number) { return this.state.get(id)?.litT ?? 99; }
   tower(id: number) { return this.towers[id]; }
+
+  // ------------------------------------------------------------ the towers under the rings
+
+  /** Put a ring's tower `k` of the way up (0: its head just under the ground; 1: standing), shaking by `shake` m. */
+  private place(id: number, k: number, shake = 0) {
+    const r = this.rest.get(id), t = this.towers[id];
+    if (!r || !t) return;
+    const dy = -(1 - k) * r.depth, a = this.time;
+    const sx = Math.sin(a * 67) * shake, sz = Math.sin(a * 53 + 1) * shake;
+    const put = (o: { x: number; y: number; z: number }, b: { x: number; y: number; z: number }, w = 1) => { o.x = b.x + sx * w; o.y = b.y + dy; o.z = b.z + sz * w; };
+    put(t.head, r.t.head);
+    put(t.flame, r.t.flame);
+    put(t.door, r.t.door);
+    // (Each stone shudders a little by itself.)
+    t.boulders.forEach((b, i) => { put(b, r.t.boulders[i], 0.6 + 0.8 * Math.sin(i * 2.4)); });
+    this.rocks.clear();
+    this.refreshT = 0;
+  }
+
+  /** A ring's tower comes up out of the ground: `k` of the way (0..1), still dark and shut. */
+  raise(id: number, k: number, shake = 0) {
+    if (!this.extra.has(id)) return;
+    this.under.delete(id);
+    this.still = id;
+    this.place(id, Math.min(1, Math.max(0, k)), shake);
+  }
+
+  /** It's up: its spirit wakes (the hop, the eyes, the door open), and it's one of the lit towers from here on. `now`: with no ceremony (a save from after). */
+  stand(id: number, now = false) {
+    if (!this.extra.has(id)) return;
+    this.under.delete(id);
+    this.place(id, 1);
+    if (this.lit.has(id) && !now) return;
+    const s = this.state.get(id)!;
+    this.lit.add(id);
+    if (now) { s.lit = 1; s.litT = 99; if (this.still === id) this.still = -1; } else s.litT = 0;
+    this.save();
+  }
+
+  /** Back under the ground, as if it had never come up (dev). */
+  bury(id: number) {
+    if (!this.extra.has(id)) return;
+    this.under.add(id);
+    this.lit.delete(id);
+    if (this.still === id) this.still = -1;
+    const s = this.state.get(id)!;
+    s.lit = 0; s.litT = 99;
+    this.place(id, 0);
+    this.save();
+  }
+
+  /** Its head may look about again. */
+  release(id: number) { if (this.still === id) this.still = -1; }
+  isUp(id: number) { return this.extra.has(id) && !this.under.has(id); }
+
+  /** Where something sat on the crown of tower `id`'s head is this frame, and how it's turned (`rot`: yaw, then tilt). */
+  crown(id: number, out: THREE.Vector3, rot: THREE.Euler, bob = true) {
+    const t = this.towers[id], s = this.state.get(id)!, h = t.head;
+    rot.set(s.tilt, h.rot + s.look, 0, 'YXZ');
+    return out.set(0, h.sy * SEAT, 0).applyEuler(rot).add(v0.set(h.x, h.y + (bob ? s.bob : 0), h.z));
+  }
 
   // ------------------------------------------------------------ actions
 
+  /** The country is cold: lighting a tower is shown warming it (a longer beat, the camera up and back). */
+  cold = false;
   /** Kept in the head: no coming down and no flying on (the first time up, until the giant has been and gone). */
   holdIn = false;
 
@@ -662,11 +798,17 @@ export class Beacons {
   }
 
   /** What the one action would do right now: smash a lock, fly to the tower you're aimed at, or leave the head. */
-  action(mode: string): 'pick' | 'down' | 'ember' | null {
+  action(mode: string): 'pick' | 'down' | 'ember' | 'jar' | null {
     if (this.slurp && this.holdIn) return null;
     if (this.slurp) return this.slurp.phase === 'view' ? (this.aim ? 'ember' : 'down') : null;
+    // A tower that's out, and a jarful to light it with: at its doorway.
+    const n = this.near;
+    if (n && this.out.has(n.id) && !this.kin && !this.free && mode === 'walk' && this.d.canKindle?.(n)) {
+      const g = n.door.ground, q = this.d.body.pos;
+      if (Math.hypot(q.x - g.x, q.z - g.z) < KINDLE_REACH && Math.abs(q.y - g.y) < 5) return 'jar';
+    }
     if (this.free || mode !== 'walk' || !this.lock || this.lock.broken) return null;
-    if (!this.d.canSmash()) return null;
+    if (!this.d.canSmash(this.lock.tower)) return null;
     const b = this.d.body, p = this.lock.pos;
     // Up to 7.5 m up: on a steep drop the lock sits well above the slope below the door.
     return Math.hypot(b.pos.x - p.x, b.pos.z - p.z) < LOCK_REACH && b.pos.y + 1 - p.y < 4 && p.y - b.pos.y - 1 < 7.5 ? 'pick' : null;
@@ -678,6 +820,7 @@ export class Beacons {
     if (a === 'down') { this.leave(); return true; }
     if (a === 'ember' && this.aim) { this.travel(this.aim); return true; }
     if (a === 'pick') { this.swing(); return true; }
+    if (a === 'jar') { this.kindle(this.near!); return true; }
     return false;
   }
 
@@ -698,8 +841,8 @@ export class Beacons {
 
   /** Debug: light towers instantly ('all', 'none' or an id), with no ceremony. */
   debugSet(id: number | 'all' | 'none') {
-    if (id === 'none') { this.lit.clear(); for (const s of this.state.values()) { s.lit = 0; s.litT = 99; } }
-    else for (const t of id === 'all' ? this.towers : [this.towers[id]].filter(Boolean)) { this.lit.add(t.id); this.state.get(t.id)!.lit = 1; }
+    if (id === 'none') { this.lit.clear(); this.out.clear(); for (const s of this.state.values()) { s.lit = 0; s.litT = 99; } }
+    else for (const t of id === 'all' ? this.towers.filter((t) => !this.under.has(t.id)) : [this.towers[id]].filter(Boolean)) { if (id !== 'all' && !this.lit.has(t.id)) this.state.get(t.id)!.litT = 0; this.lit.add(t.id); this.out.delete(t.id); this.state.get(t.id)!.lit = 1; }
     this.dropLock();
     this.save();
   }
@@ -773,6 +916,7 @@ export class Beacons {
    * from the rock.
    */
   cinematic(): { pos: THREE.Vector3; at: THREE.Vector3 } | null {
+    if (this.kin) return this.kindleCam();
     const f = this.free;
     if (!f) return null;
     const t = f.tower, sp = this.spirit, b = this.d.body.pos;
@@ -809,6 +953,9 @@ export class Beacons {
       dist *= 1 - 0.4 * k2;
     }
     const pos = at.clone().addScaledVector(dir(yaw, pitch), dist);
+    // The warmth runs out across the country: up and back to see it go, then drifting on round.
+    const lit0 = top + PULL + INTO;
+    if (f.warm) this.warmShot(t, f.side, u - lit0, pos, at);
     // A tremble as the cracks run, and a jolt as the door bursts.
     const q = u < T_BURST ? 0.05 * (u / T_BURST) : 0.35 * Math.exp(-(u - T_BURST) * 5);
     if (q > 0.002) {
@@ -818,6 +965,87 @@ export class Beacons {
     }
     return { pos, at };
   }
+
+  /** The shot of the warmth running out from tower `t`, `u` s after it lit (it eases in from a little before): blended into `pos` and `at`. */
+  private warmShot(t: Tower, side: number, u: number, pos: THREE.Vector3, at: THREE.Vector3) {
+    if (u <= -0.9) return;
+    const W = WARM_CAM, h = t.head, tall = h.y + h.sy - t.door.ground.y;
+    const k3 = THREE.MathUtils.smootherstep(u, -0.9, W.rise);
+    const on = Math.max(0, u) / WARM_AFTER;
+    const wyaw = t.yaw + side * 0.4 + side * W.drift * on;
+    const wat = new THREE.Vector3(h.x, t.door.ground.y + tall * 0.35, h.z);
+    const wpos = wat.clone().addScaledVector(new THREE.Vector3(Math.sin(wyaw) * Math.cos(W.pitch), Math.sin(W.pitch), Math.cos(wyaw) * Math.cos(W.pitch)), (tall * W.tall + W.back) * (1 + 0.18 * on));
+    wpos.y = Math.max(wpos.y, h.y + h.sy + W.high * 0.5);
+    pos.lerp(wpos, k3);
+    at.lerp(wat, k3);
+  }
+
+  /** Lighting a tower that's out: the whole of it from the front, you at its foot, as the sparks go up; then the warmth. */
+  private kindleCam(): { pos: THREE.Vector3; at: THREE.Vector3 } {
+    const f = this.kin!, t = f.tower, h = t.head;
+    const tall = h.y + h.sy - t.door.ground.y;
+    const yaw = t.yaw + f.side * 0.4, pitch = 0.07, dist = tall * 1.2 + 16;
+    const k = THREE.MathUtils.smootherstep(f.t, 0, 1.3);
+    const at = new THREE.Vector3(h.x, t.door.ground.y + tall * 0.5, h.z);
+    const pos = at.clone().addScaledVector(new THREE.Vector3(Math.sin(yaw) * Math.cos(pitch), Math.sin(pitch), Math.cos(yaw) * Math.cos(pitch)), dist);
+    pos.lerpVectors(f.from, pos, k);
+    const b = this.d.body.pos;
+    at.lerpVectors(new THREE.Vector3(b.x, b.y + 1.3, b.z), at, k);
+    if (f.warm) this.warmShot(t, f.side, f.t - this.kindleAt(f), pos, at);
+    return { pos, at };
+  }
+
+  /** When, into a kindling, the head blazes: once the last spark is up. */
+  private kindleAt(f: { n: number }) { return KINDLE.fly + (f.n - 1) * KINDLE.each; }
+
+  /** Pour a jarful at tower `t`'s doorway: its sparks fly up its face into the eyes, and it's alight again. */
+  private kindle(t: Tower) {
+    const b = this.d.body, cam = this.lastCam;
+    this.kin = { tower: t, t: 0, side: this.freeSide(), warm: this.cold, lit: false, from: cam.clone(), n: 8 };
+    this.d.kindled?.(t);
+    b.vel.set(0, b.vel.y, 0);
+    this.d.sfx.whoosh();
+  }
+
+  private updateKindle(dt: number) {
+    const f = this.kin;
+    if (!f) return;
+    const t = f.tower, b = this.d.body, h = t.head;
+    const t0 = f.t, u = (f.t += dt);
+    const fwd = new THREE.Vector3(Math.sin(t.yaw), 0, Math.cos(t.yaw));
+    // You watch them go.
+    let dh = Math.atan2(h.x - b.pos.x, h.z - b.pos.z) - b.heading;
+    dh = Math.atan2(Math.sin(dh), Math.cos(dh));
+    b.heading += dh * (1 - Math.exp(-5 * dt));
+    b.vel.set(0, b.vel.y, 0);
+    // Each spark: out of the jar, up the front of the rock and in at the eyes.
+    const eye = new THREE.Vector3(h.x, h.y + h.sy * 0.14, h.z).addScaledVector(fwd, h.sx * 0.9);
+    const from = new THREE.Vector3(b.pos.x, b.pos.y + 1.2, b.pos.z);
+    for (let i = 0; i < f.n; i++) {
+      const k = (u - i * KINDLE.each) / KINDLE.fly;
+      if (k <= 0 || k >= 1) continue;
+      const e = k * k * (3 - 2 * k);
+      const p = from.clone().lerp(eye, e).addScaledVector(fwd, Math.sin(k * Math.PI) * (6 + h.sx));
+      p.x += Math.sin(u * 7 + i * 2.1) * 0.5 * (1 - k);
+      p.z += Math.cos(u * 6 + i * 1.7) * 0.5 * (1 - k);
+      this.sparks.emit(p, 1, 0.16 + 0.1 * k, 0.5, undefined, { life: 0.35, rise: 0.2, drag: 2, up: 0.3 });
+    }
+    const at = this.kindleAt(f);
+    for (let i = 0; i < f.n; i++) { const a = i * KINDLE.each + KINDLE.fly; if (t0 < a && u >= a) this.d.sfx.chirp(false); }
+    if (!f.lit && u >= at) {
+      // The head blazes on.
+      f.lit = true;
+      this.out.delete(t.id);
+      this.state.get(t.id)!.litT = 0;
+      this.save();
+      this.sparks.emit(new THREE.Vector3(h.x, h.y, h.z).addScaledVector(fwd, h.sx), 24, 0.25, 7);
+      this.d.sfx.whoosh();
+      this.d.sfx.chirp(true);
+      this.onEvent?.('lit', t);
+    }
+    if (u >= at + (f.warm ? WARM_AFTER : KINDLE.after)) this.kin = null;
+  }
+  private lastCam = new THREE.Vector3();
 
   /** While you're the head (or rising into it / dropping out), where the camera is and looks. */
   viewCam(): { pos: THREE.Vector3; at: THREE.Vector3; fov: number } | null {
@@ -855,18 +1083,21 @@ export class Beacons {
     const b = this.d.body;
     let near: Tower | null = null, nearD = Infinity;
     for (const t of this.towers) {
+      if (this.under.has(t.id)) continue;
       const dd = Math.hypot(b.pos.x - t.x, b.pos.z - t.z);
       if (dd < nearD) { nearD = dd; near = t; }
     }
     this.near = near;
 
-    // The lock props exist for the nearest sealed tower only.
-    if (near && !this.lit.has(near.id) && nearD < 160 && !this.free) {
+    // The lock props exist for the nearest sealed tower only. (A ring's tower never had one.)
+    if (near && !this.lit.has(near.id) && !this.extra.has(near.id) && nearD < 160 && !this.free) {
       if (this.lock?.tower !== near) { this.dropLock(); this.lock = new Lock(near, (x, z) => this.d.gen.height(x, z)); this.group.add(this.lock.group); }
     } else if (this.lock && !this.free && (!near || this.lock.tower !== near || nearD > 180)) this.dropLock();
 
     this.updateSwing(dt, mode, held);
     if (this.lock && this.lock.broken && !this.free) this.dropLock();
+    this.lastCam.copy(cam.position);
+    this.updateKindle(dt);
     if (this.free) this.updateFreeing(dt);
     else if (this.lock && !this.lock.update(dt, (x, z) => this.d.gen.height(x, z))) this.dropLock();
     this.updateSlurp(dt, mode, grounded);
@@ -943,7 +1174,8 @@ export class Beacons {
     // Keep the landing spot off the rock.
     for (let i = 0; i < 30 && this.solidAt(spot.clone().setY(spot.y + 1)); i++) spot.addScaledVector(fwd, 0.5);
     spot.y = this.floorUnder(spot.x, spot.z, spot.y + 2);
-    this.free = { tower: t, lock, t: 0, spot, lit: false, camYaw, side };
+    this.free = { tower: t, lock, t: 0, spot, lit: false, camYaw, side, warm: this.cold };
+    this.d.paid?.(t);
     this.onEvent?.('opened', t);
     this.lit.add(t.id); // saved now: it's open and its spirit is out
     this.save();
@@ -1110,7 +1342,7 @@ export class Beacons {
     if (u > T_BURST && u < T_BURST + 0.3) b.vel.set(fwd.x * 3.2, b.vel.y, fwd.z * 3.2);
 
     const P = f.plan ??= this.planClimb(t, f.side, f.spot);
-    const reachEnd = T_REACH + ARMS_UP, holdEnd = reachEnd + ARMS_HOLD, pullEnd = holdEnd + PULL, poofAt = holdEnd + PULL * POOF, inEnd = pullEnd + INTO, end = inEnd + AFTER;
+    const reachEnd = T_REACH + ARMS_UP, holdEnd = reachEnd + ARMS_HOLD, pullEnd = holdEnd + PULL, poofAt = holdEnd + PULL * POOF, inEnd = pullEnd + INTO, end = inEnd + (f.warm ? WARM_AFTER : AFTER);
     const bob = () => Math.sin(this.time * 2.6) * 0.1;
     const hover = (p: THREE.Vector3) => { p.y = this.floorUnder(p.x, p.z, p.y + 2) + HOVER + bob(); return p; };
 
@@ -1558,7 +1790,7 @@ export class Beacons {
       if (!this.inRoom(t, b.pos.x, b.pos.y, b.pos.z, 0.6) && Math.hypot(b.pos.x - t.door.ground.x, b.pos.z - t.door.ground.z) > 3) this.disarmed = -1;
     }
     // Walk into the room of a lit tower, well in, and it takes you up.
-    if (!this.slurp && !this.free && near && this.lit.has(near.id) && mode === 'walk' && grounded && near.id !== this.disarmed && this.inRoom(near, b.pos.x, b.pos.y, b.pos.z, 0.55)) {
+    if (!this.slurp && !this.free && !this.kin && near && this.lit.has(near.id) && !this.out.has(near.id) && mode === 'walk' && grounded && near.id !== this.disarmed && this.inRoom(near, b.pos.x, b.pos.y, b.pos.z, 0.55)) {
       this.slurp = { tower: near, phase: 'reach', t: 0, from: b.pos.clone(), camFrom: new THREE.Vector3() };
       this.zoomK = 0;
       this.d.sfx.whoosh();
@@ -1629,11 +1861,18 @@ export class Beacons {
   private viewK = 0;
   private ember: THREE.Mesh;
 
+  /** The towers `from` can see: its own links, and any ring's tower that's up and sees it (those aren't in the network's links). */
+  private seen(from: Tower): Tower[] {
+    const out = from.links.map((i) => this.towers[i]).filter((t) => t && !this.under.has(t.id));
+    for (const id of this.extra) if (!this.under.has(id) && this.towers[id].links.includes(from.id)) out.push(this.towers[id]);
+    return out;
+  }
+
   /** Where you can fly from a lit tower: lit towers it can see, and home (from home, every lit tower). */
   targets(from: Tower): Tower[] {
-    const ok = (t: Tower) => t !== from && this.lit.has(t.id);
+    const ok = (t: Tower) => t !== from && this.lit.has(t.id) && !this.out.has(t.id);
     if (from.home) return this.towers.filter(ok);
-    const out = from.links.map((i) => this.towers[i]).filter(ok);
+    const out = this.seen(from).filter(ok);
     const home = this.d.gen.towers.home;
     if (ok(home) && !out.includes(home)) out.push(home);
     return out;
@@ -1641,7 +1880,7 @@ export class Beacons {
 
   /** Every tower shown from a head: the ones it can see, lit or not, and wherever you can fly. */
   private sight(from: Tower): Tower[] {
-    const out = new Set(from.links.map((i) => this.towers[i]));
+    const out = new Set(this.seen(from));
     for (const t of this.targets(from)) out.add(t);
     return [...out];
   }
@@ -1817,7 +2056,7 @@ export class Beacons {
     for (const t of this.towers) {
       const s = this.state.get(t.id)!;
       // Lit once its spirit is in the head (a tower being freed isn't yet).
-      const lit = this.lit.has(t.id) && !(this.free?.tower === t && !this.free.lit);
+      const lit = this.lit.has(t.id) && !this.out.has(t.id) && !(this.free?.tower === t && !this.free.lit);
       s.litT += dt;
       s.lit += ((lit ? 1 : 0) - s.lit) * e(lit ? 4 : 8);
       s.bob = 0;
@@ -1837,7 +2076,7 @@ export class Beacons {
         const want = flying.yaw! - t.yaw;
         s.look += Math.atan2(Math.sin(want - s.look), Math.cos(want - s.look)) * e(3);
         s.tilt += (0.04 - s.tilt) * e(3);
-      } else if ((inside === t && !flying) || this.free?.tower === t) {
+      } else if ((inside === t && !flying) || this.free?.tower === t || this.still === t.id) {
         s.look += Math.atan2(Math.sin(0 - s.look), Math.cos(0 - s.look)) * e(2);
         s.tilt += (0 - s.tilt) * e(2);
       } else {
@@ -1869,7 +2108,7 @@ export class Beacons {
     this.headNear.begin(); this.headFar.begin(); this.doorNear.begin(); this.doorFar.begin();
     for (const t of this.towers) {
       const d = Math.hypot(t.x - cx, t.z - cz);
-      if (d > DRAW) continue;
+      if (d > DRAW || this.under.has(t.id)) continue;
       const s = this.state.get(t.id)!;
       if (bodies) {
         const [bn, bf] = t.home ? [this.homeNear, this.homeFar] : [this.bodyNear, this.bodyFar];
@@ -1904,21 +2143,25 @@ export class Beacons {
   private key() { return `embla.towers.${this.d.saveKey}`; }
 
   private save() {
-    try { localStorage.setItem(this.key(), JSON.stringify([...this.lit])); } catch { /* private mode */ }
+    try { localStorage.setItem(this.key(), JSON.stringify([...this.lit])); localStorage.setItem(this.key() + '.out', JSON.stringify([...this.out])); } catch { /* private mode */ }
   }
 
   private load() {
     try {
       const raw = localStorage.getItem(this.key());
-      if (raw) for (const id of JSON.parse(raw) as number[]) if (this.towers[id]) this.lit.add(id);
+      // (A ring's tower is stood, lit, by its own offering's save.)
+      if (raw) for (const id of JSON.parse(raw) as number[]) if (this.towers[id] && !this.extra.has(id)) this.lit.add(id);
+      for (const id of JSON.parse(localStorage.getItem(this.key() + '.out') ?? '[]') as number[]) if (this.lit.has(id)) this.out.add(id);
     } catch { /* ignore */ }
   }
 
   /** Forget this seed's lit towers (?fresh=1). */
   reset() {
-    try { localStorage.removeItem(this.key()); } catch { /* ignore */ }
+    try { localStorage.removeItem(this.key()); localStorage.removeItem(this.key() + '.out'); } catch { /* ignore */ }
     this.lit.clear();
+    this.out.clear();
     for (const s of this.state.values()) s.lit = 0;
+    for (const id of this.extra) { this.under.add(id); this.place(id, 0); }
   }
 }
 

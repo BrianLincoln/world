@@ -72,6 +72,8 @@ const WIN = 4.3, WIN_HOPS = [0.5, 1.35, 2.2], WIN_VEIL = 0.9;
 const MISS = 4;
 /** The wind's ride: how fast it lifts (m/s), carries you across to the lip, and how high over the lip it holds you. */
 const RISE = 44, CARRY = 15, OVER = 4.5;
+/** The cavern waking: how long the dark takes to go down under the ledge (s), and how long after one another its lanterns wake, the lowest first. */
+const WAKE_ALL = 5.5, WAKE_STEP = 0.55;
 /** A lantern wakes this long after you've earned it (s). */
 const PAUSE = 0.9;
 /** Where it sets you down: this far back from the lip's edge (m). */
@@ -136,6 +138,10 @@ export class DropCave {
   hinted = false;
   /** You've been up a wall on her. Saved. */
   climbed = false;
+  /** You've ridden her out on to the ledge: the cavern has woken (every lantern, and the dark gone down under the ledge). Saved. */
+  woken = false;
+  /** How long since it began to (s). */
+  private wakeT = 0;
   /** The wurm. */
   she: Mob | null = null;
   /** The top you're to land on next (this time down): `tops.length` once you've made the ledge. */
@@ -176,6 +182,9 @@ export class DropCave {
   private lanternGeo: THREE.BufferGeometry;
   private lanternRanges: [number, number][];
   private lanternAt: THREE.Vector3[];
+  /** The ladder up the far face: which rung each lantern is of (-1: none), and how bright its turn in the light running up it makes it just now (0..1; 1 for every other lantern). */
+  private rung: number[];
+  private wave: Float32Array;
   /** Which lanterns the cave lights itself (the tops', the pit floor's): the rest wake as you come by. */
   private own: boolean[];
   private glowAt: THREE.Vector3[];
@@ -228,7 +237,9 @@ export class DropCave {
     this.lanternAt = L.lanterns.map((o) => this.world(o.x, o.y + 0.4, o.z));
     this.lit = L.lanterns.map(() => false);
     this.litK = new Float32Array(L.lanterns.length);
-    this.own = L.lanterns.map((_, i) => L.tops.some((o) => o.lantern === i) || L.ledgeLanterns.includes(i));
+    this.own = L.lanterns.map((_, i) => L.tops.some((o) => o.lantern === i) || L.ledgeLanterns.includes(i) || L.climbLanterns.includes(i));
+    this.rung = L.lanterns.map((_, i) => { const k = L.climbLanterns.indexOf(i); return k < 0 ? -1 : k >> 1; });
+    this.wave = new Float32Array(L.lanterns.length).fill(1);
     try {
       const sv = JSON.parse(localStorage.getItem(`embla.dungeon4.${d.saveKey}`) ?? '{}');
       this.taken = !!sv.taken;
@@ -236,6 +247,8 @@ export class DropCave {
       this.down = !!sv.down || this.yours;
       this.hinted = !!sv.hinted || this.down;
       this.climbed = !!sv.climbed || this.taken;
+      this.woken = !!sv.woken || this.taken;
+      if (this.woken) this.wakeT = 99;
       for (const i of (sv.lit ?? []) as number[]) if (i < this.lit.length && !this.own[i]) this.wake(i, true);
     } catch { /* no storage: nothing has happened yet */ }
     for (const i of L.beacons) this.wake(i, true);
@@ -285,7 +298,7 @@ export class DropCave {
 
   private paintLantern(i: number) {
     const a = this.lanternGeo.attributes.aLit as THREE.BufferAttribute, [from, to] = this.lanternRanges[i];
-    (a.array as Float32Array).fill(this.litK[i], from, to);
+    (a.array as Float32Array).fill(this.litK[i] * this.wave[i], from, to);
     a.needsUpdate = true;
   }
 
@@ -295,7 +308,12 @@ export class DropCave {
   }
 
   /** Below this height of the world, rock that no lantern is on isn't seen (main hands it to the shader while you're inside). */
-  get darkY() { return this.origin.y + this.layout.cavern.y - 1.5; }
+  get darkY() {
+    // (Once the cavern has woken the dark goes down, over a few seconds, to under the ledge: all of the cavern is
+    // seen, and under the ledge there is still nothing.)
+    const L = this.layout, k = ss(this.wakeT, 0.3, WAKE_ALL);
+    return this.origin.y + THREE.MathUtils.lerp(L.cavern.y - 1.5, L.cavern.y - BURROW - 7, k * k * (3 - 2 * k));
+  }
 
   /** The dungeon's creature, for whoever asks which (main). */
   get creature() { return this.she; }
@@ -320,10 +338,12 @@ export class DropCave {
       let r = o.r, keep = i === 0;
       if (o.warm) { r = (this.taken && this.win < 0 ? 4.5 : this.taken ? 8 : o.r) * (1 + 0.04 * Math.sin(this.time * 2.3)) * (1 + 1.1 * this.cheer); this.glowAt[i].copy(this.emberAt); keep = true; }
       else if (o.lantern !== undefined) {
-        const q = this.litK[o.lantern];
+        const q = this.litK[o.lantern] * this.wave[o.lantern];
         r = o.r * q * (2 - q) * (1 + 0.025 * Math.sin(this.time * 1.7 + o.lantern * 2.4)) * (1 + 0.3 * this.cheer);
         // (The one you're to land by is never dropped for a nearer light; nor the far doorway's.)
         keep = o.lantern === aim || L.beacons.includes(o.lantern) || L.ledgeLanterns.includes(o.lantern);
+        // (Woken, the whole way down is alight at once: each top's pool reaches further, so the pillars are seen.)
+        if (this.woken && o.r > 14) r *= 1.5;
       }
       this.glowR[i] = r;
       this.glowD[i] = r < 0.05 ? 1e9 : keep ? -1e9 : Math.max(0, cam.distanceTo(this.glowAt[i]) - r);
@@ -457,6 +477,11 @@ export class DropCave {
         if (ex > 0 && lx < K.x) out(-1, 0, ex);
         if (ez > 0) out(0, Math.sign(lz - K.z), ez);
       }
+      // On the far face over it she keeps over the ledge too: off its ends the way down is into the dark.
+      if (y > K.y + 1.5 && y < L.cavern.y - 1.5 && lx > K.x - K.hx! && Math.abs(lx - L.cavern.x) < PIT_HALF + 1) {
+        const ez = Math.abs(lz - K.z) - (K.hz! - m);
+        if (ez > 0) out(0, Math.sign(lz - K.z), ez);
+      }
       const pd2 = L.pitSd(lx, lz);
       if (pd2 > 0 && pd2 < m && Math.abs(y - L.ground(lx, lz)) < 1.5 && L.sdf(lx, lz) < 0 && Math.abs(lx - L.cavern.x) < PIT_HALF + 3) {
         const far = lx > L.cavern.x, overLedge = far && Math.abs(lz - K.z) < K.hz! - 1;
@@ -472,7 +497,7 @@ export class DropCave {
   private save() {
     try {
       localStorage.setItem(`embla.dungeon4.${this.d.saveKey}`, JSON.stringify({
-        down: this.down, yours: this.yours, hinted: this.hinted, climbed: this.climbed, taken: this.taken, lit: this.lit.flatMap((on, i) => (on && !this.own[i] ? [i] : [])),
+        down: this.down, yours: this.yours, hinted: this.hinted, climbed: this.climbed, woken: this.woken, taken: this.taken, lit: this.lit.flatMap((on, i) => (on && !this.own[i] ? [i] : [])),
       }));
     } catch { /* ignore */ }
   }
@@ -596,7 +621,7 @@ export class DropCave {
   /** Dev: where it all stands. */
   get debug() {
     return {
-      target: this.target, caught: this.caught, down: this.down, yours: this.yours, hinted: this.hinted, climbed: this.climbed, taken: this.taken, arrived: this.arrived,
+      target: this.target, caught: this.caught, down: this.down, yours: this.yours, hinted: this.hinted, climbed: this.climbed, woken: this.woken, taken: this.taken, arrived: this.arrived,
       gust: this.gust, glad: this.glad, win: this.win, camK: this.camK, thought: this.thoughtA, idle: this.idle, lit: this.lit.map((on) => (on ? 1 : 0)).join(''),
     };
   }
@@ -687,11 +712,22 @@ export class DropCave {
         const t = L.tops.findIndex((o) => o.lantern === i);
         // (Only two are ever awake: the one you're to land by, once its pause is up, and the one you stand by.)
         // (The ledge's other two wake with it once you're on it.)
-        this.lit[i] = t < 0 ? this.target >= N && this.lightT <= 0 : this.arrived && (t === this.target ? this.lightT <= 0 : t === this.target - 1);
+        const was = this.lit[i], c = this.rung[i];
+        this.lit[i] = c >= 0 ? false : t < 0 ? this.target >= N && this.lightT <= 0 : this.arrived && (t === this.target ? this.lightT <= 0 : t === this.target - 1);
+        // The cavern woken: every one of them, one after another from the ledge up to the lip.
+        if (this.woken && t >= 0 && this.wakeT > (N - 1 - t) * WAKE_STEP) { this.lit[i] = true; if (!was && this.wakeT < 90) this.d.sfx.collect(N - 1 - t); }
       } else if (!this.lit[i] && !this.seq && this.lanternAt[i].distanceTo(b.pos) < WAKE_R) {
         this.lit[i] = true;
         this.d.sfx.coo();
         this.save();
+      }
+      // The ladder up the far face: awake after the rest, from the foot up, and then its light runs up it over and
+      // over (the way to go) until the light at the top is yours.
+      const c = this.rung[i];
+      if (c >= 0) {
+        this.lit[i] = this.woken && this.wakeT > N * WAKE_STEP + c * 0.22;
+        const w = this.taken ? 1 : 0.22 + 0.78 * Math.max(0, Math.cos((this.time * 0.55 - c * 0.26) * Math.PI * 2)) ** 2;
+        if (this.litK[i] > 0 && w !== this.wave[i]) { this.wave[i] = w; this.paintLantern(i); }
       }
       const to = this.lit[i] ? 1 : 0;
       if (this.litK[i] !== to) { this.litK[i] = to > this.litK[i] ? Math.min(1, this.litK[i] + dt / WAKE) : Math.max(0, this.litK[i] - dt / 0.35); this.paintLantern(i); }
@@ -709,6 +745,9 @@ export class DropCave {
       const K = L.tops[N - 1];
       if (!this.climbed && mode === 'ride' && py > K.y + 6 && inPit) { this.climbed = true; this.save(); }
       const climb = !this.climbed && mode === 'ride' && over(K, px, pz, 1) && Math.abs(py - K.y) < 1.5;
+      // Out on the ledge on her for the first time: the cavern wakes.
+      if (!this.woken && mode === 'ride' && inPit && over(K, px, pz, 1)) { this.woken = true; this.wakeT = 0; this.d.sfx.shimmer(); this.save(); }
+      if (this.woken) this.wakeT += dt;
       const show = chute || climb ? 1 : 0;
       if (show && this.thoughtA < 0.02) { this.d.sfx.call(); this.thoughtT = 0; }
       this.thoughtT += dt;

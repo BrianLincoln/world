@@ -89,6 +89,7 @@ export class Pointer {
   private mat: THREE.ShaderMaterial;
   private a = 0;
   private awayT = 0;
+  private far = false;
   /** The way it points, in the world (rad, atan2(z, x)); NaN: not yet shown. */
   private ang = NaN;
   private n = new THREE.Vector3();
@@ -111,7 +112,10 @@ export class Pointer {
   update(dt: number, camera: THREE.PerspectiveCamera, player: THREE.Vector3, g: Guide | null, show: boolean) {
     const dist = g ? Math.hypot(g.at.x - player.x, g.at.z - player.z) : 0;
     this.awayT = g && dist > g.near ? this.awayT + dt : 0;
-    const want = show && g && this.awayT > DELAY ? MAX_A * THREE.MathUtils.smoothstep(dist, g.near, g.near + 25) : 0;
+    // Wanted only from far off (the way home): once it is, it stays until you're back.
+    if (!g || dist <= g.near) this.far = false;
+    else if (dist > (g.far ?? g.near)) this.far = true;
+    const want = show && g && this.far && this.awayT > (g.delay ?? DELAY) ? MAX_A * THREE.MathUtils.smoothstep(dist, g.near, g.near + 25) : 0;
     this.a += (want - this.a) * (1 - Math.exp(-(want > this.a ? 1.5 : 4) * dt));
     if (this.a < 0.01 || !g) {
       this.mesh.visible = false;

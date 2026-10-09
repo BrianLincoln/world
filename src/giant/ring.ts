@@ -18,10 +18,12 @@ export interface RingDeps {
   sfx: Sfx;
   /** Switch the explorer's movement mode ('carried' while held, 'walk' after). */
   setMode(m: string): void;
+  /** How high over the body's feet you sit, if you're on a creature (the arms take you, not it). */
+  seat?(): number;
 }
 
 /** Reaching up for you, holding a beat, pulling you under; and bringing you back up and letting go (s). */
-const REACH = 0.5, HOLD = 0.14, PULL = 0.6, RISE = 0.7, LET_GO = 0.45;
+const REACH = 0.5, HOLD = 0.14, PULL = 0.6, RISE = 1.3, LET_GO = 0.45;
 /** Shutting for good: the field closing and the dark spirit going down with it (s). */
 const SEAL = 3;
 /** How far on to the field you walk before it takes you (m in from its lip). */
@@ -103,7 +105,8 @@ export class Ring {
     const s = this.take;
     if (!s) return 0;
     if (s.phase === 'pull') return THREE.MathUtils.smoothstep(s.t / PULL, 0.4, 1);
-    if (s.phase === 'rise') return 1 - THREE.MathUtils.smoothstep(s.t, 0.05, 0.5);
+    // (Off before you're through the field: being pulled up out of it is to be seen.)
+    if (s.phase === 'rise') return 1 - THREE.MathUtils.smoothstep(s.t, 0, 0.3);
     return 0;
   }
 
@@ -224,8 +227,8 @@ export class Ring {
       }
     } else if (s.phase === 'rise') {
       const k = Math.min(1, s.t / RISE);
-      player.copy(s.from).setY(s.from.y - UNDER * Math.pow(1 - k, 2.2));
-      sunk = Math.pow(1 - k, 2.2);
+      sunk = Math.pow(1 - k, 2);
+      player.copy(s.from).setY(s.from.y - UNDER * sunk);
       if (k >= 1) { s.phase = 'letgo'; s.t = 0; player.copy(s.from); b.grounded = true; this.d.setMode('walk'); }
     } else {
       hands = 1 - THREE.MathUtils.smoothstep(s.t / LET_GO, 0, 1);
@@ -234,7 +237,7 @@ export class Ring {
     // The same two arms as a tower's spirit has, in ink. Each comes up out of
     // the field beside you, arches over, and comes down on to you from above.
     const right = new THREE.Vector3(Math.cos(b.heading), 0, -Math.sin(b.heading));
-    const chest = player.clone().setY(player.y + 1.0);
+    const chest = player.clone().setY(player.y + 1.0 + (this.d.seat?.() ?? 0));
     const drop = UNDER * sunk, h = hands;
     for (let k = 0; k < 2; k++) {
       const side = k === 0 ? -1 : 1;

@@ -5262,6 +5262,20 @@ room beyond she stands, tail going, and doesn't run. Walk up to her
 (`CATCH`, 4.5 m): the heart, the bouncing, her back. Eight veils' ends in
 all.
 
+**And before the heart, she plays** (2026-10-08, owner: "playfully comes
+to you, then away, then does spin heart thing... right now it just sorta
+ends"). Come within `TEASE_R` (10 m, was `CATCH`) and it's she who comes
+to you: `Play` `'tease'`, a fixed five seconds (`TEASE`): up to you in two
+bounds, head down and tail going a moment, away to where she stood, a look
+back, once right round you and in to your feet; then `offer()` as before
+(the hops, the turn, the heart). It follows you if you move, stops a
+little to one side of straight ahead (from behind you'd hide her), pulls
+its ring in rather than cross rock, and she can't be got on until it's
+over. `round` is 3 from its first frame, so a reload mid-way finds her
+yours. The bow is `crouch` and `low` together: all four legs fold, no
+elbows-only pose in `glimmer.ts` yet. `scripts/veil.mjs <dir> quest`
+checks it and shoots `q-12-tease-*`.
+
 ### Dungeon 2's ending is dungeon 1's (2026-10-06, owner)
 
 "the ending of D2 is messed up. when I get the orb I should get pulled up
@@ -5474,3 +5488,577 @@ the giant, so the crows left on it are how many are still to save.
 - In DESIGN.md "The cold country"; the whole of it, with what was left
   and what it collides with, in `docs/ROADMAP-openworld.md`; first job
   (mock the look) in `docs/NEXT-warmth.md`.
+
+## The cold country: a mock of the look (2026-10-07)
+Step 1 of `docs/NEXT-warmth.md`, for the owner to judge before anything
+real is built. It lives wholly in the composite pass (`postSettings.cold`,
+off by default) and is driven by `scripts/warmth-mock.mjs`; nothing in the
+world, the story or the saves knows of it. Cold is a tint and lift by a
+pixel's world place, and fog by the share of the sight line outside the
+warm circle, so a lit region seen from its tower ends in mist. What was
+tried and what isn't solved (dusk and night) is in that doc's log.
+
+## Fewer towers: 900 m apart (2026-10-07)
+The owner played and found too many, and wants the warmth sized so no
+cold can be left. `TOWER_SPACING` 560 -> 900 (about 60 a seed, from about
+115). Warmth will be a tower's patch (the land nearest it), which covers
+everything by construction, so no radius needs choosing. Cost: the world
+moved (`WORLD_VERSION` 4, dungeon cache v11), every dungeon ring is
+somewhere new, and the journey's second tower is nearly twice as far.
+Numbers and what broke: the log of `docs/NEXT-warmth.md`.
+
+## The giant walked its visit waist deep (2026-10-07)
+`theGiant()` in main stands a settled giant by the ring for whoever asks,
+and something now asks before the visit; `Visit.start` then summoned that
+same giant and walked it still dormant (sink 1, the group 43 m down).
+`Giant.emerge` clears `dormant` and `sink`. Checked with
+`scripts/visit.mjs <dir> tower`.
+
+## The cold country, a first form (2026-10-07)
+Built in one go while the owner was away, to be revised: `story/warmth.ts`
+(patches, not circles: every place belongs to its nearest lamp, so all lit
+means nothing cold), the look in the composite pass, the camera for
+lighting a tower in the cold, cold faces, and `story/sparks.ts`. Warmth
+saves nothing of its own: it follows from which towers are lit and how far
+the story has got. The shader reads the four nearest lamps per 55 m cell
+from one texture and each lamp's reach from another, so the edge is exact
+and costs five fetches; the air (fog along a sight line, the sky) reads a
+coarse warm / cold map. What was taken as a default and what isn't built
+is in the log of `docs/NEXT-warmth.md`.
+
+## Snow in the cold (2026-10-07)
+
+- Owner asked for snow in the cold areas. `src/story/snow.ts`: 9000 flat
+  round flakes, instanced quads in a 76 x 40 x 76 m box that stands a little
+  ahead of the camera. A flake's place is a function of its number and a
+  clock (wrapped into the box in the vertex shader): nothing simulated, so
+  cuts of the camera need no settling.
+- Each flake asks the warmth's own maps (`tWarmIds`, `tWarmTow`, the cabins'
+  pockets: the composite's maths again, in its vertex shader) whether the
+  land under it is cold. It thins over the last 9 m before a tower's warmth
+  (4 m before a cabin's) and none falls in it; a tower's warmth rolling out
+  sweeps it off with no code of its own.
+- Drawn in the overlay scene, not the G-buffer: opaque flakes there would
+  each get an ink outline, the grade and the fog. Hidden behind what's
+  solid by the G-buffer's depth. Because the overlay is swapped in a
+  dungeon, none falls there.
+- White by day, the snowy ground's blue after dark. Capped at about 1% of
+  the screen's height across and faded out under 4 m, or one near the lens
+  is a great disc.
+- Not done: it falls through roofs and under trees (hidden only by what's
+  in front of it), nothing settles, no wind gusts, no sound. Perf not
+  measured: 18k triangles, one draw call.
+
+
+## The hearth's warming shot (2026-10-07)
+- Lighting the hearth in a cold country is shown as lighting a tower is,
+  at a cabin's size. `Story.lightHearth` starts it (only when `Story.cold`,
+  which main sets from the warmth); the table is `HEARTH`, the camera
+  `HEARTH_CAM` / `hearthCam`: 1 s where you stand for the fire to catch,
+  then up first and out over the yard to 62 m off, looking down from
+  front-left so the hearth's wall faces it, drifting a little.
+- The ring is the cabin's own pocket: main asks `Story.hearthWarm` for how
+  much of its 16 m it is and how bright its rim. A pocket now carries its
+  rim (`uColdPk` is a vec4; 0.5 at rest, 1 while it rolls). A save that's
+  already lit starts whole.
+- It's `Story.busy`, so hands are off, and the journey's bike gift waits
+  until it's over and then its own five seconds.
+- The roof is off in the shot (the cabin's cutaway, because you're inside):
+  left so, you see the fire and the two of you in the middle of the ring.
+- Check with `scripts/hearth.mjs <dir>` (a frame each half second).
+- Later the same day, the owner asked for it far heavier and the sky dark.
+  `cold.snow` now runs 0 to 100 (1 = the first quiet fall, 9000 flakes;
+  default 12; 100 = 900,000) and the wind rises with it. Flakes are points
+  now, not quads: as quads 100 cost about 15 ms a frame here, as points
+  under 1 ms (`scripts/snow.mjs`; this machine's GPU, shared with other
+  sessions, so only roughly: **not measured on integrated graphics**).
+  Buffers grow as the amount asks.
+- The sky over cold land by day goes to a heavy slate (`cold.storm`, by
+  `cold.gloom`, default 0.8), paling to the fog at the horizon so far land
+  still goes into it; clouds stay as a shade of it. Night is as it was.
+
+
+
+## The opening, reordered (2026-10-07)
+Owner's decision (DESIGN.md "The opening, reordered"); built the same day,
+all at once at the owner's asking, and not yet played by them.
+- **One table.** Phase 1 (`phase1.ts`) is the whole opening now: `hello`,
+  `jar`, `round`, `pour`, `away`, then the old repair steps unchanged
+  (`meet` .. `hearth`), then `well` and `relight`, then `home`. New step
+  kinds: `round`, `pour`, `away`, `draw`, `relight`. One table rather than
+  a new phase, so nothing that counts phases (`phaseIndex`, the stable)
+  moved.
+- **`away` is where the journey has the guide.** `Story.begun` (the well
+  is shut) is what the journey waits on now, not `done`; it hands the guide
+  back with `Story.resume()` at the end of the grief, which used to start
+  the stable. The stable starts as before once `done` (the tower relit and
+  the guide home).
+- **The house** starts whole (`RuinCabin.setWhole`, on a save-less load)
+  and is broken by `wreck()` when the giant stops by the yard: parts go
+  back to `broken` (`resetPart`), the fire is doused. Smashed, not run
+  down: `rundown` (off) keeps the moss and the `uWear` paint for later.
+- **Smashed hard** (owner, 2026-10-07: "way more smashed"; it had been a
+  sagging roof with a hole in it). The walls are broken down at the door
+  end, one gable gone and the chimney's torn, a rag of roof left at the
+  chimney end, the ridge beam fallen in, the stack laid out across the
+  yard, the door thrown down in it, boards everywhere. Still a house you
+  mend in the same three repairs: each side is two meshes, whole and
+  wrecked (`CabinParts.wreck`), and a repair puts whole ones back
+  (`RuinCabin.mended`: roof = back and far gable, door = front, chimney =
+  its own gable). Wall collision is unchanged (the low walls still stop
+  you at full height); you can only stand on the roof that's left
+  (`roofLeft`). The moss and sapling went from the broken roof, and
+  `rundown`'s sprung boards were placed for whole walls: both would need
+  doing again for a neglected cabin.
+- **The clock.** The opening is an afternoon (13:00 on); `away` lets the
+  day run free, so the giant comes late in the day as it always did; the
+  repairs keep their old hours, a morning to dusk, and `Story.clock` runs
+  the night between past in about eight seconds (the hour is later than
+  the step's window: it wraps).
+- **The jar is `Sparks.count`.** The village gives a jarful between them
+  (`JAR` = 8, each spirit its share), the well keeps it (`Well.store`,
+  saved with the story), and the home tower takes a jarful to light again.
+  So one number, one HUD.
+- **A tower that's out** is a second set in `Beacons` (`out`, saved beside
+  the lit ones): open, dark, not alight for the warmth, taking nobody up,
+  not flown to. `kindle` is its lighting: sparks up the face, `'lit'`,
+  then the same warm shot a freed tower gets (`warmShot`, shared).
+- **The cold** is on once `giantGone`, and comes over 24 s (`FALL`), which
+  from the head of the tower whites the whole view out. A save from after
+  starts cold. Cabins warm no ground any more, and the hearth's warming
+  shot is gone with it (`HEARTH`, `hearthCam`, `scripts/hearth.mjs`).
+- **Saves.** `SAVE_VERSION` 3 and `WORLD_VERSION` 5: every save is wiped,
+  since the order of things in them changed.
+- **Checked** with `scripts/opening.mjs` (the opening by the keys; the
+  visit from the tower; the morning after; the well; the relighting) and
+  `scripts/story.mjs` (the repairs by the keys, from the checkpoint).
+  **Not checked:** the whole thing in one sitting by hand, a reload at
+  every point, touch, or the frame rate on integrated graphics (nothing
+  heavy was added: one small well, a jar, a handful of spark meshes).
+
+- **The key prompt is back from the bike on** (2026-10-07). `Story.silent`
+  hid it "while the opening runs", which was fine when the opening ended
+  before the bike; reordered, the opening runs through the bike, the tower
+  and the repairs, so "E ride the bicycle" never showed. It's now quiet
+  only until the well is shut (`begun`): the jar's round has no keys to
+  teach that the pictograms don't already.
+
+## Sparks get a look of their own (2026-10-07)
+
+The owner: sparks are central, so they and the jar icon must look much
+better, and they shouldn't just float about the world as they did (one day
+they may be in chest-like things). Done:
+
+- One look for a spark wherever it is, `story/sparkLook.ts`: a white-hot
+  bead in the scene and, in the overlay scene, a four-pointed star (amber
+  edge, pale heart) that rocks, breathes and flares, a halo in two flat
+  bands, and glitter shed when it moves. Drawn in its own colours, not
+  added as light: added, it went white at night and washed out on pale
+  ground. The gem (a stretched octahedron) is gone from the world and from
+  the well's motes; a tower's kindling still uses puffs.
+- In the world a spark lies low in the grass, wakes when you come within
+  3.6 m, whirls up round you and goes into the pack. It's yours (counted
+  and saved) from the moment it wakes; the HUD counts it when it lands.
+- The jar icon is redrawn (round-bellied glass, cork, a shine) and the
+  HUD's fills with light and stars as the count nears a jarful, or what the
+  tower you're at wants; it hops when one lands.
+- Not done, on purpose: chests. Where sparks lie is unchanged.
+- Not checked: how one reads from far off (the star is never under 9 px,
+  but the long shot in `scripts/spark-look.mjs` missed it).
+
+
+## The well mended, and the village's gift (2026-10-07, later)
+
+The owner on the jar's round, having seen it: "the vibe just ain't there",
+every villager looks the same and you can't tell who has yet to give; then
+"repairing the well or something, then they all come and add to it", the
+well "should look deeper, pouring into it should look cool, it shouldn't
+fill up so much".
+
+- **Steps.** 'jar', 'round' and 'pour' are gone from the start. 'mend':
+  five stones of the rim's upper course lie on the grass in front of it;
+  the action by one and it hops back into its gap (no tool, no inventory).
+  'gift': `Village.bring` walks everyone down the lane to a crescent round
+  the well's front (they're too short to be seen over the rim from across
+  it), each `bearing` a spark over its head; when all are there, and you
+  are, they throw them in one after another and the guide shuts the lid.
+  You do nothing in it but watch. The jar is a 'pickup' by the well just
+  before 'draw', after the giant.
+- **The shaft** isn't a hole: the terrain is in the way. It's a disc inside
+  the ring whose shader casts each pixel's ray down a cylinder 7 m deep
+  (`SHAFT_FRAG` in well.ts): coursed stone going dark in hard steps, a
+  small heap of light on the bed whose glow climbs the wall only a little,
+  up to four falling sparks painted with the ring of light each takes down
+  with it, and a breath of light when one lands. A mote is a real mesh
+  until it's inside the ring, then `Well.drop` hands it to the shader.
+- **The jar in her hands** (`CharacterRig.jarOut`): the pat's kneel with
+  both arms by IK round a jar that belongs to the rig, leaning in until
+  they reach. Used at 'draw': sparks come up out of the well into its
+  mouth, it warms in colour as it fills and dips with each. Input is held
+  while it lasts (`Story.holding`).
+- Not done: a camera of its own for the gift; anything in her hands while
+  she lifts a stone (it's the two-handed `give`); sound for the fall.
+
+## The reordered opening unwound; the cold as regions (2026-10-07, evening)
+
+The owner, after seeing both the jar's round and the well mended: "the old
+intro with cabin fix-up just felt better", and "when I build the cabin my
+spirit guy lights up. it's a vibe and it's sorta kinda a story". Kept: the
+cold country (but "just certain regions"), the action music, dungeon 4's
+fixes, the other fixes of the day.
+
+- **Put back to the last commit:** `phase1.ts`, `story.ts`, `journey.ts`,
+  `giant/visit.ts`, `cabin.ts`, `geometry.ts`, `build.ts`, `village.ts`,
+  `ui/checkpoints.ts`, `scripts/story.mjs`. Deleted: `well.ts`,
+  `scripts/opening.mjs`, `docs/NEXT-opening.md`. Taken out by hand: the
+  jar pose in the rig, `Spirit.bearing`, main's wiring (the jar, the home
+  tower alight from the first, `snuff`, the jarful). So the smashed-cabin
+  work of that day went too. `WORLD_VERSION` is 6: every save is wiped.
+- **Left in, unused:** `Beacons.snuff` / `setOut` / `kindle` and their
+  camera. Nothing calls them. Take them out if the idea isn't coming back.
+- **All of it as it stood** is `refs/backup/reordered-opening` (a commit on
+  top of bd941c7, on no branch): `git diff bd941c7 refs/backup/reordered-opening`.
+- **The cold as regions.** `Warmth.isCold(id)`: a tower is a cold tower if
+  the 2.7 km block it stands in is cold country (a hash of the seed, 28% of
+  blocks), it's over 2 km from the start, and it isn't the home tower or
+  the journey's second. A cold tower's patch is cold until it's lit; every
+  other patch counts as lit. Nothing else changed: the composite pass, the
+  snow, the roll-out on lighting. Cold towers alone want sparks. No ring
+  warms anything (none is asked). Seed to seed the share swings widely
+  (hilda: about half its towers at 34%; embla a sixth), blocks being few:
+  a real biome in `worldgen.ts` is the proper form of this, not built.
+- **Checked:** `scripts/story.mjs` plays the fix-up through; `scripts/visit.mjs
+  <dir> tower` runs; the start is warm and a cold tower's land is cold and
+  snowing on hilda. Not re-run: `scripts/warmth.mjs`, `sparks.mjs`,
+  `towermap.mjs`, `snow.mjs` (their `story` / giant cases are stale).
+
+## The way home, for whoever strays at the start (2026-10-07)
+
+- Owner: walk far off at the very start and you're simply lost. The far-off
+  pointer only ever pointed at a task, and at the start there's none.
+- Now, with no task to point at and the giant not yet been, the pointer
+  falls back to the guide's house (`wayHome` in main): once you've been
+  over 350 m off and a minute out of 150 m, it shows, and stays until
+  you're back inside 150 m. `Guide.far` / `Guide.delay` carry that;
+  `Pointer` latches on `far`. Every other guide behaves as before.
+- Not after the giant: then the trail and towers lead away on purpose.
+- Typechecked only; not walked out to in the game.
+
+## The cold is only the mountain tops (2026-10-07, late)
+Owner's call, "for now". `REGIONS = false` in `story/warmth.ts` empties the
+set of cold towers, so every patch is warm; the cold is by height instead:
+`coldHigh` in the composite pass (`uColdTop` = `postSettings.cold.top`,
+`topSoft`), taken as the max with the patches' cold, for the ground, the air
+along a sight line (the share of it above the line) and the sky (by the
+camera's height). `Warmth.warmAt` asks the ground's height (new dep
+`height`), and snow.ts keeps flakes whose own height is above the line. The
+region and patch machinery is untouched and `?cold=1` still shows it.
+
+**By the ground's height, never the air's** (owner, the same night: it
+snowed on anyone flying high, whatever was under them). A flake asks how
+high the land under it stands: `Snow.survey` keeps a 32 x 32 half-float
+texture of `gen.height` at 4 m round the box (each texel holds the cell it
+is the remainder of, so only cells new to the square are asked for: about
+32 a step, 1024 on a cut). The composite's sky goes by the ground under the
+eye (`postSettings.cold.under`, set in main; `uColdTop.z`), and the air
+along a sight line takes the ground between as a straight slope from there
+to the pixel's own height.
+
+## A tower out of the ring (2026-10-07)
+
+The owner, after the cold-country story was set aside: keep the tower that
+rises from a dungeon's ring, and put the shrine on top of it. "The orb
+would get placed, then the tower would rise up from the ring." Answers
+given: the same crow as now, from up top; you're bumped back and watch it
+rise; it's a real, lit beacon tower; a spirit in it is implied.
+
+- **Where it comes in the offering.** After the light settles in the bowl
+  (`T.set`) and before the crow is sent for: `heave`, `rise`, `up` in the
+  timing. It adds about 7 s to the first offering and 5 to the short one.
+  The shrine still comes up out of the ground first, as it did, and you
+  still walk to it: only then does the tower lift it.
+- **The tower is not in the network.** `WorldGen.ringTowers`, one a ring,
+  numbered after `towers.towers`. So no tower moved, no ring moved, no save
+  was wiped, and workers know nothing of it (the ring's own clearing is
+  what keeps trees off it). `Beacons` holds its list as the network's plus
+  these, hidden (`under`) until `raise`. Its links are worked out one way
+  (which of the network it sees); `Beacons.seen` reads them both ways, so
+  the network's own `links` are never touched (the debug map indexes by
+  them).
+- **Rising is the tower itself moved.** `Beacons.place` sets every
+  boulder's height from a copy of it standing, so drawing, collision, the
+  camera clamp and the door all follow with no second code path.
+- **The shrine rides the head** (`Beacons.crown`, `Offering.seat`): it
+  turns, tips and hops as the head does. While the offering plays the head
+  is held facing front (`still`), so the crow's marks hold; afterwards it
+  watches you like any head, and the stone creature goes round with it.
+- **A save.** `embla.offer<n>` is what stands the tower (`placed` or
+  `given`: up and lit at once). A ring tower's id in `embla.towers` is
+  ignored on load, so the two can't disagree.
+
+Defaults taken, the owner hasn't ruled on them:
+
+1. **Size.** 0.52 of an ordinary tower (`RING_TOWER_SIZE`): about 23 m to
+   the top of its head on `hilda`, against 40 or so. At full size its door
+   boulder swallowed the ring's stones. The nine stones stay, round its
+   foot.
+2. **It faces away from the giant,** out through a gap in the stones, at
+   you. The giant looks at the back of its head.
+3. **Its spirit wakes the moment it's up** (the hop, the eyes, the door
+   open), before the crow comes. The other choice was at the giant's smile.
+4. **You run to 17.5 m and watch from in front of its door.** Knocked back
+   for 0.4 s, then a turn and a run. Whatever creature stood by is simply
+   put 7 m to one side of you at the cut (no walk).
+5. **Four cameras, a cut between each** (the owner: the camera has to
+   change with what's happening; the crow taking the light from the foot
+   of the tower "looks lame"). `cinematic()` in `offering.ts`: close by the
+   shrine as the light goes to it and for the first second of the heave;
+   low on the ground behind you, inside the ring's clearing, looking
+   steeply up (64 degrees wide) while the tower comes up and wakes; **up in
+   the air by the shrine on its head for the crow** (the old close shot
+   again, 23 m up: the shrine near, the crow coming over it out of the
+   giant, the giant's face beyond); then the giant's face as before.
+6. **Its stone is the other towers' granite,** not the shrine's ash blue.
+7. **Sound** is what there was: the giant's stomp as it starts and as it
+   stands, thuds on the way, a shimmer as it wakes.
+
+Checked on `hilda` with `scripts/offering.mjs <dir> play,reload,home,tower`
+(dungeon 1's) and `scripts/veil.mjs <dir> story` (dungeon 2's short one).
+Dungeons 3 and 4 use the same code and were not run. Two checks in
+`offering.mjs home` were out of date before this (they expected the giant
+not to be solid, and the second ring to be bare stones) and were put right.
+
+## The giant's first walk never doubles back (2026-10-07)
+
+Owner: the footprints sometimes ran one way and then the opposite way,
+overlapping or side by side. Measured on 36 seeds with
+`scripts/doubleback.mjs` (new): 13 did, `hilda` among them. Three causes,
+all in `visitRoute` (`giant/visit.ts`), none in worldgen, so no land moves:
+
+1. **The ring lay back the way it came.** It always came up the lane from
+   the far end to the yard, wherever ring 1 was. Now, if that walk comes
+   back on itself, it is tried from the yard's end too (round your cabin,
+   then down the lane and on), and whichever doubles back least is taken.
+2. **The way hairpins.** Worldgen's way goes to a point beside a tower and
+   on from there, which can be straight back. The giant walks straight
+   across the mouth of one (`straight`): no prints in the loop. The way
+   itself, and what worldgen clears for it, is as it was.
+3. **It spun on the spot by the yard** to get round your cabin (240 degrees
+   one way rather than 80 the other). It may now bear round something and
+   back (`bear(.., then)`), cut the corner on to the way, and come in on a
+   bend (`comeIn`).
+
+A seed whose old walk was clean keeps it to the last bit (`plain`; the
+fingerprints in `scripts/sites.mjs` are unchanged for those). `awry` =
+`doubled` + `tight` is the measure, and the script fails on either.
+
+Not touched: the walks on to rings 2, 3 and 4 (`onwardRoute`) still turn
+round and tread back in their own prints where the only way on is back,
+by design. A save made after the visit on a seed whose walk changed
+reloads with the prints where the new walk puts them.
+
+Checked: 36 seeds clean; `scripts/sites.mjs` on 14 (nothing new wades or
+treads on a ring; its lower bound on how near the last print is to ring 2
+went from 45 m to 40, the giant's resting place is still held 58 m off);
+`scripts/visit.mjs` on `7` and `13`, where it now comes from the yard's end.
+
+## 2026-10-08: out of a dungeon still mounted; right angles on a wall; the Drop's ladder; a taller mouth
+- **Coming up mounted, you stay mounted.** Every dungeon's exit used to dismount you below, lift you alone (under
+  the veil for most of it), hide the creature and put you back on it once the arms let go: seen as a flash off it
+  and on again. Now `rideUp` (main) keeps you on it and the ring lifts the two of you: `ringDeps` maps the ring's
+  'walk' to 'ride' when you're riding, and the arms take you by the chest wherever the saddle puts it
+  (`RingDeps.seat`). The rise is longer (`RISE` 1.3 s) and the veil is off in its first 0.3 s, so being pulled up
+  out of the field is seen, on foot too. `bringUp` is left only for the dev `?ride=` arrival.
+- **A snake steerer on a wall turns in right angles there too** (`GallopState.wallSide`, `climbWall`): from going up,
+  right is along the face, right again is down. It used to double back. In the Drop she is kept over the ledge
+  while on the far face (`collide`), so no way along it leads down into the dark.
+- **The Drop's way up is shown**: `DropLayout.climbLanterns`, a ladder of lanterns up the far face either side of
+  where the ledge's end leaves her, lit once the cavern wakes, with light running up it until the light is taken
+  (`rung`, `wave` in dropCave). Pushed last so no saved lantern number moves.
+- **The giant's mouth opens taller, mostly downward** (`gape` in GIANT_FRAG; `GAPE` follows), and the crow flies in
+  `OVER_MID` over the middle: with the light under its feet it's the pair that has to clear the lips.
+- `scripts/dungeon.mjs` and `scripts/veil.mjs` each fail "hands off" by 14.1 m: that is the offering's own run out
+  from the rising tower (`flee`), which the checks predate. Not fixed here.
+
+## 2026-10-08: the moonmoth stretches her wings; the Moon Hall's stones
+
+- On the pulpit her wings lay in the rock: its face overhangs there by about 33 degrees and she hung plumb, 0.5 m
+  out. `MothLayout.perch` now carries `lean` and stands her `CLING` off the face along its slope; hung, the wings
+  are held a little off it too (`moonmoth.ts`).
+- A stretch (`d.s.stretch`, `STRETCH` s): both pairs up over her back as one (a lagging hind pair passed through the fore), a quiver,
+  eyes shut, down again. The hall starts one half a second into the first look, and as the lamp kindles (she
+  leaves the rock with them still up). On the ground, not ridden and standing still, any moonmoth does it by
+  herself every 14 to 40 s. The wild one is not looked at in a screenshot yet.
+- Stones: only the one nearest the way in is a single turn off; the others two or three (owner: three of four
+  were one turn). Same number of rng draws, so nothing else in the plan moves. A half-done save keeps its faces.
+- Each stone has a little moon on its crown (`DIAL_ORB_Y`, `DIAL_ORB_R`; `Dial.orb` in mothCave), the lamp's in
+  small: dark (`MOON_OUT`) until its face is right, then lit as the lamp is, and the beam starts in its middle
+  (it used to start as a bare cylinder end over the cap). The stone's solid is taller by it.
+- The stones' beams wait for all four (owner): a right face lights only its little moon (and the `collect` chime it
+  already had); solved, the four beams go out together (`Dial.b`) and the lamp lights.
+
+## A fourth homecoming, and a fifth ring (2026-10-08)
+Asked for: after dungeon 4's offering the crow returns the spirit to the village, and the giant moves on to
+where dungeon 5 will be. Dungeon 5 itself isn't built.
+- `WorldGen.dungeons` finds a fifth site (`nextSite(fourth, [first, second, third])`); the four before it are
+  found before it is known, so they can't move. Cache key `embla.dungeon.v12`. `WORLD_VERSION` not bumped, as
+  for the fourth: the land only changes at the new ring and along its way. The fifth search cost 0.08-0.28 s
+  on the five seeds tried.
+- `homecoming4` in main: the same class, `who: 3, leg: 4, name: 'home4'`, `before` the third's route, veil
+  moss (the Drop's). No `settledAt` and no `Ring` for the fifth: the POI's bare stones only. `offering4`'s
+  giant is null once it has got up; `ringWarm(3)` is `homecoming4.left`.
+- A save from between the fourth offering and the spirit landing puts you back by the shrine on the wurm.
+- Check: `scripts/drop.mjs <dir> home4 [sandbox]` (all ok on `hilda`, in the story), `scripts/sites.mjs` (now
+  checks the walk to ring 5 too; ok on `hildaz2`, `fjord`, `embla`, `north`). On `hilda` it fails on the walk
+  to ring 4, whose last footfall is 43 m from the ring (the limit is 45): that walk doesn't read the fifth
+  site, so it was so before this.
+- No dev shortcut for "fourth done" (`fourthDone`, a `ring5` checkpoint): nothing to stand in front of yet.
+
+## The loading veil: the start site is found once (2026-10-08)
+Owner: loading feels much longer than it used to. Measured (headless, seed `hilda`, load to the veil lifting):
+2.0 s at 575ffd8 (30 Sept), 7.4 s at d245dbd (2 Oct), 7.9 s before this change. Nearly all of the jump was one
+thing: `findStorySite` had grown to about 2.3 s (the village, the pasture, the far cabin, the approach), and
+ran on every load on the main thread and again in each chunk worker before its first chunk.
+- Now found once per seed, kept as `embla.site.v1.<seed>` and handed to the workers with each request
+  (`primeStory` in main, `WorldGen.presetStory`, `Terrain.story`), as the dungeon sites already were.
+  Bump the key's version when `storySite.ts` changes what it finds (a `WORLD_VERSION` bump wipes it too).
+- After: 2.6 s with the site kept. A seed's first load is still 7-8 s (the start site and then the dungeon
+  sites, all on the main thread with the veil up); moving those searches to a worker is the next thing if
+  first loads matter.
+
+## The village mended as dungeons are finished (2026-10-08)
+
+The owner: "I don't see any progress right now"; clutter cleaned up along
+with cabins built back up; spirits doing something when you come back,
+"shoveling dirt (from a pile) into the giant footprints in town", the
+prints disappearing over time. The homecoming's celebration stays as it is.
+
+- **`mendVillage(done)` in main** is the whole of it: the village as `done`
+  dungeons leave it. Called under each homecoming's veil (`mend` in its
+  deps, at `cutTo`, so the celebration is already in the mended village)
+  and from the frame loop when a load or a dev jump has more spirits home
+  than it has mended for. Forward only, nothing saved: it follows from how
+  many `home<n>` saves there are.
+- **Houses** (`Village.plan`): the owner, on the first cut (which tied a
+  house to who lived in it and when they came home): "more about vibe than
+  actual logical progress ... cabins in various states of repair ... use
+  good judgement". So everyone home works on all of it, one house after
+  the next down the lane, 1.4 steps a dungeon and each house 1.4 behind
+  the one before: 1 0 0 0 0, 3 1 0 0 0, 4 3 1 0 0, 5 4 3 1 0, 5 5 4 3 1.
+  Two numbers to tune by eye.
+- **Prints**: the visit's footfalls within 30 m of the lane and not under
+  a house are filled from the yard's end outward, `ceil(n * done /
+  FILLED_BY)` of them (5: `hilda` has four, so one a dungeon). A house's
+  own print goes when its footing is laid, with any other print reaching
+  under it. `Trail.fill` now also takes away the trees pressed flat in it.
+- **The print being filled** is the next in that order (then the one
+  under the next house to be begun). It is drawn part full: `Prints.part`
+  and `uPrintFill` (one print at a time; `printDeep` in `PRINT_GLSL`), its
+  floor bare earth. It starts at 62% of its depth on each load and every
+  shovelful takes a little more off, down to 30%; not saved.
+- **Shovelling** (`Village.dig` / `DigSite`): a heap of earth on the lane's
+  side of the print, two shovels stood in it. Someone home with nothing on
+  goes to the heap, takes a shovel (`Spirit.take`: it hangs on the right
+  arm), digs ('dig'), carries a clod to the lip, throws it ('toss': a puff
+  of earth out over the hollow), and goes back, four to eight times. Two
+  at once at most. `Village.busy()` puts them straight to it when the
+  village has just been mended, so you don't arrive to find them all on
+  their doorsteps.
+- **Clutter**: a house's boards and stones are stacked from step 1 (as
+  before); wreckage lying where a print has been filled is swept, and of
+  what's strewn round houses not yet begun, 22% more goes with each
+  dungeon (`CLEARED`, `Village.sweep`: the same pieces every load).
+- A carried shovel is held blade up (it went through the ground held low).
+- Spirits now walk on the ground with the prints in it (`Village.gy`):
+  they used to cross a print on the air above it.
+- Checked: `scripts/mend.mjs` on `hilda`, all frames looked at.
+- Rough: the building itself is still unseen (they hop and nod at the
+  stack); no sound for the shovel; the heap never shrinks.
+
+### The home tower's sign (2026-10-08)
+The little house is filled in, not an outline, and sits over the home tower's
+doorway (on the door boulder: `houseMark` in `HEAD_FRAG`), no longer on the
+head's brow. From inside another tower's head the home tower's glow shows the
+same house in place of eyes, paler (white gold) and in a thin steady ring of
+its own (`house` in `towerView.ts`; `aK.x` carries +2 for home). Check with
+`scripts/beacon.mjs <dir> shots=mark,travel`. While the home tower is still
+sealed the lock's upright strap runs across the sign.
+- **The shovel is picked up, not conjured** (owner: "the shovel just like
+  appears in the spirit's hand"): the two stand in the heap's foot on the
+  print's side, handles leaning out. A digger walks up, puts a hand out
+  ('grab'), and the shovel comes out of the earth to its hand
+  (`Village.flyShovels`, `Spirit.handPose`); when it has had enough it
+  walks back and stands it in the heap again ('stow'). Only an interrupted
+  digger's shovel still snaps back. The blade is a spade: square
+  shoulders drawn in to a rounded point.
+- **Cutscenes can be skipped** (owner, 2026-10-08: "an escape hatch"):
+  hold Space for 0.9 s (by touch: hold the prompt). Held, not pressed, so a
+  stray key skips nothing; not Esc, which the browser keeps to let the
+  mouse go under pointer lock. The prompt (`ui/skip.ts`, `#skip`) is text,
+  as the E / Space tips are (owner: fine here), small and pale in the
+  bottom right, and shows only once a key, click or tap is seen. Main does
+  the skip under a veil (`skipUpdate`, `skippable`): fade in, the scene's
+  own `skip()` puts everything as a save from after would find it, the
+  veil waits for `terrain.busy`, the camera comes back at a cut (`skipCut`).
+  Built for the giant's visit (`Visit.skip`), the offerings and the
+  homecomings (`Offering.skip`, `Homecoming.skip`; an offering and the
+  homecoming after it go as one, and the giant then gets up and walks on
+  by itself with nobody made to watch: `loose`). **Not yet skippable**:
+  tower lighting, the Moon Hall's show, the rings' arms, the journey's and
+  the story's own beats; a scene with no `skip` shows no prompt. Dev:
+  `__ow.skip()`, `__ow.skipping()`.
+- **Found at their stations** (owner: "they are always walking to one when
+  I get there"): `busy()` also runs whenever you come back within 120 m of
+  the lane from more than 150 m off; diggers do 8 to 16 shovelfuls, and
+  those at a stack stay at it longer. Anyone with nothing to do is on its
+  doorstep.
+- **Night** (owner: "always go into a cabin and sit by the hearth, at first
+  just the OG cabin but as they develop into their own"): from 20:30 to
+  5:30 a spirit whose house is whole goes in at its own door and stays in;
+  the rest walk up the lane, in at your cabin's door and sit on the floor
+  round the hearth (`VillageDeps.cabin`: seats in three arcs, clear of the
+  guide's seat). Out again in the morning. Arriving at night finds them
+  there already.
+- **Solid** (owner: "give those things mass ... the player should be able
+  to hop on top"): the heap is a low cone underfoot, a stack of boards has
+  a flat top and pushes you out from the side (`Village.surface` / `push`).
+  Spirits are kept out of the heap, the stacks and every house's walls,
+  whole or part built, sliding along a wall toward where they're going.
+- The guide does none of this work. Asked, not built.
+- **Chores at a house part built** (owner, 2026-10-08: "the wood ones
+  don't appear to actually be doing anything"; asked for sawing near a
+  cabin, picking up debris and adding it to a pile, wood and maybe a stone
+  pile, and hammering a board to a wall, maybe off a ladder). Every house
+  at step 1 to 4 has a yard (`Yard`, `layYard`; props `story/chores.ts`),
+  laid out in the house's own frame: a sawhorse out front of the stack, a
+  pile of stones behind it, and from step 2 a ladder on the end wall away
+  from the stack with a pile of cut boards by it. Three turns (`work`
+  picks one that's free, in its own yard mostly; `chore` is the stages):
+  *saw* (the saw off the horse, three ends sawn off a board and dropped
+  under it, what's left carried to the cut pile, a fresh board fetched
+  from the stack), *nail* (a cut board from the pile, the mallet off the
+  ladder, up, the board on the wall crooked and knocked level in six
+  blows, down), *haul* (a board or stone still lying of a house nobody has
+  begun on, within 45 m, carried in on its head: boards on to the stack,
+  stones on to the pile). One sawyer and one on the ladder per yard, two
+  hauling. The old "stand and look at it" is what's left when all are
+  taken. Defaults taken: it is looks only (nothing saved, nothing built
+  by it; a hauled piece is back where it lay after a reload or the next
+  mend); piles hold a fixed few and the oldest goes as a new one lands;
+  a load is put down and a ladder climbed down before bed; no sounds yet
+  (village spirits have none); the sawhorse, ladder and cut pile aren't
+  solid to you, the stone pile is (pushes you round, no standing on it);
+  the last house standing alone at step 1 to 4 with no wreck near has
+  nothing to haul. Spirits pushed off a pile now slide round it toward
+  where they're going (`shove`). Check with `scripts/chores.mjs <dir>`.
+- **Chores, after the owner's first look** (2026-10-08): the pile of cut
+  boards by the ladder is gone ("coming back to the single board ... over
+  and over ... looks silly"): whoever nails walks to the stack, lifts a
+  short board off it (it just appears there) and carries it round, and
+  what the sawyer has left goes on the stack too. They stay at a thing
+  longer rather than making more trips: about ten seconds of hammering to
+  a board (`KNOCKS`), four to five and a half of sawing to a cut, one or
+  two boards to a turn on the ladder. Spirits are kept out of the board on
+  the sawhorse (they go by one side of it), and whoever saws stands clear
+  of it. The saw and the mallet lie on the ground when nobody has them
+  (leant up, the saw hung in the air).

@@ -32,7 +32,9 @@ import { buildVeilRock, buildVeils } from './veilShell';
 // won by walking up to her where she ends up: behind a short veil (walk
 // round its end), among the glowcaps (her tail gives her away), and in a
 // pocket no walking gets you into (she pokes her head back out through the
-// stone to look at you, comes out, and offers her back). She is far faster
+// stone to look at you, comes out, and offers her back; before she does,
+// found for good, she plays: up to you, away, and once right round you:
+// `TEASE`). She is far faster
 // than you: she runs to just before a veil, stops and looks back until you
 // have her in sight, goes through it, and waits in the middle of the room
 // beyond until you are in its doorway; then on to the next. Her prints
@@ -90,8 +92,13 @@ const PEEKS: [string, string][] = [['E2', HIDE], ['E3', 'P'], ['E4', 'P'], ['W4'
  * on through these rooms as she did the first two; from the last she goes into the wall for the next of `PEEKS`.
  */
 const LAP_AT = 2, LAP = ['F', 'W4'];
-/** The room she waits in at the very end, a veil on from her last head out, and how near you come for her to be yours (m). */
-const LAST = 'W2', CATCH = 4.5;
+/** The room she waits in at the very end, a veil on from her last head out, and how near you come before she comes bounding to you (m). */
+const LAST = 'W2', TEASE_R = 10;
+/**
+ * The very end, before she's yours: she bounds up to you, down on her elbows a moment, away again to where she
+ * stood, a look back, and once right round you and in. How long each takes (s), how near she comes (m), and how far to one side of straight before you (rad).
+ */
+const TEASE = { come: 0.8, bow: 0.75, away: 0.6, look: 0.7, round: 2.3, near: 2.8, aside: 0.6 };
 /** How fast she goes: leading you (and through a veil), and following once she's yours (m/s). You run at 6.2. */
 const PACE = { dash: 14, follow: 9 };
 /**
@@ -124,8 +131,8 @@ export const VEIL_LOOK = {
 };
 
 type Phase = 'lower' | 'letgo' | 'reach' | 'lift';
-/** What she is doing: watching you arrive; on her way; hidden; her head through the stone; yours. */
-type Play = 'watch' | 'go' | 'hide' | 'peek' | 'yours';
+/** What she is doing: watching you arrive; on her way; hidden; her head through the stone; her last game with you, found; yours. */
+type Play = 'watch' | 'go' | 'hide' | 'peek' | 'tease' | 'yours';
 
 const v = new THREE.Vector3(), w = new THREE.Vector3();
 const ss = THREE.MathUtils.smoothstep;
@@ -205,6 +212,10 @@ export class VeilCave {
   private lap: string[] = [];
   /** She has stopped running: she waits in `LAST` to be walked up to. */
   private last = false;
+  /** Where she stood when you found her (the plan), which way round you she goes (1, -1), and which of her beats she's on. */
+  private teaseAt: [number, number] = [0, 0];
+  private teaseSide = 1;
+  private teaseN = -1;
   /** What's left of her gladness at being yours (s). */
   private glad = 0;
   /** How long she has stood before it, and how long since she began to turn back to it (s). */
@@ -299,7 +310,7 @@ export class VeilCave {
   /** The dungeon's creature, for whoever asks which (main). */
   get creature() { return this.she; }
   /** She has offered her back: E by her gets you on. */
-  get mountable() { return this.round >= 3 && this.glad <= 0; }
+  get mountable() { return this.round >= 3 && this.glad <= 0 && this.play !== 'tease'; }
 
   /** The cave's light and rock, into the shared uniforms (every frame you're inside). As dungeon 1's, with her light added. */
   applyLight(cam: THREE.Vector3) {
@@ -513,6 +524,7 @@ export class VeilCave {
     this.peekN = 0;
     this.lap = [];
     this.last = false;
+    this.teaseN = -1;
     this.waiting = false;
     this.forget(true);
     m.stabled = this.round >= 3;
@@ -764,10 +776,17 @@ export class VeilCave {
           this.send(x, z, 'hide');
           break;
         }
-        // The end of it: she stands and waits, her tail going, and this time lets you walk right up to her.
+        // The end of it: she stands and waits, her tail going; and when you come near, this time it's she who comes to you.
         if (this.last) {
           act.twitch = 0.7;
-          if (far < CATCH && level && clear()) { this.round = 3; this.save(); this.forget(); this.play = 'yours'; this.playT = 0; this.stall = 0; this.offer(); }
+          if (far < TEASE_R && level && clear()) {
+            this.round = 3; this.save(); this.forget();
+            this.play = 'tease'; this.playT = 0; this.stall = 0; this.teaseN = -1;
+            this.teaseAt = [hx, hz];
+            // (Round you by the side you aren't looking down, so it's across your view she goes first.)
+            const [fx, fz] = this.local(b.pos.x + Math.sin(b.heading), b.pos.z + Math.cos(b.heading));
+            this.teaseSide = (fx - px) * (hz - pz) - (fz - pz) * (hx - px) > 0 ? -1 : 1;
+          }
           break;
         }
         // The second lap: the same in each of its rooms; and from the last of them, into the wall of the shut cell beside it.
@@ -853,6 +872,64 @@ export class VeilCave {
           this.voice('glad');
           this.d.glow(v.copy(m.pos).setY(m.pos.y + 1.5), 9, 0.12, 2.2);
         }
+        break;
+      }
+      case 'tease': {
+        // Found, for good, and glad of it. Up to you in two bounds; down on her elbows, her tail going; away again
+        // to where she stood; a look back at you; then once right round you and in, to stop at your feet. Then
+        // she's yours. Nothing you do changes it: it goes where you go.
+        const T = TEASE, t = this.playT, [sx, sz] = this.teaseAt;
+        const dx = sx - px, dz = sz - pz, d0 = Math.max(Math.hypot(dx, dz), T.near + 0.5), ux = dx / d0, uz = dz / d0;
+        // (She stops a little to one side of straight ahead of you: looked at from behind you, you'd hide her.)
+        const a0 = Math.atan2(uz, ux), a1 = a0 + this.teaseSide * T.aside;
+        const nx = px + Math.cos(a1) * T.near, nz = pz + Math.sin(a1) * T.near;
+        const ease = (u: number) => u * u * (3 - 2 * u), arc = (u: number, h: number) => (u > 0 && u < 1 ? h * 4 * u * (1 - u) : 0);
+        const beat = (n: number, f: () => void) => { if (this.teaseN < n) { this.teaseN = n; f(); } };
+        const motes = (n: number) => this.d.glow(v.copy(m.pos).setY(m.pos.y + 1.4), n, 0.12, 2);
+        let x = hx, z = hz, t0 = 0;
+        if (t < (t0 += T.come)) {
+          beat(0, () => { this.voice('glad'); m.happy = 1.2; });
+          const u = t / T.come, k = ease(u);
+          x = sx + (nx - sx) * k; z = sz + (nz - sz) * k;
+          m.hop = arc(u * 2, 0.5) + arc(u * 2 - 1, 0.5);
+        } else if (t < (t0 += T.bow)) {
+          beat(1, () => this.voice('coo'));
+          x = nx; z = nz;
+          const u = (t - t0 + T.bow) / T.bow;
+          crouch = 0.5; low = 0.9;
+          act.twitch = 1;
+          // (A wriggle, and a start as if to go, before she does.)
+          m.hop = arc((u - 0.55) / 0.25, 0.16);
+        } else if (t < (t0 += T.away)) {
+          beat(2, () => { this.voice('chirp'); motes(6); });
+          const u = (t - t0 + T.away) / T.away, k = ease(u);
+          x = nx + (sx - nx) * k; z = nz + (sz - nz) * k;
+          m.hop = arc(u, 0.75);
+        } else if (t < (t0 += T.look)) {
+          x = sx; z = sz;
+          const u = (t - t0 + T.look) / T.look;
+          m.hop = arc(u / 0.5, 0.3);
+          act.twitch = 1;
+        } else if (t < (t0 += T.round)) {
+          beat(3, () => { this.voice('glad'); m.happy = 1.2; motes(8); });
+          const u = (t - t0 + T.round) / T.round, a = a0 + this.teaseSide * (Math.PI * 2 + T.aside) * (0.6 * u + 0.4 * ease(u));
+          let r = d0 + (T.near - d0) * ease(u);
+          // (Never into the rock or a glowcap's stem: closer in to you instead.)
+          for (let i = 0; i < 6 && r > T.near && !L.free(px + Math.cos(a) * r, L.floor(px + Math.cos(a) * r, pz + Math.sin(a) * r) + 1, pz + Math.sin(a) * r, 0.8); i++) r = Math.max(T.near, r * 0.8);
+          x = px + Math.cos(a) * r; z = pz + Math.sin(a) * r;
+          m.hop = arc((u * 5) % 1, 0.22);
+          act.twitch = 0.6;
+        } else {
+          this.play = 'yours';
+          this.playT = 0;
+          m.vel.set(0, 0, 0);
+          this.offer();
+          break;
+        }
+        const mx = x - hx, mz = z - hz, ml = Math.hypot(mx, mz), sp = ml / Math.max(dt, 1e-4);
+        if (sp > 1.5) { const yaw = this.yawOf(mx, mz); m.heading += Math.atan2(Math.sin(yaw - m.heading), Math.cos(yaw - m.heading)) * (1 - Math.exp(-14 * dt)); } else face(px, pz, 10);
+        this.world(x, L.floor(x, z), z, m.pos);
+        m.vel.set(Math.sin(m.heading) * sp, 0, Math.cos(m.heading) * sp);
         break;
       }
       case 'yours': {

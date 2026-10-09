@@ -37,9 +37,11 @@ import { onwardRoute, restOf, type Footfall } from './visit';
 // 'home2'` in main): the second spirit taken comes home, and the giant gets
 // up from the second ring and walks to a third, which opens (`settledAt`).
 // And again after dungeon 3's (`who: 2, leg: 3, name: 'home3'`): the third
-// spirit home, and the giant on to a fourth ring. That one is bare stones
-// and stays shut: there is nothing under it yet (dungeon 4 isn't built).
-// The trail ends there for now.
+// spirit home, and the giant on to a fourth ring, which opens. And after
+// dungeon 4's (`who: 3, leg: 4, name: 'home4'`): the fourth spirit home, and
+// the giant on to a fifth ring. That one is bare stones and stays shut:
+// there is nothing under it yet (dungeon 5 isn't built). The trail ends
+// there for now.
 //
 // Outside the story (`story=0`) there is no village and there are no crows:
 // it goes straight from the smile to the giant getting up.
@@ -90,6 +92,8 @@ export interface HomeDeps {
   who?: number;
   leg?: number;
   name?: string;
+  /** Under the veil, before the village is seen: what has been done there while you were away (houses further built, prints filled in). */
+  mend?(): void;
 }
 
 type Phase = 'leave' | 'cutTo' | 'village' | 'cutBack' | 'rise';
@@ -163,6 +167,10 @@ export class Homecoming {
   private camR = new THREE.Vector3();
   private lookAt = new THREE.Vector3();
   private staged = false;
+  /** The village has been set up for the shot (the guide borrowed, the crowd called out). */
+  private inVillage = false;
+  /** Skipped: what's left of it goes on by itself (the giant gets up and walks), your hands and the camera your own. */
+  private loose = false;
   /** Who's in the yard to see it: everyone home already. */
   private crowd: number[] = [];
 
@@ -184,7 +192,7 @@ export class Homecoming {
   }
 
   /** Hands off, and the camera is this's. */
-  get busy() { return this.state === 'playing'; }
+  get busy() { return this.state === 'playing' && !this.loose; }
   /** Seconds into the phase (dev). */
   get clock() { return this.t; }
   /** Waiting under the veil for the land to load (dev: a stepped script must give the workers real time here). */
@@ -262,6 +270,7 @@ export class Homecoming {
       g.look = this.lookAt.copy(v3);
       fx.whoosh();
     } else if (p === 'cutTo') {
+      this.d.mend?.();
       this.stageVillage();
     } else if (p === 'village') {
       const c = this.d.crows()!, b = c.birds[this.who];
@@ -283,22 +292,46 @@ export class Homecoming {
       fx.whoosh();
     } else if (p === 'cutBack') {
       this.stageRise();
-      // The crow doesn't come back: one fewer in the giant's trees.
-      this.d.crows()?.leave(this.who);
-      this.orb.visible = false;
-      const st = this.d.story, v = this.village;
-      if (st) { st.lent = this.wasLent; st.spirit.haste = null; }
-      // (Back to its own pace: it walks home to its house from here.)
-      if (v) {
-        v.spirits[this.who].haste = 1.8;
-        for (const k of this.crowd) v.dismiss(k);
-      }
-      this.crowd = [];
+      this.tidy();
     } else {
       this.stageRise();
       g.look = null;
       this.riseCam(0, true);
     }
+  }
+
+  /** The village shot is over: the crow gone for good, the guide its own again, and everyone off home. */
+  private tidy() {
+    // The crow doesn't come back: one fewer in the giant's trees.
+    this.d.crows()?.leave(this.who);
+    this.orb.visible = false;
+    const st = this.d.story, v = this.village;
+    if (st && this.inVillage) { st.lent = this.wasLent; st.spirit.haste = null; }
+    this.inVillage = false;
+    // (Back to its own pace: it walks home to its house from here.)
+    if (v) {
+      v.spirits[this.who].haste = 1.8;
+      for (const k of this.crowd) v.dismiss(k);
+    }
+    this.crowd = [];
+  }
+
+  /**
+   * Skipped (main does it under a veil, and waits there for the land):
+   * the spirit is home and the village mended as if it had been seen, and
+   * the giant gets up and walks on by itself, with nobody made to watch.
+   */
+  skip() {
+    if (!this.busy) return;
+    if (this.whole && this.phase !== 'rise' && this.phase !== 'cutBack') {
+      if (this.phase === 'leave') this.d.mend?.();
+      if (!this.home) { this.village!.comeHome(this.who); this.home = true; this.save(); }
+      this.tidy();
+    }
+    this.loose = true;
+    this.veil = 0;
+    if (this.phase !== 'rise') this.enter('rise');
+    this.afterYaw = this.backYaw();
   }
 
   /** Which side (+1 or -1 along `side`) of a point `ahead` of `c` is clearer of trunks for a camera. */
@@ -345,6 +378,7 @@ export class Homecoming {
     }
     const sp = st.spirit;
     this.wasLent = st.lent;
+    this.inVillage = true;
     st.lent = true;
     sp.cancelActs();
     sp.teleport(this.step);
@@ -425,7 +459,7 @@ export class Homecoming {
     const t0 = this.t, t = (this.t += dt), fx = this.d.sfx, b = this.d.body;
     const passed = (k: number) => t0 < k && t >= k;
     this.frames++;
-    this.d.halt();
+    if (!this.loose) this.d.halt();
     const c = this.d.crows(), bird = c?.birds[this.who];
     switch (this.phase) {
       case 'leave': {
@@ -449,7 +483,7 @@ export class Homecoming {
       case 'village': this.playVillage(dt, t, passed); break;
       case 'rise': {
         const g = this.d.giant();
-        this.veil = this.d.crows() && this.whole ? 1 - ss(t, 0, VEIL.fade) : 0;
+        this.veil = this.d.crows() && this.whole && !this.loose ? 1 - ss(t, 0, VEIL.fade) : 0;
         if (passed(RISE.at)) {
           this.left = true;
           this.asleep(g);
@@ -463,14 +497,16 @@ export class Homecoming {
         if (t > RISE.at && t < RISE.at + RISE.walk && Math.floor(t / 1.4) !== Math.floor(t0 / 1.4)) fx.thud();
         if (passed(RISE.at + RISE.walk) && this.route.length > 1) g.walkRoute(this.route);
         // You turn to watch it go.
-        let dh = Math.atan2(g.centre.x - b.pos.x, g.centre.z - b.pos.z) - b.heading;
-        dh = Math.atan2(Math.sin(dh), Math.cos(dh));
-        b.heading += dh * (1 - Math.exp(-1.6 * dt));
+        if (!this.loose) {
+          let dh = Math.atan2(g.centre.x - b.pos.x, g.centre.z - b.pos.z) - b.heading;
+          dh = Math.atan2(Math.sin(dh), Math.cos(dh));
+          b.heading += dh * (1 - Math.exp(-1.6 * dt));
+        }
         this.riseCam(dt, false);
         if ((t > RISE.at + RISE.walk && (g.steps >= RISE.steps || !g.walking)) || this.route.length <= 1 && t > RISE.at + 10) {
           this.state = 'done';
           this.veil = 0;
-          this.afterYaw = this.backYaw();
+          if (!this.loose) this.afterYaw = this.backYaw();
         }
         break;
       }
@@ -596,7 +632,7 @@ export class Homecoming {
 
   /** The camera for this frame while this has it. */
   cinematic(): { pos: THREE.Vector3; at: THREE.Vector3; fov: number } | null {
-    return this.state === 'playing' ? { pos: this.pos, at: this.at, fov: this.fov } : null;
+    return this.busy ? { pos: this.pos, at: this.at, fov: this.fov } : null;
   }
 
   dispose() { this.group.removeFromParent(); }

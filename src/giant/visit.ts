@@ -108,6 +108,11 @@ export interface VisitRoute { start: { x: number; z: number; heading: number }; 
  * dungeon's ring, or null if the site has no village. After the village it
  * follows a way a bike could take (WorldGen.route: dry, gentle, open), past
  * the second tower, with a footfall every 21 m on alternate sides.
+ *
+ * It never doubles back. It comes up the lane toward your cabin if it can
+ * go on from the yard without coming back beside its own prints; if the
+ * ring lies back the way it would have come, it comes from the yard's end
+ * instead (round your cabin, not over it) and goes down the lane and on.
  */
 export function visitRoute(gen: WorldGen): VisitRoute | null {
   const site = gen.story, ground = (x: number, z: number) => gen.height(x, z);
@@ -125,17 +130,8 @@ export function visitRoute(gen: WorldGen): VisitRoute | null {
     const right = Math.sign((p.x - lane[bi].x) * Math.cos(yaw) - (p.z - lane[bi].z) * Math.sin(yaw)) || 1;
     return { p, i: bi, yaw, right, c: lane[bi] };
   });
-  const order = at.map((_, i) => i).sort((a, b) => at[b].i - at[a].i); // furthest from the yard first
-  const far = at[order[0]], near = at[order[order.length - 1]];
+  const inward = at.map((_, i) => i).sort((a, b) => at[b].i - at[a].i); // furthest from the yard first
   const fall = (x: number, z: number, yaw: number, house: number): Footfall => ({ x: x - Math.sin(yaw) * SOLE, z: z - Math.cos(yaw) * SOLE, yaw, house });
-  const falls: Footfall[] = [];
-  // Odd prints are left feet: one more step on the way in if that's what puts the right foot on the first house.
-  const lead = (LEAD_IN + 1) % 2 === (far.right > 0 ? 0 : 1) ? LEAD_IN : LEAD_IN + 1;
-  const ox = -Math.sin(far.yaw), oz = -Math.cos(far.yaw); // back out along the lane
-  for (let j = lead; j >= 1; j--) {
-    const side = far.right * (j % 2 ? -1 : 1);
-    falls.push(fall(far.c.x + ox * STEP * j + Math.cos(far.yaw) * side * TRACK, far.c.z + oz * STEP * j - Math.sin(far.yaw) * side * TRACK, far.yaw, -1));
-  }
   // Your cabin's walls, and how far a print's edge is from them (m).
   const walls: { x: number; z: number }[] = [];
   for (const lx of [-0.5, -0.25, 0, 0.25, 0.5]) for (const lz of [-0.5, 0, 0.5]) walls.push(siteLocal(site, lx * CAB.W, lz * CAB.D));
@@ -145,26 +141,10 @@ export function visitRoute(gen: WorldGen): VisitRoute | null {
     for (const w of walls) g = Math.min(g, soleSdf(w.x, w.z, p));
     return g;
   };
-  const firstHouse = falls.length + 1;
-  for (const k of order) {
-    // On the house, square to the lane; a house by the yard is trodden askew or off its middle, as little
-    // as keeps the print off your cabin (the house is still well under the sole).
-    let f = fall(at[k].p.x, at[k].p.z, at[k].yaw, k), best = gap(f), cost = 0;
-    if (best < KEEP) {
-      for (const a of [0, 0.15, -0.15, 0.3, -0.3, 0.45, -0.45]) for (let d = -7; d <= 7; d++) for (const w of [0, 1.5, -1.5, 3, -3]) {
-        const yaw = at[k].yaw + a, c = Math.abs(a) * 12 + Math.abs(d) + Math.abs(w) * 2;
-        const t = fall(at[k].p.x + Math.sin(yaw) * d + Math.cos(yaw) * w, at[k].p.z + Math.cos(yaw) * d - Math.sin(yaw) * w, yaw, k), g = gap(t);
-        if (best < KEEP ? g > best : g >= KEEP && c < cost) { best = g; cost = c; f = t; }
-      }
-    }
-    falls.push(f);
-  }
-  const lastHouse = falls.length;
-
   const home = gen.towers.home;
-  // On past the yard: it bears off just enough to tread on nothing of yours.
+  // What's yours, and how clear of it a foot is. (`wade`: water will do. On its way in it may come up out of a lake.)
   const pa = site.pasture;
-  const clear = (x: number, z: number) => {
+  const clear = (x: number, z: number, wade = false) => {
     let c = Math.hypot(x - site.x, z - site.z) - 26;
     const door = siteLocal(site, -0.2, CAB.D / 2 + 2.2);
     c = Math.min(c, Math.hypot(x - door.x, z - door.z) - 22);
@@ -175,51 +155,187 @@ export function visitRoute(gen: WorldGen): VisitRoute | null {
     for (const t of site.trees) c = Math.min(c, Math.hypot(x - t.x, z - t.z) - 12);
     // Nor on the tower you're watching from (the guide is at its foot).
     c = Math.min(c, Math.hypot(x - home.x, z - home.z) - 80);
-    return ground(x, z) < 1.5 ? -50 : c;
+    return !wade && ground(x, z) < 1.5 ? -50 : c;
   };
   // Where it's bound: along the way worldgen found to the ring (by a tower, if there is one to go by).
   const dg = gen.dungeon;
   const tw = dg.tower >= 0 ? gen.towers.towers[dg.tower] : null;
   // It joins that way some 170 m out from the yard, once it is clear of the village.
-  let join = 0;
-  while (join < dg.way.length - 2 && Math.hypot(dg.way[join][0] - lane[0].x, dg.way[join][1] - lane[0].z) < 170) join++;
-  const toward = { x: dg.way[join][0], z: dg.way[join][1] };
+  let join0 = 0;
+  while (join0 < dg.way.length - 2 && Math.hypot(dg.way[join0][0] - lane[0].x, dg.way[join0][1] - lane[0].z) < 170) join0++;
   // The long walk from there: on to that way, rounded off, then a footfall every STEP along it.
   // (The line starts a step behind where the village steps ended, so the turn on to it is rounded too.)
   // On dry ground, clear of your cabin, the towers' rock and the ring: a foot that wouldn't be is drawn in toward the line.
-  const walk = (cx: number, cz: number, h: number, side: number) => stride([[cx - Math.sin(h) * STEP, cz - Math.cos(h) * STEP], [cx, cz], ...dg.way.slice(join)], side,
+  const walk = (cx: number, cz: number, h: number, side: number, way: [number, number][]) => stride([[cx - Math.sin(h) * STEP, cz - Math.cos(h) * STEP], [cx, cz], ...way], side,
     (x, z, sx, sz) => Math.min(ground(x, z), ground(sx, sz)) > 1.5 && Math.hypot(sx - site.x, sz - site.z) > 18 + KEEP && (!tw || Math.hypot(sx - tw.x, sz - tw.z) > 55) && Math.hypot(sx - home.x, sz - home.z) > 55 && Math.hypot(sx - dg.x, sz - dg.z) > dg.r + 16);
-  let best: Footfall[] = [], bestScore = -Infinity, bestWorst = -Infinity;
-  // `turn` at each of its first `n` steps, and straight on after.
-  const bear = (turn: number, n: number) => {
-    const out: Footfall[] = [];
-    let cx = near.c.x, cz = near.c.z, h = near.yaw, side = near.right, worst = Infinity;
-    for (let m = 1; m <= LEAD_OUT; m++) {
-      if (m <= n) h += turn;
-      cx += Math.sin(h) * STEP; cz += Math.cos(h) * STEP;
-      side = -side;
-      const x = cx + Math.cos(h) * side * TRACK, z = cz - Math.sin(h) * side * TRACK;
-      worst = Math.min(worst, clear(x, z));
-      out.push(fall(x, z, h, -1));
+
+  // The same way with its hairpins cut off (it goes to a point beside the tower and on from there, which can
+  // be back on itself): wherever it comes back within 100 m of where it was, by more than twice as far
+  // round, and the straight line across is dry and clear of the towers' rock, it goes straight across.
+  const straight: [number, number][] = [];
+  {
+    const W = dg.way, run = [0];
+    for (let i = 1; i < W.length; i++) run.push(run[i - 1] + Math.hypot(W[i][0] - W[i - 1][0], W[i][1] - W[i - 1][1]));
+    const across = (a: [number, number], b: [number, number]) => {
+      const m = Math.ceil(Math.hypot(b[0] - a[0], b[1] - a[1]) / 8);
+      for (let k = 1; k < m; k++) {
+        const x = a[0] + (b[0] - a[0]) * (k / m), z = a[1] + (b[1] - a[1]) * (k / m);
+        if (ground(x, z) < 2.2 || (tw && Math.hypot(x - tw.x, z - tw.z) < 75) || Math.hypot(x - home.x, z - home.z) < 80) return false;
+      }
+      return true;
+    };
+    for (let i = 0; i < W.length; i++) {
+      straight.push(W[i]);
+      for (let j = W.length - 1; j > i; j--) {
+        const d = Math.hypot(W[j][0] - W[i][0], W[j][1] - W[i][1]), l = run[j] - run[i];
+        if (d < 100 && l > 80 && l > d * 2.2 && across(W[i], W[j])) { i = j - 1; break; }
+      }
     }
-    // (And as it turns on to the way: that can bring it back round past the yard.)
-    const on = walk(cx, cz, h, side);
-    let cabin = Infinity;
-    for (const f of out) cabin = Math.min(cabin, gap(f) - KEEP);
-    for (const f of on.slice(0, 12)) cabin = Math.min(cabin, gap(f) - KEEP);
-    worst = Math.min(worst, cabin);
-    // Clear of your cabin before anything; then of what else is yours; then the way that leaves it facing where it's going.
-    let off = Math.atan2(toward.x - cx, toward.z - cz) - h;
-    off = Math.abs(Math.atan2(Math.sin(off), Math.cos(off)));
-    const score = Math.min(cabin, 0) * 100 + Math.min(worst, 0) * 10 - off * 1.5 - Math.abs(turn) * 0.3;
-    if (score > bestScore) { bestScore = score; bestWorst = worst; best = [...out, ...on]; }
+  }
+  let join1 = 0;
+  while (join1 < straight.length - 2 && Math.hypot(straight[join1][0] - lane[0].x, straight[join1][1] - lane[0].z) < 170) join1++;
+
+  /**
+   * The whole walk, coming up the lane to the yard, or (`rev`) from the yard's end and down it; and whether
+   * it keeps off your cabin. `plain`: straight in along the lane and on to the way where it leaves the
+   * village, as it always was. Otherwise it may come in on a bend, and cuts the corner on to the way, so as
+   * not to come back beside its own prints.
+   */
+  const build = (rev: boolean, plain: boolean): { route: VisitRoute; ok: boolean } => {
+    const W = plain ? dg.way : straight;
+    const order = rev ? [...inward].reverse() : inward, about = rev ? Math.PI : 0;
+    const first = at[order[0]], last = at[order[order.length - 1]];
+    const yaw0 = first.yaw + about, right0 = rev ? -first.right : first.right;
+    // Odd prints are left feet: one more step on the way in if that's what puts the right foot on the first house.
+    const lead = (LEAD_IN + 1) % 2 === (right0 > 0 ? 0 : 1) ? LEAD_IN : LEAD_IN + 1;
+    const firstHouse = lead + 1, lastHouse = lead + order.length;
+    const trod: Footfall[] = [];
+    for (const k of order) {
+      // On the house, square to the lane; a house by the yard is trodden askew or off its middle, as little
+      // as keeps the print off your cabin (the house is still well under the sole).
+      const hy = at[k].yaw + about;
+      let f = fall(at[k].p.x, at[k].p.z, hy, k), best = gap(f), cost = 0;
+      if (best < KEEP) {
+        for (const a of [0, 0.15, -0.15, 0.3, -0.3, 0.45, -0.45]) for (let d = -7; d <= 7; d++) for (const w of [0, 1.5, -1.5, 3, -3]) {
+          const yaw = hy + a, c = Math.abs(a) * 12 + Math.abs(d) + Math.abs(w) * 2;
+          const t = fall(at[k].p.x + Math.sin(yaw) * d + Math.cos(yaw) * w, at[k].p.z + Math.cos(yaw) * d - Math.sin(yaw) * w, yaw, k), g = gap(t);
+          if (best < KEEP ? g > best : g >= KEEP && c < cost) { best = g; cost = c; f = t; }
+        }
+      }
+      trod.push(f);
+    }
+
+    // On past the last house: it bears off just enough to tread on nothing of yours.
+    let best: Footfall[] = [], bestScore = -Infinity, bestWorst = -Infinity;
+    // `turn` at each of its first `n` steps, and straight on after (or `then` at each: round something and back).
+    const bear = (turn: number, n: number, then = 0) => {
+      const out: Footfall[] = [];
+      // (Going down the lane, the foot that trod the last house is the print's own: even prints are right feet.)
+      let cx = last.c.x, cz = last.c.z, h = last.yaw + about, side = rev ? (lastHouse % 2 ? -1 : 1) : last.right, worst = Infinity;
+      for (let m = 1; m <= LEAD_OUT; m++) {
+        h += m <= n ? turn : then;
+        cx += Math.sin(h) * STEP; cz += Math.cos(h) * STEP;
+        side = -side;
+        const x = cx + Math.cos(h) * side * TRACK, z = cz - Math.sin(h) * side * TRACK;
+        worst = Math.min(worst, clear(x, z));
+        out.push(fall(x, z, h, -1));
+      }
+      let join = plain ? join0 : join1;
+      if (!plain) {
+        const far = (i: number) => Math.hypot(W[i][0] - cx, W[i][1] - cz);
+        // (Going down the lane it is already some way along the way: on from the nearest of it.)
+        if (rev) for (let i = join1; i < W.length - 1; i++) if (far(i) < far(join)) join = i;
+        // It cuts the corner: on to the way at the first of it that's no more than a quarter turn or so off,
+        // if the straight line there is dry and clear of what's yours.
+        const off = (i: number) => { const a = Math.atan2(W[i][0] - cx, W[i][1] - cz) - h; return Math.abs(Math.atan2(Math.sin(a), Math.cos(a))); };
+        const open = (i: number) => {
+          const l = far(i), m = Math.ceil(l / 10);
+          for (let k = 1; k <= m; k++) if (clear(cx + (W[i][0] - cx) * (k / m), cz + (W[i][1] - cz) * (k / m)) < 0) return false;
+          return true;
+        };
+        for (let i = join; i < W.length - 2 && far(i) < 700; i++) if (far(i) > 60 && off(i) < 1.25 && open(i)) { join = i; break; }
+      }
+      const toward = { x: W[join][0], z: W[join][1] };
+      // (And as it turns on to the way: that can bring it back round past the yard.)
+      const on = walk(cx, cz, h, side, W.slice(join));
+      let cabin = Infinity;
+      for (const f of out) cabin = Math.min(cabin, gap(f) - KEEP);
+      for (const f of on.slice(0, 12)) cabin = Math.min(cabin, gap(f) - KEEP);
+      worst = Math.min(worst, cabin);
+      // Clear of your cabin before anything; then of what else is yours; then the way that leaves it facing where it's going.
+      let off = Math.atan2(toward.x - cx, toward.z - cz) - h;
+      off = Math.abs(Math.atan2(Math.sin(off), Math.cos(off)));
+      let score = Math.min(cabin, 0) * 100 + Math.min(worst, 0) * 10 - off * 1.5 - (Math.abs(turn) + Math.abs(then)) * 0.3;
+      // (And, before that last, the way that doesn't bring it back beside the village it has just trodden.)
+      if (!plain) { const all = [...trod, ...out, ...on.slice(0, 30)]; score -= (doubled(all, 3) + tight(all)) * 15; }
+      if (score > bestScore) { bestScore = score; bestWorst = worst; best = [...out, ...on]; }
+    };
+    for (const turn of [0, 0.2, -0.2, 0.35, -0.35, 0.5, -0.5, 0.7, -0.7]) bear(turn, LEAD_OUT);
+    // Nothing gentle keeps off it: it turns sharply as it leaves.
+    if (bestWorst < 0) for (const n of [2, 1, 3]) for (const turn of [0.5, -0.5, 0.8, -0.8, 1.1, -1.1, 1.4, -1.4]) bear(turn, n);
+    if (!plain) for (const n of [1, 2]) for (const turn of [0.3, -0.3, 0.5, -0.5, 0.7, -0.7, 0.9, -0.9]) for (const k of [0.3, 0.5, 0.7]) bear(turn, n, -Math.sign(turn) * k);
+    const after = [...trod, ...best];
+
+    // And the way in: `turn` at each of its last `n` steps before the first house (worked out backwards, from
+    // the house). Straight along the lane if it can be; but from the yard's end that's over your cabin, and
+    // either way it may be where it's about to go: then it comes in on a bend, from the other side.
+    let come: Footfall[] = [], top = -Infinity, ok = true, start = { x: 0, z: 0, heading: yaw0 };
+    const comeIn = (turn: number, n: number) => {
+      const out: Footfall[] = [];
+      let cx = first.c.x, cz = first.c.z, h = yaw0, worst = Infinity, cabin = Infinity;
+      for (let j = 1; j <= lead; j++) {
+        if (j <= n) h -= turn;
+        // (Straight in: worked out from the house each time, so it's to the last bit what it always was.)
+        if (n) { cx -= Math.sin(h) * STEP; cz -= Math.cos(h) * STEP; } else { cx = first.c.x - Math.sin(h) * STEP * j; cz = first.c.z - Math.cos(h) * STEP * j; }
+        const side = right0 * (j % 2 ? -1 : 1);
+        const x = cx + Math.cos(h) * side * TRACK, z = cz - Math.sin(h) * side * TRACK;
+        const f = fall(x, z, h, -1);
+        if (!plain) { worst = Math.min(worst, clear(x, z, true)); cabin = Math.min(cabin, gap(f) - KEEP); }
+        out.unshift(f);
+      }
+      const score = plain ? 0 : Math.min(cabin, 0) * 100 + Math.min(worst, 0) * 10 - awry([...out, ...after]) * 15 - Math.abs(turn) * n * 0.3;
+      if (score > top) { top = score; come = out; ok = cabin >= 0; start = n ? { x: cx - Math.sin(h) * STEP * 0.5, z: cz - Math.cos(h) * STEP * 0.5, heading: h } : { x: first.c.x - Math.sin(h) * STEP * (lead + 0.5), z: first.c.z - Math.cos(h) * STEP * (lead + 0.5), heading: h }; }
+    };
+    comeIn(0, 0);
+    if (!plain) for (const n of [1, 2, 3, 4, 6]) for (let k = 1; k <= 17; k++) for (const turn of [k * 0.1, -k * 0.1]) if (k * 0.1 * n < 2) comeIn(turn, n);
+    return { route: { start, falls: [...come, ...after], firstHouse, lastHouse }, ok };
   };
-  for (const turn of [0, 0.2, -0.2, 0.35, -0.35, 0.5, -0.5, 0.7, -0.7]) bear(turn, LEAD_OUT);
-  // Nothing gentle keeps off it: it turns sharply as it leaves the yard.
-  if (bestWorst < 0) for (const n of [2, 1, 3]) for (const turn of [0.5, -0.5, 0.8, -0.8, 1.1, -1.1, 1.4, -1.4]) bear(turn, n);
-  falls.push(...best);
-  const j = lead + 1;
-  return { start: { x: far.c.x + ox * STEP * (j - 0.5), z: far.c.z + oz * STEP * (j - 0.5), heading: far.yaw }, falls, firstHouse, lastHouse };
+
+  // As it always was, if that never comes back on itself; else whichever way does so least (up the lane, if it's all one).
+  let pick = build(false, true).route, back = awry(pick.falls);
+  for (const rev of back ? [false, true] : []) {
+    const b = build(rev, false), n = awry(b.route.falls);
+    if (b.ok && n < back) { pick = b.route; back = n; }
+  }
+  return pick;
+}
+
+/** How many of some footfalls are where a walk shouldn't be: back beside its own prints, or turning on the spot. */
+export function awry(falls: Footfall[]) { return doubled(falls) + tight(falls); }
+
+/** How many of some footfalls end more than 140 degrees of turning one way in four steps: it has all but spun round where it stood. */
+export function tight(falls: Footfall[]) {
+  let n = 0;
+  const d = (i: number) => { const a = falls[i].yaw - falls[i - 1].yaw; return Math.atan2(Math.sin(a), Math.cos(a)); };
+  for (let i = 4; i < falls.length; i++) if (Math.abs(d(i) + d(i - 1) + d(i - 2) + d(i - 3)) > 2.45) n++;
+  return n;
+}
+
+/**
+ * How many of some footfalls come down beside the walk's own earlier prints
+ * (within 60 m of one more than `apart` steps before, trodden the other way):
+ * it has doubled back. (Its own other foot is 29 m off, going the same way.)
+ */
+export function doubled(falls: Footfall[], apart = 7) {
+  let n = 0;
+  for (let i = apart + 1; i < falls.length; i++) {
+    const a = falls[i];
+    for (let j = 0; j < i - apart; j++) {
+      const b = falls[j];
+      if (Math.cos(a.yaw - b.yaw) < -0.3 && Math.hypot(a.x + Math.sin(a.yaw) * SOLE - b.x - Math.sin(b.yaw) * SOLE, a.z + Math.cos(a.yaw) * SOLE - b.z - Math.cos(b.yaw) * SOLE) < 60) { n++; break; }
+    }
+  }
+  return n;
 }
 
 /**
@@ -969,6 +1085,52 @@ export class Visit {
   /** How many spirits were taken. */
   get spirits() { return this.count; }
 
+  /**
+   * Skipped (main does it under a veil): the rest of it at once, as a save
+   * from after finds it. Every house it was going to tread on gone under,
+   * everyone taken, and the giant asleep by the ring with its crows.
+   */
+  skip() {
+    if (!this.busy || !this.route) return;
+    const r = this.route, st = this.d.story, sp = st.spirit, v = st.village!;
+    if (!this.bolted) { this.bolted = true; this.d.scare(this.giant!.centre, this.gather); }
+    for (const f of r.falls.slice(this.fallen)) {
+      this.d.trail.stamp(v1.set(f.x, 0, f.z), f.yaw);
+      if (f.house >= 0) v.smash(f.house, (x, z) => this.d.trail.height(x, z), true);
+    }
+    this.fallen = r.falls.length;
+    for (let i = 0; i < this.count; i++) { v.take(i, this.hub); v.drop(i); }
+    this.lie();
+    this.state = 'gone';
+    this.fled = true;
+    this.filming = false;
+    this.music = 'giant_aftermath';
+    this.d.calm();
+    st.lent = this.wasLent;
+    sp.haste = null;
+    if (!this.vantage) sp.want.pose = 'stand';
+    this.stage = null;
+    sp.mood = null;
+    st.giantGone = true;
+    st.save();
+  }
+
+  /** The giant where its walk ends, a hill by the open ring, its birds in its trees with their lights. */
+  private lie() {
+    const at = restOf(this.route!.falls);
+    const g = this.d.summon(at.x, at.z, at.heading);
+    this.flock(g);
+    g.pauseAt = null;
+    g.come();
+    g.settle();
+    this.settled = true;
+    this.d.ring()?.setOpen();
+    for (const [i, bird] of this.birds!.birds.entries()) {
+      bird.state = 'roost';
+      this.birds!.carry(i, true);
+    }
+  }
+
   /** A save from after the visit: the prints, the wreckage, and the giant where it ended up with its birds and their lights. Nothing is replayed. */
   restore() {
     const r = this.route;
@@ -979,16 +1141,7 @@ export class Visit {
       this.d.trail.stamp(v1.set(f.x, 0, f.z), f.yaw);
       if (f.house >= 0) v.smash(f.house, (x, z) => this.d.trail.height(x, z), true);
     }
-    const at = restOf(r.falls);
-    const g = this.d.summon(at.x, at.z, at.heading);
-    this.flock(g);
-    g.settle();
-    this.settled = true;
-    this.d.ring()?.setOpen();
-    for (const [i, bird] of this.birds!.birds.entries()) {
-      bird.state = 'roost';
-      this.birds!.carry(i, true);
-    }
+    this.lie();
   }
 
   dispose() {

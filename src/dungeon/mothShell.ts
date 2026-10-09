@@ -84,6 +84,8 @@ export function buildDialHead(c: MoonLook) {
   // A cap and a foot, so it reads as a made thing.
   f.stone.push(tint(new THREE.BoxGeometry(H * 2.24, 0.22, H * 2.24).translate(0, H + 0.11, 0), c.stone));
   f.stone.push(tint(new THREE.BoxGeometry(H * 2.24, 0.22, H * 2.24).translate(0, -H - 0.11, 0), c.stone));
+  // A cup on the cap, for the little moon that sits on it (the cave's: it lights).
+  f.stone.push(tint(new THREE.CylinderGeometry(0.3, 0.4, 0.2, 12).translate(0, H + 0.32, 0), c.stone));
   for (let k = 0; k < 4; k++) face(f, k * 2, H, (k * Math.PI) / 2, c);
   return done(f);
 }

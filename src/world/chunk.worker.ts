@@ -8,6 +8,7 @@ self.onmessage = (e: MessageEvent<ChunkRequest>) => {
   const req = e.data;
   if (!gen || gen.seed !== req.seed) {
     gen = new WorldGen(req.seed);
+    if (req.story) gen.presetStory(req.story);
     if (req.dungeons) gen.presetDungeons(req.dungeons);
   }
   const r = buildChunk(gen, req);

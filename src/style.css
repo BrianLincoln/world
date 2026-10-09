@@ -20,6 +20,25 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: #efd6c3; }
   display: inline-block; min-width: 1.2em; padding: 0 4px; margin-right: 2px; text-align: center;
   border: 1.5px solid #5c3a3e; border-radius: 5px; font-weight: 600; font-size: 11px; line-height: 1.35;
 }
+/* The way out of a cutscene (ui/skip.ts): small and pale in a corner, over the picture and any veil, and only once a key or a tap asks for it. */
+#skip {
+  position: fixed; right: max(22px, env(safe-area-inset-right)); bottom: max(20px, env(safe-area-inset-bottom)); z-index: 6;
+  font: 13px/1.4 ui-sans-serif, system-ui, sans-serif; letter-spacing: 0.02em; color: #fbf1e2;
+  background: rgba(40, 24, 30, 0.42); border-radius: 999px; padding: 5px 14px 8px; overflow: hidden; opacity: 0; pointer-events: none;
+  transition: opacity 0.35s; -webkit-user-select: none; user-select: none;
+}
+#skip.on { opacity: 0.9; }
+#skip b {
+  display: inline-block; padding: 0 5px; margin: 0 1px; border: 1px solid rgba(251, 241, 226, 0.8); border-radius: 4px;
+  font-weight: 600; font-size: 11px; line-height: 1.4;
+}
+/* The hold, filling from the left under the words. */
+#skip i {
+  position: absolute; left: 0; right: 0; bottom: 0; height: 3px; background: #fbf1e2;
+  transform: scaleX(0); transform-origin: left;
+}
+body.touch #skip { font-size: 14px; padding: 12px 18px 15px; }
+body.touch #skip.on { pointer-events: auto; }
 /* Lasso reticle: a hand-inked loop that sits over the aimed creature. */
 #aim {
   position: fixed; left: 0; top: 0; width: 0; height: 0; pointer-events: none; opacity: 0;

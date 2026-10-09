@@ -47,6 +47,8 @@ export interface WallCap { x: number; y: number; z: number; r: number; dir: numb
 
 /** How high the ledge stands over the hall's floor (m). */
 export const LEDGE_H = 50;
+/** How far off the pulpit's face the sleeping moth's middle is (m). */
+const CLING = 0.34;
 /** How high the great hall is, and the gallery over its own floor (m). */
 export const HALL_H = 130, GALLERY_H = 46;
 /** How far from the lamp the stones stand, and the moons in the floor lie (m). */
@@ -59,6 +61,8 @@ export function pulpitR(k: number) {
 }
 /** A stone's head: how high its middle is over the floor, and half its width (m). */
 export const DIAL_Y = 2.3, DIAL_HALF = 0.8;
+/** The little moon on a stone's crown, the lamp's in small: how high its middle is over the head's middle, and its radius (m). */
+export const DIAL_ORB_Y = DIAL_HALF + 0.22 + 0.5, DIAL_ORB_R = 0.4;
 /** The lamp: how high its moon hangs over the floor, and how big it is (m). */
 export const LAMP_Y = 6.4, LAMP_R = 1.9;
 
@@ -92,8 +96,8 @@ export class MothLayout {
   readonly pulpit: { x: number; z: number; r: number; y: number };
   /** The pale stone on the pulpit's top that the lit lamp points at. */
   readonly mark: { x: number; y: number; z: number };
-  /** Where the moth sleeps: on the pulpit's face, head up, her back to the hall (`nx`, `nz`: into the rock). */
-  readonly perch: { x: number; y: number; z: number; nx: number; nz: number };
+  /** Where the moth sleeps: on the pulpit's face, head up, her back to the hall (`nx`, `nz`: into the rock; `lean`: how far the face overhangs there, rad). */
+  readonly perch: { x: number; y: number; z: number; nx: number; nz: number; lean: number };
   /** The dungeon's light, in the loft. */
   readonly ember: { x: number; y: number; z: number };
   /** Which of `glows` is the lamp's own, and the first of the four stones' (they follow one another). */
@@ -143,17 +147,22 @@ export class MothLayout {
     // (Both it and the stones can be flown over, and stood on.)
     this.solids.push({ x: great.x, z: great.z, r: 2.1, top: LAMP_Y + LAMP_R, flat: true });
     // The four turning stones stand on the line from the door to the ledge and square across it; the ring's set
-    // pictures lie between those lines. The seed picks where in the ring the month starts; no stone starts right.
+    // pictures lie between those lines. The seed picks where in the ring the month starts; no stone starts right:
+    // the one nearest the way in is a single turn off (the easy first go), the others two or three.
     {
       const base = Math.atan2(uz, ux), shift = (this.shift = Math.floor(rnd() * 4));
       this.turnDir = s;
       this.ringAt = base;
       for (let k = 0; k < 4; k++) {
         const a = base + s * k * (Math.PI / 2), x = great.x + Math.cos(a) * DIAL_R, z = great.z + Math.sin(a) * DIAL_R, want = (k + shift) % 4;
-        this.dials.push({ x, z, nx: -Math.cos(a), nz: -Math.sin(a), want, start: (want + 1 + Math.floor(rnd() * 3)) % 4 });
-        this.solids.push({ x, z, r: 1.15, top: DIAL_Y + DIAL_HALF + 0.25, flat: true });
+        const off = 2 + Math.floor(rnd() * 2);
+        this.dials.push({ x, z, nx: -Math.cos(a), nz: -Math.sin(a), want, start: (want - off + 4) % 4 });
+        this.solids.push({ x, z, r: 1.15, top: DIAL_Y + DIAL_ORB_Y + DIAL_ORB_R, flat: true });
         this.at[`dial${k}`] = [x - Math.cos(a) * 2.6, z - Math.sin(a) * 2.6];
       }
+      // (The way in is at the hall's -x end.)
+      const near = this.dials.reduce((b, o) => (o.x < b.x ? o : b));
+      near.start = (near.want + 3) % 4;
     }
 
     {
@@ -167,8 +176,11 @@ export class MothLayout {
     {
       const P = this.pulpit;
       this.mark = { x: P.x - ux * (P.r - 1.4), y: P.y + 1.5, z: P.z - uz * (P.r - 1.4) };
-      const out = P.r * pulpitR(1 - 4.6 / LEDGE_H) + 0.5;
-      this.perch = { x: P.x - ux * out, y: P.y - 4.6, z: P.z - uz * out, nx: ux, nz: uz };
+      // (The face overhangs there: she lies along it, her middle `CLING` off the rock, or her wings would be in it.)
+      const R = (dy: number) => P.r * pulpitR(1 - (4.6 - 0.58 - dy) / LEDGE_H);
+      const slope = (R(0.5) - R(-0.5)) / 1;
+      const out = R(0) + CLING * Math.hypot(1, slope);
+      this.perch = { x: P.x - ux * out, y: P.y - 4.6, z: P.z - uz * out, nx: ux, nz: uz, lean: Math.atan(slope) };
     }
     const { dx: vx, dz: vz } = along(up2);
     this.ember = { x: loft.x + vx * 4, y: this.floor(loft.x + vx * 4, loft.z + vz * 4) + 1.7, z: loft.z + vz * 4 };

@@ -59,6 +59,10 @@ export function over(o: Top, x: number, z: number, pad = 0) {
 export const PIT_DEPTH = 215, BURROW = 172, CAVERN_UP = 52;
 /** Half the pit's width, lip to far lip (m), and the cavern's radius. */
 export const PIT_HALF = 44, CAVERN_R = 58;
+/** The ladder of lanterns up the far face: how far apart its rungs are (m), and how far either side of the way up they hang. */
+export const CLIMB_RUNG = 15, CLIMB_LANE = 4.5;
+/** Where along the face she goes up it, left to herself: where the ledge's end holds her (by the ledge's own last lantern). */
+const CLIMB_AT = -2.6;
 /** How big a top's lantern is, times an ordinary one, and how high its post stands. */
 export const POST_S = 2.3, POST_H = 2.6;
 
@@ -93,6 +97,12 @@ export class DropLayout {
   readonly den: { x: number; z: number; r: number };
   /** The ledge's other lanterns (of `lanterns`): they wake with it once you're down. */
   readonly ledgeLanterns: number[] = [];
+  /**
+   * The way up, shown: a ladder of lanterns up the far face from over the ledge's end to the lit doorway, two to a
+   * rung, either side of where she climbs (of `lanterns`, from the foot up). They wake once you're out on the ledge
+   * on her, and their light runs up the wall.
+   */
+  readonly climbLanterns: number[] = [];
   /** Where the wurm sleeps, in the den, and which way she lies (a heading of the plan: atan2(z, x)). */
   readonly wurm: { x: number; z: number; dir: number };
   /** The dungeon's light, in the loft. */
@@ -142,8 +152,9 @@ export class DropLayout {
     // The way down: six tops, each lower and a little smaller, scattered about the cavern (40 to 46 m apart, so each
     // is a flight and not a hop; the first 38 m out from the lip and only 12 m under it, where it's seen as you come
     // up to the edge: the owner found it too close under the cliff at 21 m out and hard to see); and the ledge.
+    // (None stands within 22 m of the far face over the ledge: that air is the camera's, when she climbs.)
     const down: [number, number, number, number, boolean?][] = [
-      [180, -10, 7, 12], [158, 30, 6, 38], [198, 36, 5.5, 64], [214, -6, 5, 91], [180, -34, 4.5, 118], [192, 10, 4.5, 145], [den.x, 21.5, 9, BURROW, true],
+      [180, -10, 7, 12], [158, 30, 6, 38], [200, 30, 5.5, 64], [210, -20, 5, 91], [180, -34, 4.5, 118], [192, 10, 4.5, 145], [den.x, 21.5, 9, BURROW, true],
     ];
     {
       let px = this.lip.x, pz = this.lip.z;
@@ -252,6 +263,11 @@ export class DropLayout {
       // (The far way's are awake from the start: a lit doorway across the dark, and the light in it.)
       for (const sd of [1, -1]) { const i = hang(great.x + CAVERN_R + 4, 0, 0, sd, 14, 6); if (i >= 0) this.beacons.push(i); }
       for (const sd of [1, -1]) hang(loft.x - 2, 0, 0.3, sd, loft.r + 6);
+    }
+    // The ladder up the far face. (Last of all, so no other lantern's number moves: saves keep those.)
+    // (Its first rung just over your head as you ride the ledge: it's in the picture as you come to the ledge's end.)
+    for (let y = last.y + 5; y < great.floor - 6; y += CLIMB_RUNG) {
+      for (const sd of [1, -1]) { this.lanterns.push({ x: farLip - 0.15, y, z: CLIMB_AT * s + sd * CLIMB_LANE, nx: -1, nz: 0, s: 1.5 }); this.climbLanterns.push(this.lanterns.length - 1); }
     }
     this.lanterns.forEach((o, i) => this.glows.push({ x: o.x + o.nx * 0.7, y: o.y + 0.5, z: o.z + o.nz * 0.7, r: i === this.tops[this.tops.length - 1].lantern ? 21 : o.s ? 15 : LANTERN_R, warm: false, lantern: i }));
 

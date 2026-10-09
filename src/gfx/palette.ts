@@ -189,6 +189,7 @@ export const BIOME = {
   cutWood: '#e9cf9c',  // fresh-cut log ends, the axe handle
   steel: '#8e9cab',
   soot: '#3e3238',
+  earth: '#a08268',     // bare squashed earth: the giant's prints, and what they're filled with
   ember: '#ffb45a',
   // The wild biomes.
   bog: '#8f8a58',        // fen moss, olive going brown

@@ -56,6 +56,8 @@ export const PRINT_U = {
   uPrintHead: { value: 0 },
   /** How many prints back the warmth has gone out of the ground. */
   uPrintCool: { value: 9 },
+  /** One print being filled in again (`Prints.part`): its x and z, and how much of its depth is left (1 = all of it). */
+  uPrintFill: { value: new THREE.Vector3(0, 0, 1) },
 };
 
 export const PRINT_GLSL = /* glsl */ `
@@ -63,6 +65,9 @@ uniform sampler2D uPrints;
 uniform sampler2D uPrintClear;
 uniform float uPrintHead;
 uniform float uPrintCool;
+uniform vec3 uPrintFill;
+// How much of this print's depth is left: 1, but for the one being shovelled full.
+float printDeep(vec4 p) { return p.a > 0.5 && distance(p.xy, uPrintFill.xy) < 0.5 ? uPrintFill.z : 1.0; }
 // Signed distance (m) to the edge of its sole: negative inside.
 float soleSdf(vec2 xz, vec4 p) {
   if (p.a < 0.5) return 99.0;
@@ -100,7 +105,7 @@ float printLift(float s) {
 float printWarmth(vec4 p) { return clamp(1.0 - (uPrintHead - p.a) / uPrintCool, 0.0, 1.0); }
 `;
 
-export interface Print { x: number; z: number; heading: number; n: number; /** Which side of it (its own x, +1 / -1) the other foot came down: the middle of the trail. 0 = no telling. */ side?: number }
+export interface Print { x: number; z: number; heading: number; n: number; /** Which side of it (its own x, +1 / -1) the other foot came down: the middle of the trail. 0 = no telling. */ side?: number; /** How much of its depth is left (`Prints.part`; left out: all of it). */ keep?: number }
 
 /** Print p clears what stands at (x, z) (`pad`: that much more round the sole itself, m). */
 export function printClears(x: number, z: number, p: Print, pad = 0): boolean {
@@ -184,7 +189,19 @@ export class Prints {
       if (left.length) this.cells.set(k, left); else this.cells.delete(k);
       this.write(k, left);
     }
+    if (p.keep !== undefined) this.part(null);
     PRINT_TEX.needsUpdate = true;
+  }
+
+  /**
+   * Print `p` is part filled in: `keep` of its depth is left (1 = as it was
+   * pressed). One at a time: the shader knows of one (`uPrintFill`), and
+   * the one before goes back to its full depth.
+   */
+  part(p: Print | null, keep = 1) {
+    for (const q of this.list) q.keep = undefined;
+    if (p) p.keep = keep;
+    PRINT_U.uPrintFill.value.set(p?.x ?? 0, p?.z ?? 0, p ? keep : 1);
   }
 
   /** A cell's prints into the texture's two layers. */
@@ -216,7 +233,7 @@ export class Prints {
   /** What a print adds to the ground height here (0 away from any). */
   offset(x: number, z: number): number {
     const p = this.at(x, z);
-    return p ? printLift(soleSdf(x, z, p)) : 0;
+    return p ? printLift(soleSdf(x, z, p)) * (p.keep ?? 1) : 0;
   }
 
   /** 1 = just made, 0 = gone cold. */
@@ -239,5 +256,6 @@ export class Prints {
     (CLEAR_TEX.image.data as Uint8Array).fill(0);
     CLEAR_TEX.needsUpdate = true;
     PRINT_U.uPrintHead.value = this.head = 0;
+    PRINT_U.uPrintFill.value.set(0, 0, 1);
   }
 }

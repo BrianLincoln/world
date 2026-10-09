@@ -15,7 +15,7 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 
 const PAD = 0.5;
-const LOOPS = ['warm_field_v3_exploration_loop', 'moonhall_dark_hall_loop', 'moonhall_flying_loop'];
+const LOOPS = ['warm_field_v3_exploration_loop', 'moonhall_dark_hall_loop', 'moonhall_flying_loop', 'action_loop', 'action_final_push_loop'];
 const SHOTS = ['giant_emergence', 'giant_village', 'giant_aftermath', 'moonhall_way_in', 'moonhall_lamp_lights'];
 
 const src = process.argv[2] ?? join(homedir(), 'Downloads');

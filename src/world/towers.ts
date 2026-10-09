@@ -15,7 +15,7 @@ import type { StorySite } from './storySite';
 /** How far one flame can be seen from another (m). */
 export const TOWER_RANGE = 1500;
 /** No two towers closer than this (m). */
-export const TOWER_SPACING = 560;
+export const TOWER_SPACING = 900;
 /** The network covers a disc this big around the home tower (m). */
 export const TOWER_REGION = 5200;
 /** The home tower stands this far from the home cabin (m). */
@@ -248,9 +248,9 @@ function sees(f: Field, ax: number, ay: number, az: number, bx: number, by: numb
 }
 
 /** Build the boulder stack for a tower. Deterministic per tower position. */
-function stack(seed: number, id: number, x: number, z: number, y: number, yaw: number, home: boolean, f: Field): Omit<Tower, 'links' | 'parent'> {
+function stack(seed: number, id: number, x: number, z: number, y: number, yaw: number, home: boolean, f: Field, size = 1, bare = false): Omit<Tower, 'links' | 'parent'> {
   const rnd = mulberry32(hashInt(Math.round(x), Math.round(z), seed, 977));
-  const scale = TOWER_SCALE * (home ? 1.12 : 1) * (0.92 + rnd() * 0.12);
+  const scale = TOWER_SCALE * (home ? 1.12 : 1) * (0.92 + rnd() * 0.12) * size;
   const boulders: TowerBoulder[] = [];
   const fx = Math.sin(yaw), fz = Math.cos(yaw);
   const L = layout(scale, rnd);
@@ -288,7 +288,7 @@ function stack(seed: number, id: number, x: number, z: number, y: number, yaw: n
   const sx = doorC.x + fx * 2.5, sz = doorC.z + fz * 2.5;
   const door = { ...doorC, ground: { x: sx, y: f.base(sx, sz), z: sz } };
   // Some stand beside a second boulder as big as the door's (never in front).
-  if (rnd() < 0.3) {
+  if (rnd() < 0.3 && !bare) {
     let a = rnd() * Math.PI * 2;
     if (Math.cos(a - (Math.PI / 2 - yaw)) > -0.2) a += Math.PI;
     const b0 = L.out[0];
@@ -298,7 +298,7 @@ function stack(seed: number, id: number, x: number, z: number, y: number, yaw: n
     boulders.push({ x: bx, y: Math.min(f.base(bx, bz), ground) + sy * 0.3, z: bz, sx: r, sy, rot: rnd() * Math.PI });
   }
   // Half of them have a smaller boulder or two leaning on the base.
-  if (rnd() < 0.5) {
+  if (rnd() < 0.5 && !bare) {
     const n = 1 + Math.floor(rnd() * 2);
     const a0 = rnd() * Math.PI * 2;
     for (let k = 0; k < n; k++) {
@@ -337,7 +337,7 @@ function stack(seed: number, id: number, x: number, z: number, y: number, yaw: n
   // A few loose boulders round the foot, like rubble that rolled off
   // (kept clear of the doorway).
   const foot = L.out[0].r;
-  const loose = 2 + Math.floor(rnd() * 4);
+  const loose = bare ? 0 : 2 + Math.floor(rnd() * 4);
   for (let k = 0; k < loose; k++) {
     const a = rnd() * Math.PI * 2;
     if (Math.cos(a - (Math.PI / 2 - yaw)) > 0.55) continue;
@@ -536,4 +536,25 @@ export function buildTowerNet(seed: number, f: Field, site: StorySite): TowerNet
 /** Line of sight between two towers' flames (terrain only). For probes and the debug view. */
 export function towersSee(f: Field, a: Tower, b: Tower) {
   return sees(f, a.flame.x, a.flame.y, a.flame.z, b.flame.x, b.flame.y, b.flame.z);
+}
+
+/** A dungeon's tower beside any other: it has to stand inside the ring's stones. */
+export const RING_TOWER_SIZE = 0.52;
+
+/**
+ * The tower that comes up out of a dungeon's ring once its light is given
+ * (giant/offering.ts). Not one of the network's: it isn't there until then,
+ * and nothing in the land is placed by it. A small stack with nothing loose
+ * round its foot, moved so its head is over the ring's very middle (the
+ * shrine rides up on it), and seeing whichever of the network's towers it
+ * can. `yaw`: the way it faces.
+ */
+export function ringTower(seed: number, id: number, site: { x: number; z: number; y: number }, yaw: number, f: Field, net: TowerNet): Tower {
+  const t = stack(seed, id, site.x, site.z, site.y, yaw, false, f, RING_TOWER_SIZE, true) as Tower;
+  const dx = site.x - t.head.x, dz = site.z - t.head.z;
+  for (const o of [t, t.head, t.flame, t.door, t.door.ground, ...t.boulders]) { o.x += dx; o.z += dz; }
+  t.door.ground.y = f.base(t.door.ground.x, t.door.ground.z);
+  t.parent = -1;
+  t.links = net.towers.filter((o) => sees(f, t.flame.x, t.flame.y, t.flame.z, o.flame.x, o.flame.y, o.flame.z)).map((o) => o.id);
+  return t;
 }

@@ -7,7 +7,8 @@ import { OCCLUDE, overlayMat } from './overlay';
 // them. Every tower in view is a dark silhouette of its stack; a lit one's
 // eyes blaze with a big warm glow, an unlit one's eyes are two dim embers,
 // so you can tell at a glance where you can go and where to go next. The one
-// you're aimed at glows brighter still, with a pulsing ring.
+// you're aimed at glows brighter still, with a pulsing ring. The home tower
+// shows a little house in place of eyes, paler, in a thin ring of its own.
 
 /** Silhouette body colour: a deep plum, like the far layers at dusk. */
 const SIL = new THREE.Color('#3b2a36');
@@ -58,7 +59,7 @@ void main() {
 }
 `;
 
-// aK: x = lit (0..1), y = aimed (0..1), z = alpha, w = half size in pixels.
+// aK: x = lit (0..1), plus 2 for the home tower; y = aimed (0..1), z = alpha, w = half size in pixels.
 const EYE_FRAG = /* glsl */ `
 precision highp float;
 ${OCCLUDE}
@@ -72,17 +73,30 @@ float eye(vec2 p, float x) {
   float r = pow(pow(q.x, 4.0) + pow(q.y, 4.0), 0.25);
   return 1.0 - smoothstep(0.8, 1.0, r);
 }
+// The home tower's sign: the little house over its doorway (houseMark in HEAD_FRAG), filled in.
+float house(vec2 p) {
+  vec2 q = p / 0.27 + vec2(0.0, 0.045);
+  vec2 b = abs(q - vec2(0.0, -0.35)) - vec2(0.74, 0.55);
+  float box = length(max(b, 0.0)) + min(max(b.x, b.y), 0.0);
+  vec2 t = vec2(abs(q.x), q.y - 0.2);
+  float roof = max(dot(t, normalize(vec2(0.62, 0.78))) - 0.62, -t.y);
+  float door = max(abs(q.x) - 0.17, abs(q.y + 0.62) - 0.28);
+  return (1.0 - smoothstep(-0.04, 0.06, min(box, roof))) * smoothstep(-0.03, 0.05, door);
+}
 void main() {
-  float lit = vK.x, aim = vK.y;
+  float home = step(1.5, vK.x);
+  float lit = vK.x - 2.0 * home, aim = vK.y;
   vec2 p = vUv;
   float r = length(p);
-  float eyes = max(eye(p, -0.2), eye(p, 0.2));
-  vec3 ember = vec3(1.0, 0.6, 0.27), core = vec3(1.0, 0.86, 0.55);
+  float eyes = home > 0.5 ? house(p) : max(eye(p, -0.2), eye(p, 0.2));
+  // Home burns paler, a white gold, and keeps a thin steady ring of its own.
+  vec3 ember = mix(vec3(1.0, 0.6, 0.27), vec3(1.0, 0.72, 0.38), home), core = mix(vec3(1.0, 0.86, 0.55), vec3(1.0, 0.94, 0.76), home);
   float pulse = 0.5 + 0.5 * sin(uTime * 4.0);
   // Lit: a big soft glow round white-hot eyes. Unlit: two dim embers.
   float halo = lit * (exp(-r * r * 5.0) * (0.55 + 0.35 * aim) + 0.25 * exp(-r * r * 1.6) * aim);
   float ring = aim * (1.0 - smoothstep(0.02, 0.06, abs(r - 0.78 - 0.06 * pulse))) * 0.9;
-  vec3 eyeCol = mix(vec3(0.42, 0.2, 0.12), mix(core, vec3(1.0, 0.97, 0.88), aim), lit);
+  ring = max(ring, home * lit * (1.0 - smoothstep(0.012, 0.035, abs(r - 0.6))) * 0.75);
+  vec3 eyeCol = mix(vec3(0.42, 0.2, 0.12), mix(core, vec3(1.0, 0.97, 0.88), max(aim, home)), lit);
   float eyeA = eyes * mix(0.75, 1.0, lit);
   vec3 col = mix(ember, core, clamp(halo, 0.0, 1.0));
   float a = max(max(halo, ring), eyeA);
@@ -173,7 +187,7 @@ export class TowerView {
       const px = (t.head.sx * 1.1 / Math.max(d, 1)) * res.y * 1.4;
       const size = Math.max(px, vt.lit ? 26 + 14 * vt.aimed : 11) * (vt.lit ? 1.6 + 0.5 * vt.aimed : 1);
       this.aPos.setXYZ(n, ex, ey, ez);
-      this.aK.setXYZW(n, vt.lit ? 1 : 0, vt.aimed, vt.alpha, size);
+      this.aK.setXYZW(n, (vt.lit ? 1 : 0) + (t.home ? 2 : 0), vt.aimed, vt.alpha, size * (t.home ? 1.25 : 1));
       n++;
     }
     this.sil.forEach((im, k) => { im.count = Math.min(counts[k], MAX * 8); im.instanceMatrix.needsUpdate = true; this.silA[k].needsUpdate = true; });

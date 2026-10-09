@@ -14,6 +14,7 @@
 //           getting up and walking off; then the walk to the second ring from where you sit and from above, it
 //           lying down there, and a reload at each step (before the spirit is home, once it is, the giant
 //           walking, the giant settled). `walk=0` skips the long walk (it is put at the end of it).
+//   tower:  the tower the ring became: standing and lit afterwards, going up into its head, flying home, a reload.
 //   `sandbox`: with the story off (as scripts/dungeon.mjs quest runs): a giant is stood by the ring.
 // Uses the build in dist/, or in $DIST (run `npx vite build` first).
 import { chromium } from 'playwright';
@@ -26,7 +27,7 @@ const dir = args[0] ?? 'shots/offering';
 const arg = (k, d) => args.find((a) => a.startsWith(k + '='))?.slice(k.length + 1) ?? d;
 const seed = arg('seed', 'hilda'), hour = arg('t', ''), every = parseFloat(arg('every', '1'));
 const sandbox = args.includes('sandbox');
-const kinds = (args.find((a) => /^(play|reload|views|mouth|claws|home)/.test(a)) ?? 'play').split(',');
+const kinds = (args.find((a) => /^(play|reload|views|mouth|claws|home|tower)/.test(a)) ?? 'play').split(',');
 fs.mkdirSync(dir, { recursive: true });
 const server = http.createServer((req, res) => {
   const p = decodeURIComponent(new URL(req.url, 'http://x').pathname);
@@ -104,22 +105,48 @@ if (kinds.includes('play')) {
   const p1 = await where();
   const cues = await run(() => window.__ow.offering().cues);
   console.log('cues', JSON.stringify(Object.fromEntries(Object.entries(cues).map(([k, v]) => [k, +v.toFixed(1)]))));
-  let n = 0, moved = 0;
+  // (The ground heaves, you run out through the stones, and the tower comes up under the shrine: you stand where you
+  // got to from then on.)
+  let n = 0, moved = 0, p2 = null, tower = null;
   for (let t = 0; t < cues.end + 1; t += every) {
     await step(Math.round(every * 60));
     s = await state();
     await shot(`o-${String(++n).padStart(2, '0')}-t${String(Math.round(s.clock < 0 ? t : s.clock)).padStart(2, '0')}`);
     const p = await where();
-    if (s.busy) moved = Math.max(moved, Math.hypot(p[0] - p1[0], p[2] - p1[2]));
+    if (s.clock > cues.up + 0.2 && !p2) { p2 = p; tower = await run(() => { const ow = window.__ow, t = ow.gen().ringTowers[0], o = ow.offering(); return { up: ow.beacons.isUp(t.id), lit: ow.beacons.isLit(t.id), head: t.head.y + t.head.sy - o.shrineAt.y, light: o.lightAt.y - o.shrineAt.y }; }); }
+    if (s.busy && p2) moved = Math.max(moved, Math.hypot(p[0] - p2[0], p[2] - p2[2]));
   }
-  void p0;
+  void p0; void p1;
+  check('the tower came up under the shrine, lit, the light on top of it', !!tower && tower.up && tower.lit && tower.light > tower.head, JSON.stringify(tower));
+  check('you ran out through the stones to watch it', !!p2 && s.fromShrine > 15 && s.fromShrine < 26, `from the middle ${s.fromShrine}`);
   check('hands off from there to the end', moved < 0.3, `moved ${moved.toFixed(2)} m with W held`);
   s = await state();
   check('the giant has it: awake, its mouth shut again, smiling', s.state === 'given' && !s.busy && s.giant.awake && s.giant.mouth === 0 && s.giant.grin > 0.4, JSON.stringify(s));
-  check('on foot by the shrine at the end of it', s.mode === 'walk' && s.fromShrine < 3.3, s.mode);
+  check('on foot before the tower at the end of it', s.mode === 'walk' && s.fromShrine < 26, s.mode);
   check('and it carries straight on: the homecoming has the camera', s.home?.state === 'playing', JSON.stringify(s.home));
   await keysUp();
   await shot('o-end');
+}
+
+if (kinds.includes('tower')) {
+  // The tower the ring became, afterwards: it stands, lit, the shrine on its head; you can go up into it, and fly home.
+  await setup();
+  const t = await run(() => {
+    const ow = window.__ow, b = ow.beacons, t = ow.gen().ringTowers[0], home = ow.gen().towers.home;
+    ow.offering().debug('given');
+    b.debugSet(home.id);
+    ow.advance(30);
+    b.debugEnter(t.id);
+    ow.advance(240);
+    return { id: t.id, up: b.isUp(t.id), lit: b.isLit(t.id), inside: b.inside?.id, onTop: b.onTop, sees: t.links.length, to: b.targets(t).map((o) => o.id), home: home.id, fromHome: b.targets(home).map((o) => o.id) };
+  });
+  check('the tower stands, lit, and takes you up into its head', t.up && t.lit && t.inside === t.id && t.onTop, JSON.stringify(t));
+  check('you can fly home from it, and to it from home', t.to.includes(t.home) && t.fromHome.includes(t.id), JSON.stringify(t));
+  await run(() => { const ow = window.__ow; ow.beacons.escape(); ow.advance(120); });
+  await again();
+  await run(() => { window.__ow.manual(true); window.__ow.advance(30); });
+  const r = await run(() => { const ow = window.__ow, b = ow.beacons, t = ow.gen().ringTowers[0]; return { up: b.isUp(t.id), lit: b.isLit(t.id), light: ow.offering().shrineAt.y, head: t.head.y }; });
+  check('a reload finds it standing and lit', r.up && r.lit, JSON.stringify(r));
 }
 
 if (kinds.includes('reload')) {
@@ -153,7 +180,7 @@ if (kinds.includes('reload')) {
   s = await state();
   // (A page runs real frames before this script takes it over, so how far the homecoming had got when it was
   // reloaded varies: before the spirit was home it plays again from by the shrine; after, it is all done.)
-  const before = s.home?.state === 'playing' && s.mode === 'ride' && s.fromShrine < 8, after = s.home?.state === 'done' && s.home.settled && !s.busy;
+  const before = s.home?.state === 'playing' && s.mode === 'ride' && s.fromShrine < 26, after = s.home?.state === 'done' && s.home.settled && !s.busy;
   check(`reload after the smile: ${after ? 'the spirit was home already, so nothing replays' : 'by the shrine, mounted, and the homecoming plays'}`, s.state === 'given' && s.sealed && (before || after), JSON.stringify(s));
   await shot('r-given');
 }
@@ -166,9 +193,10 @@ if (kinds.includes('home')) {
   const lookAtGiant = (dist = 14, pitch = 0.02) => run(([dist, pitch]) => { const ow = window.__ow, g = ow.giant(), b = ow._body.pos; ow.view(Math.atan2(b.x - g.centre.x, b.z - g.centre.z), pitch, dist); ow.advance(2); }, [dist, pitch]);
   await setup();
   await untilPlaced();
-  const p0 = await where();
   const cues = await run(() => window.__ow.offering().cues);
   await step(Math.round((cues.end - 1.5) * 60));
+  // (From where you ran to as the tower came up.)
+  const p0 = await where();
   // The smile, and on. W is still held: nothing may move you until it hands you back.
   let s, n = 0, was = '', moved = 0, seen = new Set(), secs = 0;
   const v0 = sandbox ? null : await vil();
@@ -190,7 +218,7 @@ if (kinds.includes('home')) {
   check('hands off throughout', moved < 0.3, `moved ${moved.toFixed(2)} m with W held`);
   check('still on foot by the shrine', s.mode === 'walk', s.mode);
   let g = await giantNow();
-  check('the giant is up, walking, and not solid', g.sunk < 0.05 && g.walking && !g.dormant && !g.solid, JSON.stringify(g));
+  check('the giant is up and walking (solid, as it always is now)', g.sunk < 0.05 && g.walking && !g.dormant && g.solid, JSON.stringify(g));
   if (!sandbox) {
     const v = await vil();
     check('one spirit is home, its house not touched, and its crow has no light', v.home && v.taken === v0.taken - 1 && v.mended === 0 && v.lights === v0.lights - 1, `${JSON.stringify(v0)} -> ${JSON.stringify(v)}`);
@@ -252,7 +280,8 @@ if (kinds.includes('home')) {
     await run(() => { const ow = window.__ow, d = ow.gen().dungeons[1], g = ow.giant(); const ux = g.centre.x - d.x, uz = g.centre.z - d.z; ow.teleport(d.x, d.z); ow.view(Math.atan2(-ux, -uz) + 0.5, -0.05, 9); ow.advance(40); });
     await shot(`${name}-ring2-giant`);
     const r = await run(() => { const ow = window.__ow, d = ow.gen().dungeons[1], b = ow._body; return { open: ow.ring().open, site: ow.ring().site === d, mode: ow.mode(), y: +(b.pos.y - ow.height(d.x, d.z)).toFixed(1) }; });
-    check('the second ring is bare stones: standing in its middle, nothing takes you', (r.mode === 'walk' || r.mode === 'ride') && !r.site && Math.abs(r.y) < 1.5, JSON.stringify(r));
+    // (The second ring is open once it lies there: the Veil Cave is under it, and standing in its middle takes you down.)
+    check('the second ring is open: standing in its middle, it takes you', r.mode === 'carried' && !r.site, JSON.stringify(r));
   };
   await at2('h-settled');
   // Settled: a reload finds the same.
@@ -273,7 +302,7 @@ if (kinds.includes('home')) {
     await run(() => { window.__ow.manual(true); window.__ow.advance(20); });
     s = await state(); g = await giantNow();
     const v = await vil();
-    check('reload before the spirit is home: by the shrine, mounted, and it plays again from its start; nobody home yet', s.home.state === 'playing' && ['leave', 'cutTo', 'village'].includes(s.home.phase) && s.mode === 'ride' && s.fromShrine < 8 && g.dormant && g.fromRing1 < 150 && !v.home, `${JSON.stringify(s.home)} ${JSON.stringify(v)}`);
+    check('reload before the spirit is home: by the shrine, mounted, and it plays again from its start; nobody home yet', s.home.state === 'playing' && ['leave', 'cutTo', 'village'].includes(s.home.phase) && s.mode === 'ride' && s.fromShrine < 26 && g.dormant && g.fromRing1 < 150 && !v.home, `${JSON.stringify(s.home)} ${JSON.stringify(v)}`);
     await shot('h-reload-before');
     // On to the village, and a reload there, once the spirit stands on its doorstep.
     for (let i = 0; i < 200; i++) { await step(20); if ((await vil()).home) break; }

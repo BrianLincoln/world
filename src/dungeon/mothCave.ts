@@ -12,7 +12,7 @@ import { Billboard } from '../story/overlay';
 import type { DungeonSite } from '../world/worldgen';
 import { makeDarkLight } from './darkLight';
 import { ARM_R, LANTERN_R, LIFT_R } from './layout';
-import { DIAL_HALF, DIAL_Y, LAMP_R, LAMP_Y, MothLayout, pulpitR } from './mothPlan';
+import { DIAL_HALF, DIAL_ORB_R, DIAL_ORB_Y, DIAL_Y, LAMP_R, LAMP_Y, MothLayout, pulpitR } from './mothPlan';
 import { buildDialHead, buildMosaic, buildMothRock, buildWallCaps, FACE_R, floorMoon } from './mothShell';
 
 /** The marks on a moon: a shade under its light. */
@@ -33,8 +33,8 @@ import { buildCaps, buildLanterns, buildShell } from './shell';
 // of their four faces. Walk up to one and turn it (the action key): a
 // quarter turn each time. Let into the floor round the lamp are four moons,
 // each on its stone's side: that is the moon each stone has to show the
-// lamp. A stone showing its moon sends the lamp a beam. All four, and the
-// lamp is lit: the hall's colour comes back, and the moth, who goes to
+// lamp. A stone showing its moon lights the little moon on its crown. All four, and
+// each sends the lamp a beam and the lamp is lit: the hall's colour comes back, and the moth, who goes to
 // light, comes down off her ledge to it, is glad, and offers her back. The
 // lit lamp throws one more beam, up to a pale stone on the ledge she came
 // from: that is the way on. Fly up; behind the ledge a gallery leads to the
@@ -70,6 +70,8 @@ const WIN = 4.3, WIN_HOPS = [0.5, 1.35, 2.2], WIN_VEIL = 0.9;
 const TURN_R = 3.6, TURN = 0.5;
 /** The first look at her, up on her ledge (s). */
 const LOOK = 3.6;
+/** How far into that look she stretches her wings (s). */
+const STRETCH_AT = 0.5;
 /**
  * The lamp lit, in seconds from the last stone coming right: the lamp
  * kindles (you watch from where you stand); the cut to her ledge, where she
@@ -125,9 +127,12 @@ interface DialState {
   t: number;
   head: THREE.Group;
   flare: THREE.Mesh;
+  /** The little moon on its crown: dark, or lit as the lamp's is when its face is the right one. Its beam starts in it. */
+  orb: THREE.Mesh;
   beam: THREE.Mesh;
-  /** How much of its beam is out (0..1). */
+  /** How lit its little moon is (0..1: its face is the right one), and how much of its beam is out (0..1: all four are). */
   k: number;
+  b: number;
 }
 
 export class MoonHall {
@@ -261,7 +266,7 @@ export class MoonHall {
     };
     this.markBeam = beam(this.moon.position, this.markBall.position);
 
-    // The four stones: a head that turns on its post, a flare over the face that looks at the lamp (shown when it's the right one), a beam.
+    // The four stones: a head that turns on its post, a flare over the face that looks at the lamp (shown when it's the right one), a little moon on its crown and the beam out of it.
     // (A moon's dark side is a dim moon, not a hole: its marks show on it.)
     const moonLook = { stone: '#c4a6b8', dark: '#57415f', darkMark: '#47334f' };
     const head = buildDialHead(moonLook);
@@ -292,11 +297,13 @@ export class MoonHall {
       // (Behind the whole moon and a little bigger: a bright rim all round it.)
       const flare = add(new THREE.CircleGeometry(FACE_R * 1.2, 36).translate(0, 0, DIAL_HALF + 0.006), flareMat, post);
       flare.visible = false;
-      // (From the head's crown, not its face: the beam mustn't hide the moon it's for.)
-      const from = new THREE.Vector3(o.x, y + DIAL_HALF + 0.3, o.z);
+      // (From the little moon on the head's crown, not its face: the beam mustn't hide the moon it's for.)
+      const from = new THREE.Vector3(o.x, y + DIAL_ORB_Y, o.z);
+      const orb = add(new THREE.SphereGeometry(DIAL_ORB_R, 20, 14), makeSolidMaterial(MOON_OUT, 0, { keep: 1 }));
+      orb.position.copy(from);
       const k = this.solved ? 1 : 0;
       g.rotation.y = (-state[i] * Math.PI) / 2;
-      this.dials.push({ n: state[i], turns: state[i], t: -1, head: g, flare, beam: beam(from, this.moon.position), k });
+      this.dials.push({ n: state[i], turns: state[i], t: -1, head: g, flare, orb, beam: beam(from, this.moon.position), k, b: k });
     });
     // The floor's ring of eight pictures: the month as it should be. They never change; they are what the stones are turned to.
     {
@@ -554,6 +561,7 @@ export class MoonHall {
       m.heading = this.yawOf(L.perch.nx, L.perch.nz);
       d.rest = 1;
       d.s.hang = 1;
+      d.s.lean = L.perch.lean;
       m.stabled = false;
     } else {
       this.put(L.lamp.x - LAND_R, L.lamp.z, this.yawOf(-1, 0));
@@ -699,7 +707,7 @@ export class MoonHall {
     this.solved = this.yours = true;
     this.show = -1;
     this.lampK = this.markK = 1;
-    for (const o of this.dials) o.k = 1;
+    for (const o of this.dials) o.k = o.b = 1;
     const m = this.she;
     if (!m) return;
     const b = this.d.body, [x, z] = this.local(b.pos.x - Math.cos(b.heading) * 2, b.pos.z + Math.sin(b.heading) * 2);
@@ -793,9 +801,13 @@ export class MoonHall {
       if (on) right++;
       o.k += ((on ? 1 : 0) - o.k) * (1 - Math.exp(-(on ? 5 : 9) * dt));
       o.flare.visible = o.k > 0.03;
-      o.beam.visible = o.k > 0.02;
+      { const u = (o.orb.material as THREE.ShaderMaterial).uniforms; u.uEmissive.value = o.k; (u.uColor.value as THREE.Color).copy(cA.set(MOON_OUT)).lerp(cB.set(MOON), o.k); }
+      o.orb.scale.setScalar(1 + 0.03 * o.k * Math.sin(this.time * 2.1 + i * 1.7));
+      // (No beam till all four are right: then they go out together, and the lamp lights.)
+      o.b += ((this.solved ? 1 : 0) - o.b) * (1 - Math.exp(-5 * dt));
+      o.beam.visible = o.b > 0.02;
       const r = 0.085 * (1 + 0.12 * Math.sin(this.time * 5 + i * 1.7));
-      o.beam.scale.set(r, o.beam.userData.len * o.k, r);
+      o.beam.scale.set(r, o.beam.userData.len * o.b, r);
     });
 
     // All four: the lamp is lit.
@@ -816,6 +828,8 @@ export class MoonHall {
       this.show += dt;
       b.vel.x = b.vel.z = 0;
       if (t0 < 0.5 && this.show >= 0.5) this.d.sfx.fanfare();
+      // (Waking, her wings go up; she's off the rock with them still raised.)
+      if (t0 < SHOW.kindle && this.show >= SHOW.kindle && this.she && !this.she.ridden) (this.she.data as BeastData).s.stretch = 0;
       if (t0 < SHOW.wake && this.show >= SHOW.wake) this.takeOff();
       if (this.show >= SHOW.end) this.show = -1;
     }
@@ -854,6 +868,8 @@ export class MoonHall {
       this.save();
     }
     if (this.lookT >= 0) {
+      // (Once the camera is on her she stretches her wings, asleep.)
+      if (this.lookT < STRETCH_AT && this.lookT + dt >= STRETCH_AT && this.she) (this.she.data as BeastData).s.stretch = 0;
       this.lookT += dt;
       b.vel.x = b.vel.z = 0;
       if (this.lookT >= LOOK) this.lookT = -1;

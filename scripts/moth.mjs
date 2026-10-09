@@ -1,7 +1,8 @@
 // The third dungeon, the Moon Hall: node scripts/moth.mjs <dir> [seed=hilda] [inside,quest,reload,story,home3]
 //   inside: stills from round the hall as you'd find it (dark), the hint in the floor, a stone's face,
 //           and the same with the lamp lit.
-//   quest:  the whole of it played with the keys, from the well: the first look at her on her ledge;
+//   quest:  the whole of it played with the keys, from the well: the first look at her on her ledge
+//           (her wings' stretch: `look-*`);
 //           each stone turned to its moon (read off the floor's moons, as a player would); the lamp
 //           lighting and her coming down (a frame every half second: `show-*`); getting on; flying up
 //           to the ledge the lamp points at; the gallery; the light; the cut and the ring's arms lifting you out; and
@@ -150,8 +151,8 @@ if (kinds.includes('quest')) {
   let r = await run(() => { window.__bot.go('ante', { stop: 3 }); return window.__bot.go('hall', { stop: 2, until: () => window.__ow.hall().debug.look >= 0 }); });
   let d = await info();
   check('walking in, the camera goes up to her', d.look >= 0, JSON.stringify(r));
-  await run(() => window.__bot.tick(100));
-  await shot('q-01-first-look');
+  // (She stretches her wings while the camera is on her: a frame every 0.4 s.)
+  for (let i = 0; i < 8; i++) { await run(() => window.__bot.tick(24)); await shot(i === 4 ? 'q-01-first-look' : `look-${i}`); }
   r = await run(() => window.__bot.wait(() => !window.__ow.hall().busy, 8));
   check('and comes back', r.ok, `${r.secs}s`);
   // The answer, read off the floor.
@@ -170,7 +171,7 @@ if (kinds.includes('quest')) {
     }, i);
     check(`stone ${i}: turned to its moon`, r.ok && t.offer === 'hand' && t.shows === t.want && (i === 3 || t.k > 0.9), JSON.stringify({ ...t, walk: r.secs }));
     if (i === 0) await shot('q-03-stone-right');
-    if (i === 2) await shot('q-04-three-beams');
+    if (i === 2) await shot('q-04-three-right');
   }
   d = await info();
   check('all four: the lamp is lit', d.solved && d.show >= 0, `show ${d.show.toFixed(2)}`);

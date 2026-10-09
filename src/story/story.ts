@@ -94,8 +94,12 @@ interface SaveData {
   giant?: boolean;
 }
 
-/** Where the next task is, and how close counts as there (the pointer hides). */
-export interface Guide { at: THREE.Vector3; near: number }
+/**
+ * Where the next task is, and how close counts as there (the pointer hides).
+ * `far` / `delay`: it isn't asked for until you've been this far off (m; `near`
+ * if not given) and out of `near` this long (s; the pointer's own if not given).
+ */
+export interface Guide { at: THREE.Vector3; near: number; far?: number; delay?: number }
 
 interface Token { bb: Billboard; from: THREE.Vector3; part: PartId; slot: number; t: number; res: Resource }
 
@@ -227,7 +231,23 @@ export class Story {
     this.group.add(this.cabin.root, this.cabin.embers.group, this.cabin.smoke.group, this.cabin.column.batch.mesh, this.sparkles.group, this.chipPuffs.group);
     this.overlayGroup.add(this.cabin.overlay);
     if (site.village) {
-      this.village = new Village(site.village, { seed: gen.seed, ground });
+      // By night they sit round your cabin's hearth (those without a house of their own to go to): in at the door, to a place on the floor.
+      const P = (lx: number, lz: number, y: number) => { const q = siteLocal(site, lx, lz); return new THREE.Vector3(q.x, y, q.z); };
+      const fy = site.y + CAB.floor, hx = CAB.hearth.x, hz = CAB.hearth.z, seats: THREE.Vector3[] = [];
+      for (const [r, n] of [[2.1, 4], [3.2, 5], [4.3, 5]]) for (let j = 0; j < n; j++) {
+        const a = (j / (n - 1) - 0.5) * 2.3, x = hx - 0.3 - Math.cos(a) * r, z = hz + Math.sin(a) * r;
+        // (Inside the walls, and not on the guide's own seat.)
+        if (Math.abs(x) < CAB.W / 2 - 0.6 && Math.abs(z) < CAB.D / 2 - 0.6 && Math.hypot(x - (hx - 1.3), z - (hz + 0.95)) > 0.9) seats.push(P(x, z, fy));
+      }
+      this.village = new Village(site.village, {
+        seed: gen.seed, ground,
+        night: () => d.env.hour >= 20.5 || d.env.hour < 5.5,
+        cabin: {
+          floor: (x, z) => (this.cabin.inside(x, z, -0.2) ? fy : -Infinity),
+          way: [P(-0.2, CAB.D / 2 + 2.2, ground(siteLocal(site, -0.2, CAB.D / 2 + 2.2).x, siteLocal(site, -0.2, CAB.D / 2 + 2.2).z)), P(-0.9, CAB.D / 2 + 0.5, fy), P(-0.9, CAB.D / 2 - 0.9, fy)],
+          seats, hearth: P(hx, hz, fy + 0.5),
+        },
+      });
       this.group.add(this.village.group);
     }
     if (site.pasture) {

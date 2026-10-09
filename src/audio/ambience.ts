@@ -27,8 +27,8 @@ export interface AmbienceState {
   soon: Group | null;
 }
 
-/** Whose a piece is: the giant's visit, the Moon Hall. Each has its own volume (`gains`), and they're fetched together. */
-type Group = 'scene' | 'hall';
+/** Whose a piece is: the giant's visit, the Moon Hall, the action music (anyone's: `Ambience.action`). Each has its own volume (`gains`), and they're fetched together. */
+type Group = 'scene' | 'hall' | 'action';
 interface Piece {
   of: Group;
   /** Seconds it takes to come in. */
@@ -51,7 +51,14 @@ const CUES = {
   moonhall_dark_hall_loop: { of: 'hall', in: 4, loop: 72 },
   moonhall_lamp_lights: { of: 'hall', in: 0.5, over: 3, ends: true },
   moonhall_flying_loop: { of: 'hall', in: 3, over: 4, loop: 64 },
+  // The action music: not any one scene's. Two loops the same length, bar for bar, so the push takes over
+  // from the drive where the drive had got to (`phase`) and never starts again.
+  action_loop: { of: 'action', in: 3, loop: 360 / 7 },
+  action_final_push_loop: { of: 'action', in: 3, loop: 360 / 7 },
 } satisfies Record<string, Piece>;
+/** What `Ambience.action` takes: the action loop, its final push, or neither. */
+export type Action = 'drive' | 'push' | null;
+const ACTION: Record<'drive' | 'push', Cue> = { drive: 'action_loop', push: 'action_final_push_loop' };
 export type Cue = keyof typeof CUES;
 const piece = (c: Cue): Piece => CUES[c];
 /** A piece dropped with nothing after it goes out over this long (s). */
@@ -61,7 +68,7 @@ const TAIL = 2;
 /** Seconds with no music at all after the last piece, before the loop starts back in. */
 const REST = 4;
 
-interface Voice { cue: Cue; src: AudioBufferSourceNode; gain: GainNode; level: number; ends: number; out: number; done: boolean }
+interface Voice { cue: Cue; src: AudioBufferSourceNode; gain: GainNode; level: number; /** When its loop was at 0 (context time). */ t0: number; ends: number; out: number; done: boolean }
 
 const FILE = 'warm_field_v3_exploration_loop';
 /** The loop's exact length in seconds (what scripts/audio.mjs prints). */
@@ -78,8 +85,9 @@ export class Ambience {
    * The music's volume, apart from the effects'. 1 is the file as it was made.
    * `scene`: the giant's pieces, times that (they're mastered 3 dB or so under the loop).
    * `hall`: the Moon Hall's, times that.
+   * `action`: the action music's, times that.
    */
-  readonly gains = { music: 0.35, scene: 1.4, hall: 1 };
+  readonly gains = { music: 0.35, scene: 1.4, hall: 1, action: 1 };
   private bytes: ArrayBuffer | null = null;
   private buf: AudioBuffer | null = null;
   private decoding = false;
@@ -101,6 +109,31 @@ export class Ambience {
   private asked: Cue | null = null;
   private due: Cue | null = null;
   private rest = 0;
+  private acting: Action = null;
+  private back = false;
+
+  /**
+   * The action music, for any scene that wants it: 'drive' cross-fades the action loop in over whatever is
+   * playing, 'push' cross-fades on into its final stretch (in step, not from the top), null cross-fades back
+   * to what belongs to where you are. Say it once or every frame. A scene's own piece (`AmbienceState.cue`) wins.
+   */
+  action(a: Action) {
+    this.acting = a;
+    if (a) this.fetch('action');
+  }
+  /** An action scene is coming: have its music fetched, so it comes in on its moment. */
+  prepare() { this.fetch('action'); }
+
+  private fetch(want: Group) {
+    if (this.fetched.has(want)) return;
+    this.fetched.add(want);
+    for (const c of Object.keys(CUES) as Cue[]) {
+      if (piece(c).of !== want) continue;
+      fetch(`${import.meta.env.BASE_URL}audio/${c}.mp3`)
+        .then((r) => (r.ok ? r.arrayBuffer() : Promise.reject(new Error(c))))
+        .then((b) => (this.cueBytes[c] = b), () => { /* that one stays silent */ });
+    }
+  }
 
   constructor(private sfx: Sfx) {
     fetch(`${import.meta.env.BASE_URL}audio/${FILE}.mp3`)
@@ -126,19 +159,12 @@ export class Ambience {
   /** The scene pieces: begins the one asked for, fades the rest, and counts out the quiet after. */
   private score(dt: number, s: AmbienceState, ctx: AudioContext) {
     const all = Object.keys(CUES) as Cue[];
+    const cue = s.cue ?? (this.acting && ACTION[this.acting]);
     const want = s.cue ? piece(s.cue).of : s.soon;
-    if (want && !this.fetched.has(want)) {
-      this.fetched.add(want);
-      for (const c of all) {
-        if (piece(c).of !== want) continue;
-        fetch(`${import.meta.env.BASE_URL}audio/${c}.mp3`)
-          .then((r) => (r.ok ? r.arrayBuffer() : Promise.reject(new Error(c))))
-          .then((b) => (this.cueBytes[c] = b), () => { /* that one stays silent */ });
-      }
-    }
-    if (s.cue !== this.asked) {
-      this.asked = this.due = s.cue;
-      if (!s.cue) for (const v of this.voices) v.out ||= DROP;
+    if (want) this.fetch(want);
+    if (cue !== this.asked) {
+      this.asked = this.due = cue;
+      if (!cue) for (const v of this.voices) v.out ||= piece(v.cue).of === 'action' ? FADE : DROP;
     }
     if (this.due) {
       // All of its group are decoded at the first, so the later ones come in on their moment.
@@ -156,15 +182,23 @@ export class Ambience {
         gain.gain.value = 0;
         src.buffer = buf;
         src.connect(gain).connect(this.gate);
-        const v: Voice = { cue, src, gain, level: 0, ends: p.loop ? Infinity : ctx.currentTime + buf.duration, out: 0, done: false };
+        const v: Voice = { cue, src, gain, level: 0, ends: p.loop ? Infinity : ctx.currentTime + buf.duration, out: 0, done: false, t0: ctx.currentTime };
         src.onended = () => (v.done = true);
         // A loop never restarts while it's asked for: it goes round a window one period long inside its file.
-        if (p.loop) { src.loop = true; src.loopStart = PAD; src.loopEnd = PAD + p.loop; src.start(0, PAD); } else src.start();
+        if (p.loop) {
+          // One action loop into the other carries on from the same bar.
+          const from = p.of === 'action' ? this.voices.find((o) => o.cue !== cue && piece(o.cue).of === 'action') : undefined;
+          const phase = from ? (ctx.currentTime - from.t0) % p.loop : 0;
+          v.t0 = ctx.currentTime - phase;
+          src.loop = true; src.loopStart = PAD; src.loopEnd = PAD + p.loop; src.start(0, PAD + phase);
+        } else src.start();
         this.voices.push(v);
         this.due = null;
       }
     }
     const had = this.voices.length > 0;
+    // Action music on its way out with nothing after it: the loop comes back in under it, and no quiet between.
+    if (had) this.back = this.voices.every((v) => v.out > 0 && piece(v.cue).of === 'action');
     for (const v of this.voices) {
       const p = piece(v.cue);
       v.level = Math.min(1, Math.max(0, v.level + dt / (v.out ? -v.out : p.in)));
@@ -175,7 +209,7 @@ export class Ambience {
       if (v.done) { v.src.onended = null; try { v.src.stop(); } catch { /* already ended */ } v.gain.disconnect(); }
     }
     this.voices = this.voices.filter((v) => !v.done);
-    if (had && !this.voices.length) this.rest = REST;
+    if (had && !this.voices.length) this.rest = this.back ? 0 : REST;
     else if (!had) this.rest = Math.max(0, this.rest - dt);
     // (Kept between pieces only where more are to come: in the hall, between the lamp's and getting on her.)
     if (!this.voices.length && !this.due && !(s.cue && s.soon)) this.cueBufs = null;
@@ -188,7 +222,7 @@ export class Ambience {
     this.shut();
     if (ctx.state !== 'running') return;
     this.score(dt, s, ctx);
-    const hush = s.hush || this.voices.length > 0 || this.rest > 0;
+    const hush = s.hush || (this.voices.length > 0 && !this.back) || this.rest > 0;
 
     if (!this.src) {
       if (hush) return;

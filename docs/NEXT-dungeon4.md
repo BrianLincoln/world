@@ -14,8 +14,11 @@ from the first cliff edge. The wind keeps blowing the whole time (owner:
 Under the fourth ring (`ring4` in main), which opens when the giant lies
 down there after the third homecoming, takes you down, lifts you out and
 shuts for good once the light is taken. Then its offering (`offering4`: the
-short telling, the shrine a wurm in stone). **Nothing follows the offering
-yet**: the giant stays where it lies.
+short telling, the shrine a wurm in stone). Then the fourth homecoming
+(`homecoming4`, 2026-10-08: the standard one, `who: 3, leg: 4`): a crow
+flies the fourth spirit home, and the giant gets up and walks to a fifth
+ring and lies down. That ring is bare stones: nothing is under it yet.
+Check with `scripts/drop.mjs <dir> home4 [sandbox]`.
 Dev: the progress selector's "7.1 ring (dungeon 4)" and "7.2 offering
 (dungeon 4 done)" (`?fresh=1&cp=ring4`, `cp=offer4`), `?dungeon=4` (or
 `?dungeon=4,x,z`), `__ow.enterChasm()`, `__ow.thirdDone()`,
@@ -65,8 +68,17 @@ Dev: the progress selector's "7.1 ring (dungeon 4)" and "7.2 offering
   (`climbHintCanvas`) until you've been up one; turn her to the far face
   (one tap) and she goes straight up it (her own wall climb, through
   `DropCave.climbTop`), 172 m, about 35 s at a walk, over the far lip in
-  front of the doorway and on to the light. A small light goes with you up
-  the dark face.
+  front of the doorway and on to the light.
+- **The cavern wakes** (owner, 2026-10-07: after the bottom it was "just
+  kinda dark"; "maybe there is some magic that brightens up the room"):
+  the first time you ride her out on to the ledge, every lantern of the
+  way down wakes, one after another from the ledge up to the lip, and the
+  dark goes down over 5 s to under the ledge (`woken`, saved; `darkY`).
+  The cavern and its pillars are seen. Under the ledge there is still
+  nothing.
+- **The camera on the climb** stands well back from the face, square on to
+  it and about level (`wallCamK` in main), unless you move it. No pillar
+  stands within 22 m of the far face over the ledge, to leave it room.
 - **She can't go into the dark:** riding, the ledge's edges and the lips
   hold her (she stops), but for the far lip over the ledge, where the way
   down the face comes out on it.
@@ -128,8 +140,14 @@ Dev: the progress selector's "7.1 ring (dungeon 4)" and "7.2 offering
   too.
 
 - What follows the offering (a fourth homecoming, and where the giant goes).
+  (Its offering does have the tower now, as every dungeon's does: DESIGN.md
+  "Dungeons", step 3.)
 
 ## Also changed
+
+- Coming up out of any dungeon mounted, the creature is no longer stood
+  beside the ring while the arms lift you and then jumped under you: it
+  isn't drawn until you're on it (`bringUp` in main).
 
 - `mobs/wurm.ts`: straight up or down a sheer wall her body's segments
   were turned whichever way the maths fell (their back to the world's north

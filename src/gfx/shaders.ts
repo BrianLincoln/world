@@ -74,7 +74,8 @@ void main() {
   if (p.y < 0.0) p.y -= push * min(1.0, -p.y * 2.0);
   vec4 wp = modelMatrix * vec4(p, 1.0);
   // The giant's footprints are pressed in here, not built into the chunk.
-  float lift = printLift(soleSdf(wp.xz, printAt(wp.xz)));
+  vec4 pr = printAt(wp.xz);
+  float lift = printLift(soleSdf(wp.xz, pr)) * printDeep(pr);
   wp.y += lift;
   vH += lift;
   vWorld = wp.xyz;
@@ -210,9 +211,9 @@ void main() {
   vec4 pr = printAt(vWorld.xz);
   float ps = soleSdf(vWorld.xz, pr);
   if (ps < 4.5) {
-    float l0 = printLift(ps);
+    float l0 = printLift(ps), deep = printDeep(pr);
     vec2 sg = vec2(soleSdf(vWorld.xz + vec2(0.3, 0.0), pr), soleSdf(vWorld.xz + vec2(0.0, 0.3), pr));
-    n = normalize(vec3(n.x - (printLift(sg.x) - l0) / 0.3, n.y, n.z - (printLift(sg.y) - l0) / 0.3));
+    n = normalize(vec3(n.x - (printLift(sg.x) - l0) * deep / 0.3, n.y, n.z - (printLift(sg.y) - l0) * deep / 0.3));
     // The wall that faces away from the light, and the crescent of shadow
     // it throws across the floor: what makes it read as a hole.
     vec2 outw = normalize(sg - ps + 1e-5);
@@ -222,6 +223,8 @@ void main() {
     float warm = ceil(printWarmth(pr) * 4.0) / 4.0;
     float wob = (nz2.g - 0.5) * 0.7;
     if (ps < -1.3 + wob * 0.5) {
+      // (Being shovelled full: its floor is fresh earth, not grass.)
+      if (deep < 1.0) { c = cPrintEarth; grass = false; em = 0.0; }
       if (warm > 0.0) {
         c = mix(cPrintEarth, cPrintWarm, warm);
         grass = false;
@@ -1319,20 +1322,20 @@ vec3 holeAxis(int h) {
   if (gKind > 0.5) return normalize(DOOR_C);
   return h == 1 ? normalize(EYE_L) : normalize(EYE_R);
 }
-// A little house carved over the home tower's brow: distance to its outline.
+// A little house carved over the home tower's doorway, filled in: how much of it is here (0..1).
 float houseMark(vec3 d) {
-  vec3 c = normalize(vec3(0.0, 0.74, 0.67));
+  vec3 c = normalize(vec3(0.0, 0.47, 0.88));
   vec3 r = normalize(cross(vec3(0.0, 1.0, 0.0), c));
   vec3 u = cross(c, r);
-  if (dot(d, c) < 0.8) return 1.0;
+  if (dot(d, c) < 0.8) return 0.0;
   vec2 q = vec2(dot(d, r), dot(d, u)) / 0.12;
-  // Walls (a box) and a pitched roof over them.
-  vec2 b = abs(q - vec2(0.0, -0.35)) - vec2(0.62, 0.55);
+  // Walls (a box) and a pitched roof over them, and its own little doorway left as stone.
+  vec2 b = abs(q - vec2(0.0, -0.35)) - vec2(0.74, 0.55);
   float box = length(max(b, 0.0)) + min(max(b.x, b.y), 0.0);
   vec2 p = vec2(abs(q.x), q.y - 0.2);
   float roof = max(dot(p, normalize(vec2(0.62, 0.78))) - 0.62, -p.y);
   float door = max(abs(q.x) - 0.17, abs(q.y + 0.62) - 0.28);
-  return min(min(abs(min(box, roof)), abs(door)), 1.0);
+  return (1.0 - smoothstep(0.06, 0.12, min(box, roof))) * smoothstep(0.0, 0.06, door);
 }
 void main() {
   float lit = vH1.z;
@@ -1468,11 +1471,11 @@ void main() {
     float nearEye = max(1.0 - eyeR(eyeUV(d, normalize(EYE_L), 0.0)), 1.0 - eyeR(eyeUV(d, normalize(EYE_R), 0.0)));
     float lip = step(-0.2, nearEye) * step(0.0, d.z);
     col = mix(col, stone * mix(uLightCol, uEmber, 0.6), lit * lip * 0.5);
-    if (home > 0.5 && !isDoor) {
+    if (home > 0.5 && isDoor) {
       float m = houseMark(d);
-      float line = 1.0 - smoothstep(0.1, 0.16, m);
-      col = mix(col, mix(stone * uShadeCol * 0.75, core, lit), line);
-      em = max(em, line * lit);
+      float on = gOpen > 0.5 ? shaftGlow : 0.0;
+      col = mix(col, mix(stone * uShadeCol * 0.7, core, on), m);
+      em = max(em, m * on);
     }
     // Targeted from another tower (the tower camera): a warm rim.
     if (hl > 0.0) {
@@ -1661,7 +1664,8 @@ vec2 mouthUV(vec3 d) {
 float gape(vec3 d) {
   if (dot(d, MOUTH_C) < 0.4) return 9.0;
   vec2 mq = mouthUV(d);
-  vec2 o = vec2(mq.x / (0.2 + 0.2 * uMouth), (mq.y + 0.13 * uMouth) / (0.33 * uMouth + 1e-3));
+  // (Tall, and most of it downward: a crow goes in with a light hanging under its feet, and that has to clear the bottom lip.)
+  vec2 o = vec2(mq.x / (0.2 + 0.2 * uMouth), (mq.y + 0.17 * uMouth) / (0.4 * uMouth + 1e-3));
   return dot(o, o);
 }
 void main() {

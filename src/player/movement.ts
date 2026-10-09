@@ -615,6 +615,8 @@ export class GallopState {
   wall = 0;
   wallX = 0;
   wallZ = 0;
+  /** A snake steerer on a wall, turned to crawl along it: 1 to the right (as you face the wall), -1 to the left, 0 up or down. */
+  wallSide = 0;
   /** Snake steerers: crawling on by itself, and last frame's stick x (for presses). */
   crawl = false;
   stickX = 0;
@@ -871,6 +873,7 @@ export function gallopUpdate(st: GallopState, b: Body, ctx: MoveContext, s: Moun
       b.pos.x += fx * s.radius * 0.5;
       b.pos.z += fz * s.radius * 0.5;
       st.wall = -1;
+      st.wallSide = 0;
       st.wallX = -fx;
       st.wallZ = -fz;
       b.vel.y = 0;
@@ -882,6 +885,7 @@ export function gallopUpdate(st: GallopState, b: Body, ctx: MoveContext, s: Moun
         const top = world.climbTop(b.pos.x + fx * (s.radius + 0.1), b.pos.z + fz * (s.radius + 0.1), s.radius * 0.4);
         if (top > b.pos.y + 0.5) {
           st.wall = 1;
+          st.wallSide = 0;
           st.wallX = fx;
           st.wallZ = fz;
         }
@@ -914,12 +918,18 @@ function climbWall(st: GallopState, b: Body, ctx: MoveContext, s: MountSpec, wis
   const face = (x: number, z: number) => Math.max(world.climbTop?.(x, z, r * 0.4) ?? -Infinity, world.groundHeight(x, z));
   let vy = Math.abs(into) > 0.25 ? Math.sign(into) * gait * Math.min(1, wl) : 0;
   if (s.trait?.snap) {
-    // A snake steerer crawls on the way it's facing; a turn doubles it back.
-    if (snake) st.wall = -st.wall;
-    vy = st.crawl ? st.wall * gait : 0;
+    // A snake steerer crawls on the way it's facing, and a press is a right
+    // angle on the wall as it is on the ground: from going up, right is along
+    // the face to the right, right again is down, and so round.
+    if (snake) {
+      if (st.wallSide) { st.wall = -snake * st.wallSide; st.wallSide = 0; }
+      else st.wallSide = snake * st.wall;
+    }
+    vy = st.crawl && !st.wallSide ? st.wall * gait : 0;
   }
+  const ahead = face(b.pos.x + nx * (r + 0.1), b.pos.z + nz * (r + 0.1));
   // Shuffled off the end of the wall: nothing to hold, so it slides down.
-  if (face(b.pos.x + nx * (r + 0.1), b.pos.z + nz * (r + 0.1)) < b.pos.y - 0.3) vy = -gait;
+  if (ahead < b.pos.y - 0.3) { vy = -gait; st.wallSide = 0; }
   if (vy) st.wall = Math.sign(vy);
   // Shuffle along the face (the walls hold it off them).
   if (Math.abs(side) > 0.25 && !s.trait?.snap) {
@@ -927,10 +937,21 @@ function climbWall(st: GallopState, b: Body, ctx: MoveContext, s: MountSpec, wis
     b.pos.z += nx * side * gait * 0.6 * dt;
     world.collide?.(b.pos, b.vel, r);
   }
+  let along = 0;
+  if (st.wallSide && st.crawl) {
+    // Along the face, as far as there's face to hold: at its end it stops (turn again to go on up or down).
+    const sx = -nz * st.wallSide, sz = nx * st.wallSide, step = gait * dt;
+    if (face(b.pos.x + sx * (step + r) + nx * (r + 0.1), b.pos.z + sz * (step + r) + nz * (r + 0.1)) >= b.pos.y - 0.3) {
+      b.pos.x += sx * step;
+      b.pos.z += sz * step;
+      world.collide?.(b.pos, b.vel, r);
+      along = gait;
+    }
+  }
   b.pos.y += vy * dt;
-  b.heading = Math.atan2(nx, nz) + (st.wall < 0 ? Math.PI : 0);
+  b.heading = st.wallSide ? Math.atan2(-nz * st.wallSide, nx * st.wallSide) : Math.atan2(nx, nz) + (st.wall < 0 ? Math.PI : 0);
   const fx = Math.sin(b.heading), fz = Math.cos(b.heading);
-  st.speed = Math.abs(vy);
+  st.speed = Math.abs(vy) + along;
   b.vel.set(fx * st.speed, 0, fz * st.speed);
   b.grounded = true;
   if (vy > 0) {
@@ -951,7 +972,7 @@ function climbWall(st: GallopState, b: Body, ctx: MoveContext, s: MountSpec, wis
       if (vy < 0) st.speed = gait;
     }
   }
-  if (!st.wall) b.vel.set(fx * st.speed, 0, fz * st.speed);
+  if (!st.wall) { st.wallSide = 0; b.vel.set(fx * st.speed, 0, fz * st.speed); }
 }
 
 /**

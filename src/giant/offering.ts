@@ -5,6 +5,8 @@ import { makeSolidMaterial } from '../gfx/materials';
 import { rockhopperStatue } from '../mobs/rockhopper';
 import type { Body } from '../player/movement';
 import type { Sfx } from '../story/audio';
+import type { Beacons } from '../story/beacons';
+import type { Tower } from '../world/towers';
 import type { DungeonSite } from '../world/worldgen';
 import { Birds, CLAW } from './birds';
 import type { Giant } from './giant';
@@ -20,7 +22,12 @@ import type { Ring } from './ring';
 // spirit goes down with it, and what's left is paving and a shrine: a stone
 // rockhopper on a plinth, with a bowl on its back. You get down off
 // whatever brought you up, walk to it with the light in your mittens and
-// hold it up; it leaves them and settles in the bowl. One of the giant's crows comes down off
+// hold it up; it leaves them and settles in the bowl. Then the ground heaves
+// (the owner, 2026-10-07): you're knocked back and run out through the ring's
+// stones, and turn to watch a beacon tower come up out of the ring under the
+// shrine and carry it up on its head, the light in the bowl. Its spirit
+// wakes: it is a lit tower from then on, one you can go up into and fly from.
+// The rest is as it was, from up there. One of the giant's crows comes down off
 // its head in one swoop, levels out, and takes the light in its claws as it
 // passes; it pulls up and hangs in the air with it, turning to the giant.
 // The giant's eyes open, and then its mouth, wide: a real hole into the
@@ -50,12 +57,18 @@ export interface OfferDeps {
   hands(out: THREE.Vector3): THREE.Vector3;
   /** How far the nearest standing tree's trunk is from a point (Infinity if none within `max`). */
   tree(x: number, z: number, max: number): number;
+  /** The tower that comes up out of this ring (`WorldGen.ringTowers`), and the towers' keeper. */
+  tower: Tower;
+  towers: Pick<Beacons, 'raise' | 'stand' | 'bury' | 'release' | 'isUp' | 'crown'>;
+  /** Whatever creature is standing within `r` of the ring's middle is put by `to`, out of the tower's way. */
+  clear(r: number, to: THREE.Vector3): void;
   saveKey: string;
 }
 
 /**
  * The sequence, in seconds from when the light leaves your mittens. It
- * goes to the bowl (`set`); the crow leaves the giant's head at `come` and
+ * goes to the bowl (`set`); the ground heaves (`heave`) and the tower takes
+ * `rise` to come up under the shrine, and stands, lit (`up`); the crow leaves the giant's head at `come` and
  * takes `dive` to swoop down, level out and be over the bowl, where it
  * takes the light in its claws without stopping (`has`); it pulls up and
  * round, and hangs in the air with it. The giant's eyes open at `wake` (the camera cuts to
@@ -64,19 +77,20 @@ export interface OfferDeps {
  * a second or so before; the mouth starts to shut behind it at `shut` and
  * is shut at `closed`; the smile comes at `smile`; `end`.
  */
-const timing = (set: number, come: number, dive: number, gaps: [number, number, number, number], climb: number, smileAfter: number, hold: number) => {
+const timing = (set: number, rise: number, wait: number, dive: number, gaps: [number, number, number, number], climb: number, smileAfter: number, hold: number) => {
+  const heave = set + 0.5, up = heave + rise, come = up + wait;
   const has = come + dive;
   const wake = has + gaps[0], cut = wake + gaps[1], open = cut + gaps[2], fly = open + gaps[3];
   const gone = fly + climb, shut = gone - 0.7, closed = shut + 0.75, smile = gone + smileAfter, end = smile + hold;
-  return { set, come, dive, has, wake, cut, open, fly, climb, gone, shut, closed, smile, end };
+  return { set, heave, rise, up, come, dive, has, wake, cut, open, fly, climb, gone, shut, closed, smile, end };
 };
-const T = timing(1.7, 1.2, 4.3, [0.4, 1.0, 1.7, 1.4], 4.8, 1.8, 3.4);
+const T = timing(1.7, 5.6, 0.9, 4.3, [0.4, 1.0, 1.7, 1.4], 4.8, 1.8, 3.4);
 export type OfferTiming = typeof T;
 /**
  * The same, told quickly (dungeon 2's: the owner found the first at risk of
- * wearing thin): about 13 s from the light leaving you, 17 from coming up.
+ * wearing thin): about 18 s from the light leaving you, 22 from coming up.
  */
-export const OFFER_SHORT: OfferTiming = timing(1.3, 0.4, 3.0, [0.2, 0.8, 1.0, 0.9], 3.6, 1.2, 2.2);
+export const OFFER_SHORT: OfferTiming = timing(1.3, 4.4, 0.6, 3.0, [0.2, 0.8, 1.0, 0.9], 3.6, 1.2, 2.2);
 
 /** What differs from one dungeon's offering to the next. Left out: dungeon 1's. */
 export interface OfferOpts {
@@ -92,6 +106,10 @@ const PAUSE = 0.7;
 const MARK = 2.7, PACE = 1.5, RAISE = 1.1, WALK_MAX = 7;
 /** The shrine: its plinth's radius (what you can't walk through) and height, how big the stone rockhopper is beside a live one, and how far over the ground the light sits in the bowl on its back. */
 const FOOT_R = 1.5, PLINTH = 0.5, STATUE = 1.35, BOWL_Y = PLINTH + STATUE * 1.33 + 0.42;
+/** The tower coming up: how far from the ring's middle you watch it from (m: out through the stones, in front of its door), how long you stumble back before you turn and run (s) and how fast (m/s), how hard it shakes (m), and the camera behind you: how far back, aside and up (m). */
+const WATCH = 17.5, KNOCK = 0.4, RUN = 6.6, SHAKE = 0.07, RISE_BACK = 3.2, RISE_ASIDE = 4.6, RISE_UP = 0.9;
+/** How long the close camera stays as the ground heaves (s), how long the low one stays once the tower is up (s), and the one up by the shrine for the crow: how far back from the bowl (away from the giant), aside, and over it (m). */
+const HEAVE_HOLD = 1.0, RISE_HOLD = 1.3, TOP_BACK = 8.2, TOP_ASIDE = 4.8, TOP_UP = 0.4;
 /** The crow's swoop: how far out from the bowl it's down and level (m), how far round from the giant toward the near camera it comes in (rad), how long before the bowl its claws start down (s), and how far over the bowl it hangs afterwards (m). */
 const LEVEL = 20, ASKEW = 0.7, CLAWS = 0.8, HANG = 3.5;
 /** The camera for the giant's face: how far in front of it (toward the ring), how far to one side, and how far above (m). */
@@ -99,13 +117,16 @@ const CAM_FRONT = 40, CAM_ASIDE = 15, CAM_ABOVE = 2;
 /** The light's size in your mittens and in the bowl, and under the crow (as the lights the other crows carry). */
 const ORB = 0.34, ORB_CROW = 0.95;
 /** The cameras' field of view: by the shrine, close on the giant's face as it wakes, back for the crow flying in, and on the smile. */
-const FOV = 36, FOV_FACE = 20, FOV_WIDE = 40, FOV_SMILE = 25;
+const FOV = 36, FOV_RISE = 64, FOV_TOP = 40, FOV_FACE = 20, FOV_WIDE = 40, FOV_SMILE = 25;
 /** The crow's way in: how far out in front of the lips it lines up, and how far past the middle of the head it gets (see `Giant.throat`). */
 const LINE_UP = 5, DEEP_IN = -0.2;
+/** The crow flies in this far over the middle of the mouth (m): the light hangs under its feet, and it's the two of them together that go through the middle, clear of both lips. */
+const OVER_MID = 1.0;
 /** The grin it keeps. */
 const GRIN_KEEP = 0.55;
 
 const v1 = new THREE.Vector3(), v2 = new THREE.Vector3();
+const e1 = new THREE.Euler();
 const ss = THREE.MathUtils.smoothstep;
 
 /** Flat stones laid over the ground where the field was: one mesh, each stone on the slope where it lies. */
@@ -175,6 +196,15 @@ export class Offering {
   private planned = false;
   private staged = false;
   private camNear = new THREE.Vector3();
+  /** Where you watch the tower come up from, the camera for it, and whether you've got there. */
+  private watch = new THREE.Vector3();
+  private camRise = new THREE.Vector3();
+  /** The camera up by the shrine once the tower has it (set as it's first wanted), and which camera had the last frame (a cut starts its aim afresh). */
+  private camTop = new THREE.Vector3();
+  private topSet = false;
+  private shot = '';
+  private there = false;
+  private dustT = 0;
   private camFace = new THREE.Vector3();
   /** The crow's swoop: level from `run` to `over` the bowl, on by way of `pull` and up to `hang`. Its speed down (m/s), and when it came to hang (-1: not yet). */
   private run = new THREE.Vector3();
@@ -241,17 +271,35 @@ export class Offering {
     const k = this.pick(this.camNear, [[-7.4, 4.6], [-7.4, -4.6], [-7.4, 5.8], [-7.4, -5.8], [-8.6, 3.6], [-8.6, -3.6]], 2.2, 3);
     this.side = k % 2 ? -1 : 1;
     // The stone rockhopper stands side on to the way you come up and to the giant, its head to the near camera's side.
-    this.statue.rotation.y = Math.atan2(this.p.x * this.side, this.p.z * this.side);
-    // The gap between two of the ring's stones nearest the side away from the giant: you come up in line with it,
-    // so the camera behind you looks in through it rather than at the back of a stone.
-    const turn = (Math.PI * 2) / 9, back = Math.atan2(-this.u.z, -this.u.x);
-    this.gap = 0.2 + (Math.round((back - 0.2) / turn - 0.5) + 0.5) * turn;
-    this.mark.copy(this.centre).add(v1.set(Math.cos(this.gap) * MARK, 0, Math.sin(this.gap) * MARK));
+    // (The shrine is turned as the tower's head is: it rides on it.)
+    const tw = this.d.tower;
+    this.statue.rotation.y = Math.atan2(this.p.x * this.side, this.p.z * this.side) - tw.yaw;
+    // The gap between two of the ring's stones on the side away from the giant, the one the tower faces out through:
+    // you come up in line with it, so the camera behind you looks in through it rather than at the back of a stone.
+    this.gap = Math.atan2(Math.cos(tw.yaw), Math.sin(tw.yaw));
+    const gx = Math.cos(this.gap), gz = Math.sin(this.gap);
+    this.mark.copy(this.centre).add(v1.set(gx * MARK, 0, gz * MARK));
+    this.watch.copy(this.centre).add(v1.set(gx * WATCH, 0, gz * WATCH));
+    this.watch.y = this.d.ground(this.watch.x, this.watch.z);
+    // The camera for the tower coming up: low on the ground behind you and to one side, inside the ring's own
+    // clearing (further back it's in the trees), looking steeply up at it. The place with the clearest line to it.
+    let best = -Infinity;
+    for (const [n, aside] of [RISE_ASIDE, -RISE_ASIDE, RISE_ASIDE * 1.6, -RISE_ASIDE * 1.6, RISE_ASIDE * 0.5, -RISE_ASIDE * 0.5].entries()) {
+      const sd = aside * this.side;
+      const x = this.watch.x + gx * RISE_BACK - gz * sd, z = this.watch.z + gz * RISE_BACK + gx * sd;
+      let clear = Math.min(this.d.tree(x, z, 12), 5);
+      for (let k = 1; k <= 4; k++) clear = Math.min(clear, this.d.tree(x + (this.centre.x - x) * k * 0.18, z + (this.centre.z - z) * k * 0.18, 12) - 0.5);
+      // (Nor right behind one of the ring's stones.)
+      for (let i = 0; i < 9; i++) { const a = 0.2 + (i / 9) * Math.PI * 2; clear = Math.min(clear, Math.hypot(this.centre.x + Math.cos(a) * this.d.site.r - x, this.centre.z + Math.sin(a) * this.d.site.r - z) - 3); }
+      if (clear - n * 0.3 > best) { best = clear - n * 0.3; this.camRise.set(x, this.d.ground(x, z) + RISE_UP, z); }
+    }
   }
 
   /** Where the ring's arms set you down when you come up with the light: short of the middle, facing it, the giant beyond. */
   arrival(out: THREE.Vector3) {
     this.plan();
+    // (Once the tower is up: where you watched it from.)
+    if (this.state === 'placed' || this.state === 'given') return out.copy(this.watch);
     return out.copy(this.centre).add(v1.set(Math.cos(this.gap) * 5.6, 0, Math.sin(this.gap) * 5.6));
   }
   get arrivalHeading() { return Math.atan2(-Math.cos(this.gap), -Math.sin(this.gap)); }
@@ -274,6 +322,8 @@ export class Offering {
     this.state = st;
     this.plan();
     this.d.ring.seal(true);
+    // (The light in the bowl: the tower is up under it.)
+    if (st !== 'held') { this.d.towers.stand(this.d.tower.id, true); this.there = true; this.seat(); }
     this.orbAt.copy(st === 'held' ? v1.copy(this.d.body.pos).setY(this.d.body.pos.y + 2) : this.bowl);
     if (st === 'given') this.keep(true);
     if (st === 'placed') this.popT = 9;
@@ -300,7 +350,7 @@ export class Offering {
 
   /** The shrine is a thing you can't walk through. */
   collide(pos: THREE.Vector3, vel: THREE.Vector3, r: number) {
-    if (!this.d.ring.sealed || this.d.ring.sealK < 0.6) return;
+    if (!this.d.ring.sealed || this.d.ring.sealK < 0.6 || this.d.towers.isUp(this.d.tower.id)) return;
     const dx = pos.x - this.centre.x, dz = pos.z - this.centre.z, dist = Math.hypot(dx, dz), min = FOOT_R + r * 0.8;
     if (dist >= min || dist < 1e-4 || pos.y > this.centre.y + BOWL_Y) return;
     const nx = dx / dist, nz = dz / dist, vn = vel.x * nx + vel.z * nz;
@@ -373,7 +423,14 @@ export class Offering {
     g.face(v1);
     const fx = v1.x - c.x, fz = v1.z - c.z, along = fx * u.x + fz * u.z, across = fx * p.x + fz * p.z, up = v1.y + CAM_ABOVE - c.y;
     this.pick(this.camFace, [[along - CAM_FRONT, across + CAM_ASIDE * side], [along - CAM_FRONT, across - CAM_ASIDE * side], [along - CAM_FRONT + 8, across + (CAM_ASIDE + 5) * side], [along - CAM_FRONT + 8, across - (CAM_ASIDE + 5) * side]], up, 4);
-    // The crow's marks. It comes in level between two of the ring's stones, from the giant's side and round toward
+    this.atNow.copy(this.bowl);
+  }
+
+  /** The crow's marks, from where the bowl is (up on the tower by the time it's sent for). */
+  private marks() {
+    const c = this.centre, u = this.u, p = this.p, side = this.side;
+    this.seat(false);
+    // It comes in level from the giant's side and round toward
     // the near camera's: across the view and away, not at you. (Over the bowl its claws, `CLAW` under it, are on
     // the light.) Then on, up and round on the far side, to hang there.
     const turn = (Math.PI * 2) / 9, want = Math.atan2(u.z, u.x) - side * ASKEW, a = 0.2 + (Math.round((want - 0.2) / turn - 0.5) + 0.5) * turn;
@@ -382,7 +439,37 @@ export class Offering {
     this.run.copy(this.over).addScaledVector(v2, LEVEL);
     this.pull.copy(this.over).addScaledVector(v2, -5).setY(this.over.y + 2);
     this.hang.copy(c).addScaledVector(u, 1).addScaledVector(p, -side * 7.5).setY(this.over.y + HANG);
-    this.atNow.copy(this.bowl);
+  }
+
+  /** Where the shrine is this frame, and so the bowl: on the ground where it came up, or on the tower's head once that has it. (`bob`: with the head's hop.) */
+  private seat(bob = true) {
+    const c = this.centre, tw = this.d.tower, sh = this.shrine;
+    const rise = ss(this.d.ring.sealK, 0.45, 1);
+    sh.position.set(c.x, c.y - (BOWL_Y + 0.6) * (1 - rise) * (1 - rise), c.z);
+    sh.rotation.set(0, tw.yaw, 0, 'YXZ');
+    if (this.d.towers.isUp(tw.id) && this.d.towers.crown(tw.id, v1, e1, bob).y > c.y) { sh.position.copy(v1); sh.rotation.copy(e1); }
+    this.bowl.set(0, BOWL_Y, 0).applyEuler(sh.rotation).add(sh.position);
+  }
+
+  /** Knocked back from the shrine as the ground heaves, then out through the stones at a run to where you watch from. */
+  private flee(dt: number, mode: string) {
+    const b = this.d.body, T = this.T, since = this.t - T.heave;
+    const dx = this.watch.x - b.pos.x, dz = this.watch.z - b.pos.z, far = Math.hypot(dx, dz);
+    // (On something, a save from part way: it stands where it is. And if anything held you up, you're there by the time the tower is.)
+    if (mode !== 'walk' || far < 0.6) { this.there = true; return; }
+    if (this.t > T.up - 0.4) { b.pos.set(this.watch.x, this.watch.y, this.watch.z); b.vel.set(0, 0, 0); this.there = true; return; }
+    if (since < KNOCK) {
+      // Backwards, still facing it.
+      b.vel.x = Math.cos(this.gap) * 5.5;
+      b.vel.z = Math.sin(this.gap) * 5.5;
+      return;
+    }
+    const pace = Math.min(RUN, 0.8 + far * 3) * 1.25;
+    b.vel.x = (dx / far) * pace;
+    b.vel.z = (dz / far) * pace;
+    let dh = Math.atan2(dx, dz) - b.heading;
+    dh = Math.atan2(Math.sin(dh), Math.cos(dh));
+    b.heading += dh * (1 - Math.exp(-12 * dt));
   }
 
   /** The best of some places for the camera (`along` the way to the giant, `across` it, `up` over the ring's middle): clear of trunks and the ring's stones. */
@@ -409,14 +496,15 @@ export class Offering {
   update(dt: number, mode: string) {
     const T = this.T;
     this.time += dt;
-    const ring = this.d.ring, c = this.centre;
+    const ring = this.d.ring;
     const up = this.state !== 'none' && ring.sealed;
     // The shrine comes up out of the ground as the field closes over it; the paving shows as the field draws in.
+    // (And later the tower comes up under it, and it's on that.)
     const rise = ss(ring.sealK, 0.45, 1), lay = ss(ring.sealK, 0.05, 0.6);
     this.paving.visible = up && lay > 0;
     this.paving.position.y = -0.3 * (1 - lay);
     this.shrine.visible = up && rise > 0;
-    this.shrine.position.set(c.x, c.y - (BOWL_Y + 0.6) * (1 - rise) * (1 - rise), c.z);
+    this.seat();
     this.crow.group.visible = this.state !== 'none' && !this.eaten;
     if (this.state === 'none') return;
     const g = this.d.giant();
@@ -425,9 +513,9 @@ export class Offering {
 
     // The shrine is up: a beat, and you take the light to it. (A save from part way through: on from the light in the bowl.)
     if (this.state === 'held' && ring.sealK >= 1 && this.off < 40) this.approach(dt, mode);
-    else if (this.state === 'placed' && this.t < 0 && this.off < 40) { this.t = T.set; this.stage(); }
+    else if (this.state === 'placed' && this.t < 0 && this.off < 40) { this.t = T.up; this.stage(); }
 
-    if (this.t >= 0) this.play(dt, g);
+    if (this.t >= 0) this.play(dt, g, mode);
     const bird = this.crow.birds[0];
 
     // The light: in your mittens; up to the bowl; in the crow's claws; in through the giant's mouth.
@@ -471,13 +559,30 @@ export class Offering {
   }
 
   /** One frame of the sequence. */
-  private play(dt: number, g: Giant) {
+  private play(dt: number, g: Giant, mode: string) {
     const T = this.T;
     const t0 = this.t, t = (this.t += dt), fx = this.d.sfx, crow = this.crow, bird = crow.birds[0], b = this.d.body;
     const passed = (k: number) => t0 < k && t >= k;
-    this.d.halt();
+    const tw = this.d.tower, tws = this.d.towers;
+    // The ground heaves under the shrine: whatever stood by is out of the way, and so are you.
+    if (passed(T.heave)) { fx.stomp(); this.there = false; this.topSet = false; this.d.clear(WATCH + 2, v1.copy(this.watch).addScaledVector(this.p, -this.side * 7)); this.d.puff(v1.copy(this.centre).setY(this.centre.y + 0.4), 16, 0.6, 5); }
+    const fleeing = t >= T.heave && !this.there;
+    if (fleeing) this.flee(dt, mode); else this.d.halt();
+    // The tower comes up under it, slowly at first, shaking, dust rolling off its stones; and stands, and its spirit wakes.
+    if (t >= T.heave && t < T.up) {
+      const x = (t - T.heave) / T.rise, k = x * x * (3 - 2 * x);
+      tws.raise(tw.id, 0.04 * x + 0.96 * k * k ** 0.35, SHAKE * Math.min(1, x * 6) * ss(1 - x, 0, 0.18));
+      this.dustT -= dt;
+      if (this.dustT <= 0) {
+        this.dustT = 0.16;
+        const a = this.time * 7.3, r = 2 + 7 * k;
+        this.d.puff(v1.set(this.centre.x + Math.cos(a) * r, this.d.ground(this.centre.x + Math.cos(a) * r, this.centre.z + Math.sin(a) * r) + 0.5, this.centre.z + Math.sin(a) * r), 5, 0.55, 2.6);
+        if (Math.floor(t / 0.8) !== Math.floor((t - 0.16) / 0.8)) fx.thud();
+      }
+    }
+    if (passed(T.up)) { tws.stand(tw.id); fx.stomp(); fx.shimmer(); this.d.puff(v1.copy(this.centre).setY(this.centre.y + 0.6), 20, 0.7, 9); }
     // You turn to watch: the shrine, the crow while it's down here, then the giant.
-    {
+    if (!fleeing) {
       const look = t < T.come ? this.bowl : t < T.wake ? bird.pos : g.centre;
       let dh = Math.atan2(look.x - b.pos.x, look.z - b.pos.z) - b.heading;
       dh = Math.atan2(Math.sin(dh), Math.cos(dh));
@@ -488,6 +593,7 @@ export class Offering {
     // (A save from part way: it comes the quicker, to be there on the beat.)
     if (bird.state === 'roost' && t >= T.come && t < T.has) {
       const dur = T.has - t;
+      this.marks();
       bird.grab = bird.fore = 0;
       bird.holds = false;
       this.hung = -1;
@@ -524,11 +630,11 @@ export class Offering {
     // And the crow flies up and straight in, the light under it.
     // (Lined up out in front of the mouth, then along that line through the lips and on to the back of the hollow.)
     if (passed(T.fly)) {
-      crow.send(0, 'climb', g.throat(v1, LINE_UP), g.throat(v2, DEEP_IN), T.climb, 'hover');
+      crow.send(0, 'climb', g.throat(v1, LINE_UP).setY(v1.y + OVER_MID), g.throat(v2, DEEP_IN).setY(v2.y + OVER_MID), T.climb, 'hover');
       g.gulp = 1;
       fx.whoosh();
     }
-    if (bird.state === 'climb' && t >= T.fly) { g.throat(bird.b, LINE_UP); g.throat(bird.c, DEEP_IN); }
+    if (bird.state === 'climb' && t >= T.fly) { g.throat(bird.b, LINE_UP).y += OVER_MID; g.throat(bird.c, DEEP_IN).y += OVER_MID; }
     // Its light lights the hollow as it goes in.
     if (t >= T.fly && !this.eaten) g.gulpAt.copy(this.orbAt);
     if (passed(T.shut)) {
@@ -547,28 +653,53 @@ export class Offering {
       fx.thud();
     }
     if (passed(T.smile)) { g.grin = 1; fx.fanfare(0.1); }
-    if (t >= T.end) { this.t = -1; this.after = 0; this.afterYaw = this.arrivalHeading + Math.PI; this.keep(false); }
+    if (t >= T.end) { tws.release(tw.id); this.t = -1; this.after = 0; this.afterYaw = this.arrivalHeading + Math.PI; this.keep(false); }
   }
 
   /** The camera for this frame while the offering has it. */
   cinematic(): { pos: THREE.Vector3; at: THREE.Vector3; fov: number } | null {
     const T = this.T;
-    const t = this.t, g = this.d.giant(), bird = this.crow.birds[0];
+    const t = this.t, bird = this.crow.birds[0];
     // (From when you get down to make the offering.)
     const coming = this.state === 'held' && this.wait >= PAUSE && this.staged;
-    if ((t < 0 && !coming) || !g) { this.watching = false; return null; }
+    // (Not asked for the giant until then: asking stands one asleep by the ring, and before any offering it may be
+    // still on its way there. Asked every frame, it was laid down at the ring the moment the visit's camera let go.)
+    if (t < 0 && !coming) { this.watching = false; return null; }
+    const g = this.d.giant();
+    if (!g) { this.watching = false; return null; }
     let fov = FOV;
-    if (t < T.cut) {
-      // From behind and beside where you came up: you and the shrine; then the crow coming down over it out of
-      // the giant, and the giant beyond.
-      this.pos.copy(this.camNear);
+    // Four cameras, a cut between each: close by the shrine while the light goes to it and the ground first heaves;
+    // low behind you for the tower coming up; up by the shrine on its head for the crow; and the giant's face.
+    const top = Math.min(T.up + RISE_HOLD, T.come - 0.1);
+    const shot = t < T.heave + HEAVE_HOLD ? 'near' : t < top ? 'rise' : t < T.cut ? 'top' : 'face';
+    const cut = shot !== this.shot || !this.watching;
+    this.shot = shot;
+    this.watching = true;
+    if (shot === 'rise') {
+      // The tower: from low behind where you run to, looking up at it; you come out toward the camera and turn.
+      this.pos.copy(this.camRise);
+      v1.copy(this.centre).setY(THREE.MathUtils.lerp(this.centre.y + 1.5, Math.max(this.bowl.y, this.centre.y + 8), 0.36));
+      if (cut) this.atNow.copy(v1);
+      this.atNow.lerp(v1, 0.08);
+      this.at.copy(this.atNow);
+      fov = FOV_RISE;
+    } else if (shot !== 'face') {
+      // From behind and beside where you came up: you and the shrine, and it starting to lift. And the same
+      // again from up in the air once the tower has it: the shrine close, the crow coming down over it out of
+      // the giant, taking the light, and the giant beyond.
+      if (shot === 'top' && !this.topSet) {
+        this.topSet = true;
+        this.d.towers.crown(this.d.tower.id, this.camTop, e1, false);
+        this.camTop.addScaledVector(this.u, -TOP_BACK).addScaledVector(this.p, TOP_ASIDE * this.side).setY(this.camTop.y + BOWL_Y + TOP_UP);
+      }
+      this.pos.copy(shot === 'top' ? this.camTop : this.camNear);
       v1.copy(this.bowl).setY(this.bowl.y - 0.5);
       if (t < 0) v1.lerp(v2.copy(this.d.body.pos).setY(this.d.body.pos.y + 1.2), 0.5);
-      else v1.lerp(bird.pos, t < T.has ? 0.35 * ss(t, T.come, T.has) : 0.5);
-      if (!this.watching) this.atNow.copy(v1);
-      this.watching = true;
-      this.atNow.lerp(v1, 0.06);
+      else if (shot === 'top') v1.lerp(bird.pos, t < T.has ? 0.35 * ss(t, T.come, T.has) : 0.5);
+      if (cut) this.atNow.copy(v1);
+      this.atNow.lerp(v1, shot === 'top' ? 0.1 : 0.06);
       this.at.copy(this.atNow);
+      if (shot === 'top') fov = FOV_TOP;
     } else {
       // In front of its face and to one side, one place. Close as its eyes open; back as the mouth opens and
       // the crow flies up into frame and in; close again on the smile.
@@ -582,6 +713,40 @@ export class Offering {
     return { pos: this.pos, at: this.at, fov };
   }
 
+  /** It can be skipped: from when the shrine is up and you're about to take the light to it, until the giant has it. */
+  get canSkip() { return this.busy && this.state !== 'given' && this.d.ring.sealK >= 1 && !!this.d.giant(); }
+
+  /**
+   * Skipped (main does it under a veil): all of it at once, as a save from
+   * after finds it. The tower up and lit with the shrine on its head, the
+   * light given, the giant smiling; and you where you'd have watched from.
+   */
+  skip(mode: string) {
+    if (!this.canSkip) return;
+    const g = this.d.giant()!, b = this.d.body, tw = this.d.tower, tws = this.d.towers;
+    this.stage();
+    if (this.t < this.T.heave) this.d.clear(WATCH + 2, v1.copy(this.watch).addScaledVector(this.p, -this.side * 7));
+    tws.stand(tw.id, true);
+    tws.release(tw.id);
+    // (On something: it stands where it is, as it does when the scene plays.)
+    if (mode === 'walk') {
+      b.pos.set(this.watch.x, this.watch.y, this.watch.z);
+      b.vel.set(0, 0, 0);
+      b.heading = Math.atan2(g.centre.x - b.pos.x, g.centre.z - b.pos.z);
+    }
+    this.there = true;
+    this.seat();
+    this.orbAt.copy(this.bowl);
+    this.state = 'given';
+    this.save();
+    this.t = -1;
+    this.after = -1;
+    this.lift = -1;
+    this.watching = false;
+    this.afterYaw = this.arrivalHeading + Math.PI;
+    this.keep(true);
+  }
+
   /** Dev: straight to a step (`held`: up with the light, the shrine risen; `placed`: the light in the bowl; `given`). */
   debug(to: OfferState) {
     this.d.ring.seal(true);
@@ -590,6 +755,9 @@ export class Offering {
     this.after = -1;
     this.wait = 0;
     this.lift = -1;
+    this.there = to === 'placed' || to === 'given';
+    this.topSet = false;
+    if (this.there) this.d.towers.stand(this.d.tower.id, true); else this.d.towers.bury(this.d.tower.id);
     const g = this.d.giant();
     if (g) { g.awake = false; g.mouth = 0; g.gulp = 0; g.grin = 0; g.wide = 0; g.look = null; g.snap(); }
     this.eaten = false;
@@ -597,6 +765,7 @@ export class Offering {
     this.crow.birds[0].holds = false;
     this.state = to;
     if (to === 'none') return;
+    this.seat();
     this.orbAt.copy(to === 'held' ? this.d.body.pos : this.bowl);
     if (to === 'given') this.keep(true);
     this.save();

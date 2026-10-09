@@ -59,7 +59,7 @@ const LUMP_MAX = 1.14;
 /** Where its mouth is on its head, as a direction from the head's middle (y, z; the eyes are at y 0.2): GIANT_FRAG draws it there. */
 const MOUTH = [-0.3, 0.95];
 /** The way out through the middle of its open mouth, from the head's middle (unit; the hole sits a little under MOUTH). */
-const GAPE = new THREE.Vector3(0, -0.421, 0.907);
+const GAPE = new THREE.Vector3(0, -0.458, 0.889);
 /** With its mouth open it lifts its head and tips it back, clear of its chest: how far up and forward (m), and back (rad). */
 const CHIN_UP = 3.5, CHIN_OUT = 1.5, CHIN_BACK = 0.45;
 /** The head bone on the torso. */
@@ -374,9 +374,16 @@ export class Giant {
   get arrived() { return !!this.route && this.phi >= this.route.length + 1; }
 
   /** It starts right under (the lake, or the ground) and comes up slowly, over `secs`, walking as it does. */
-  emerge(secs: number) { this.under = 1; this.riseTime = secs; this.rising = true; this.pose(0); }
+  emerge(secs: number) {
+    // (On its feet as it comes: a giant that had been lying somewhere as a hill, `settle`, walked on still sunk to the waist.)
+    this.dormant = false;
+    this.sink = 0;
+    this.under = 1; this.riseTime = secs; this.rising = true; this.pose(0);
+  }
   /** Right under, and staying there until it's told to `emerge`. */
   submerge() { this.under = 1; this.rising = false; this.pose(0); }
+  /** Up out of wherever it was coming up through, at once. */
+  come() { this.under = 0; this.rising = false; this.pose(0); }
   private under = 0;
   private rising = false;
   private riseTime = 1;

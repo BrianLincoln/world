@@ -6,7 +6,7 @@ import * as THREE from 'three';
 // in-world billboards (as textures), so an icon always looks the same
 // wherever it appears.
 
-export type IconName = 'axe' | 'log' | 'stone' | 'flame' | 'heart' | 'home' | 'check' | 'hand' | 'hammer' | 'pick' | 'smash' | 'antlers' | 'up' | 'down' | 'ember' | 'bike' | 'finger' | 'mouse' | 'mouseDown' | 'fingerDown' | 'pat' | 'lasso' | 'stable' | 'creature' | 'parachute' | 'prints';
+export type IconName = 'axe' | 'log' | 'stone' | 'flame' | 'heart' | 'home' | 'check' | 'hand' | 'hammer' | 'pick' | 'smash' | 'antlers' | 'up' | 'down' | 'ember' | 'bike' | 'finger' | 'mouse' | 'mouseDown' | 'fingerDown' | 'pat' | 'lasso' | 'stable' | 'creature' | 'parachute' | 'prints' | 'jar';
 
 const INK = '#4a2e36';
 const SIZE = 128;
@@ -673,39 +673,171 @@ function drawParachute(g: CanvasRenderingContext2D) {
   g.fill();
 }
 
-/** The giant's trail: three of its prints going away up the bubble, left, right, left, each smaller and cooler than the last. */
+/** The giant's trail: three bare footprints going away up the bubble, right, left, right, each smaller and fainter than the last. Dark, flat, no line round them: marks pressed in the ground, not things. */
 function drawPrints(g: CanvasRenderingContext2D) {
-  const one = (x: number, y: number, s: number, lean: number, fill: string) => {
+  // Drawn as a right foot (big toe on the left); `side` -1 mirrors it.
+  const one = (x: number, y: number, s: number, lean: number, side: number, alpha: number) => {
     g.save();
     g.translate(x, y);
     g.rotate(lean);
-    g.scale(s, s);
-    // The sole: broad at the toes, narrow at the heel.
+    g.scale(s * side, s);
+    g.globalAlpha = alpha;
+    g.fillStyle = INK;
+    // The sole: a broad ball, the arch cut in on the inside, a round heel.
     g.beginPath();
-    g.moveTo(0, 26);
-    g.bezierCurveTo(-15, 26, -17, 6, -18, -8);
-    g.bezierCurveTo(-19, -24, 19, -24, 18, -8);
-    g.bezierCurveTo(17, 6, 15, 26, 0, 26);
+    g.moveTo(1, 28);
+    g.bezierCurveTo(13, 28, 15, 12, 17, -3);
+    g.bezierCurveTo(19, -21, -18, -25, -17, -6);
+    g.bezierCurveTo(-16, 4, -6, 6, -9, 16);
+    g.bezierCurveTo(-11, 24, -7, 28, 1, 28);
     g.closePath();
-    g.fillStyle = fill;
     g.fill();
-    ink(g, 5 / s);
-    // Three blunt toes.
-    for (const [tx, ty] of [[-12, -31], [0, -35], [12, -31]]) {
+    // Five toes, standing clear of the sole.
+    for (const [tx, ty, rx, ry] of [[-12, -34, 6.5, 8], [0, -36, 4.6, 5.6], [9, -33, 4.2, 5], [16, -27, 3.8, 4.5], [21, -19, 3.4, 4]]) {
       g.beginPath();
-      g.arc(tx, ty, 5.5, 0, Math.PI * 2);
-      g.fillStyle = fill;
+      g.ellipse(tx, ty, rx, ry, 0, 0, Math.PI * 2);
       g.fill();
-      ink(g, 4 / s);
     }
     g.restore();
   };
-  one(86, 26, 0.42, 0.3, '#f6c9a4');
-  one(48, 54, 0.62, 0.12, '#f3ad84');
-  one(78, 92, 0.9, 0.2, '#ee8f6c');
+  one(88, 25, 0.5, 0.3, 1, 0.7);
+  one(48, 53, 0.68, 0.1, -1, 0.85);
+  one(80, 91, 0.92, 0.2, 1, 1);
+}
+
+/** A spark as it's drawn flat: a four-pointed star, hollow-sided, white-hot with an amber edge. */
+function drawSpark(g: CanvasRenderingContext2D, x: number, y: number, r: number, turn = 0) {
+  g.save();
+  g.translate(x, y);
+  g.rotate(turn);
+  // Its own light round it.
+  g.beginPath();
+  g.arc(0, 0, r * 0.95, 0, Math.PI * 2);
+  g.fillStyle = 'rgba(255, 244, 205, 0.75)';
+  g.fill();
+  const w = r * 0.72, c = r * 0.2;
+  g.beginPath();
+  g.moveTo(0, -r);
+  g.quadraticCurveTo(c, -c, w, 0);
+  g.quadraticCurveTo(c, c, 0, r);
+  g.quadraticCurveTo(-c, c, -w, 0);
+  g.quadraticCurveTo(-c, -c, 0, -r);
+  g.closePath();
+  g.fillStyle = '#fffdf0';
+  g.fill();
+  g.strokeStyle = '#f09a2c';
+  g.lineWidth = Math.max(2, r * 0.22);
+  g.stroke();
+  g.restore();
+}
+
+/** Where the sparks sit in the jar, from the bottom up. */
+const JAR_SPOTS = [[48, 97, 11, 0.1], [80, 95, 12, -0.15], [64, 79, 12, 0.05], [42, 73, 9, -0.2], [86, 71, 10, 0.2], [58, 59, 9, 0.15], [77, 55, 9, -0.1], [45, 52, 7, 0]];
+
+/**
+ * The jar of sparks: a round-bellied glass jar with a cork, `n` lights in it
+ * (eight show at most), and their light standing in it as deep as it is full
+ * (`n` of `of`). Full, it shines out of the glass.
+ */
+function drawJar(g: CanvasRenderingContext2D, n = 3, of = 6) {
+  const f = Math.max(0, Math.min(1, n / of));
+  const body = () => {
+    g.beginPath();
+    g.moveTo(47, 36);
+    g.bezierCurveTo(44, 46, 22, 48, 22, 74);
+    g.lineTo(22, 96);
+    g.quadraticCurveTo(22, 114, 40, 114);
+    g.lineTo(88, 114);
+    g.quadraticCurveTo(106, 114, 106, 96);
+    g.lineTo(106, 74);
+    g.bezierCurveTo(106, 48, 84, 46, 81, 36);
+    g.closePath();
+  };
+  // The light it throws: two flat rings round it, wider the fuller it is.
+  if (n > 0) {
+    for (const [r, a] of [[52 + 10 * f, 0.2 + 0.12 * f], [40 + 8 * f, 0.26 + 0.14 * f]]) {
+      g.beginPath();
+      g.arc(64, 76, r, 0, Math.PI * 2);
+      g.fillStyle = `rgba(255, 196, 96, ${a})`;
+      g.fill();
+    }
+  }
+  // Glass.
+  body();
+  g.fillStyle = n > 0 ? '#f3f1dc' : '#e3efea';
+  g.fill();
+  // The light standing in it, with a brighter bed.
+  if (n > 0) {
+    g.save();
+    body();
+    g.clip();
+    const top = 110 - 66 * f;
+    g.beginPath();
+    g.moveTo(16, top + 3);
+    g.quadraticCurveTo(40, top - 7, 64, top + 1);
+    g.quadraticCurveTo(88, top + 8, 112, top - 3);
+    g.lineTo(112, 120);
+    g.lineTo(16, 120);
+    g.closePath();
+    g.fillStyle = '#ffdf96';
+    g.fill();
+    g.beginPath();
+    g.ellipse(64, 116, 46, 10 + 22 * f, 0, 0, Math.PI * 2);
+    g.fillStyle = '#ffc661';
+    g.fill();
+    g.restore();
+  }
+  for (let i = Math.min(n, JAR_SPOTS.length) - 1; i >= 0; i--) { const [x, y, r, t] = JAR_SPOTS[i]; drawSpark(g, x, y, r, t); }
+  // A shine down the glass, and a glint at its shoulder.
+  g.beginPath();
+  g.moveTo(33, 70);
+  g.quadraticCurveTo(31, 84, 33, 99);
+  g.strokeStyle = 'rgba(255, 255, 255, 0.9)';
+  g.lineWidth = 5;
+  g.stroke();
+  g.beginPath();
+  g.arc(40, 58, 3, 0, Math.PI * 2);
+  g.fillStyle = 'rgba(255, 255, 255, 0.9)';
+  g.fill();
+  body();
+  ink(g);
+  // The lip, a twist of twine under it, and the cork.
+  g.beginPath();
+  g.roundRect(40, 27, 48, 12, 6);
+  g.fillStyle = '#eef5f1';
+  g.fill();
+  ink(g);
+  g.beginPath();
+  g.moveTo(52, 26);
+  g.lineTo(54, 12);
+  g.quadraticCurveTo(64, 7, 74, 12);
+  g.lineTo(76, 26);
+  g.closePath();
+  g.fillStyle = '#c99a62';
+  g.fill();
+  ink(g);
+  g.beginPath();
+  g.moveTo(58, 15);
+  g.quadraticCurveTo(64, 13, 70, 15);
+  g.strokeStyle = '#e6c08c';
+  g.lineWidth = 3;
+  g.stroke();
+}
+
+/** The jar as the HUD shows it: `n` sparks in it, of the `of` that fill it. */
+export function jarCanvas(n: number, of: number): HTMLCanvasElement {
+  const key = `jar:${Math.min(n, of + 1)}:${of}`;
+  let c = cache.get(key);
+  if (!c) {
+    const [cc, g] = canvas();
+    drawJar(g, n, of);
+    cache.set(key, (c = cc));
+  }
+  return c;
 }
 
 const DRAW: Record<IconName, (g: CanvasRenderingContext2D) => void> = {
+  jar: (g) => drawJar(g),
   prints: drawPrints,
   parachute: drawParachute,
   up: drawUp, down: drawDown, ember: drawEmber, bike: drawBike,

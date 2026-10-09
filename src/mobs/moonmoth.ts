@@ -133,6 +133,10 @@ export function moonmothStatue(): THREE.BufferGeometry {
   return g;
 }
 
+/** How long a stretch of her wings takes (s). */
+export const STRETCH = 2.8;
+const smooth = (x: number, a: number, b: number) => { const k = clamp((x - a) / (b - a), 0, 1); return k * k * (3 - 2 * k); };
+
 export class Moonmoth extends Beast {
   private bodyB: PartBatch; private thighB: PartBatch; private shinB: PartBatch; private headB: PartBatch; private wingB: PartBatch[]; private saddleB: PartBatch; private collarB: PartBatch;
 
@@ -204,11 +208,33 @@ export class Moonmoth extends Beast {
     const walk = flying ? 0 : a.moving;
     const step = a.cyc * Math.PI * 2;
     up += walk * (0.3 + Math.sin(step * 2) * 0.06);
+    // (Clinging to a rock face, head up, wings spread against it: `s.hang`, 0..1, and `s.lean`, how far the face overhangs. Whoever has put her there says so.)
+    const hang = d.s.hang ?? 0;
+    // (Held a little off the rock, not lying in it.)
+    up += hang * (flying ? 0 : 0.16);
+    // A stretch: both pairs lifted slowly right up over her back as one (the hind never above the fore: they'd
+    // pass through each other), held there quivering, and let down again. `s.stretch` (0..1 through it) starts one: set it to 0. Left alone on the
+    // ground she does it by herself now and then.
+    const idle = !flying && !m.ridden && walk < 0.05 && a.joy <= 0;
+    d.s.stretchAt ??= t + 5 + m.rnd() * 15;
+    if (t > d.s.stretchAt) {
+      if (idle && hang === 0 && d.s.stretch === undefined) d.s.stretch = 0;
+      d.s.stretchAt = t + 14 + m.rnd() * 26;
+    }
+    let lift = 0;
+    if (d.s.stretch !== undefined) {
+      const u = d.s.stretch, on = flying ? hang : 1 - walk;
+      lift = smooth(u, 0, 0.36) * (1 - smooth(u, 0.62, 1)) * on;
+      d.s.stretch = u + a.dt / STRETCH;
+      if (d.s.stretch >= 1 || a.joy > 0 || (flying && hang <= 0)) d.s.stretch = undefined;
+    }
+    const high = 1.02 + Math.sin(t * 24) * 0.035 * lift;
+    const fore = lerp(up, high, lift), hind = lerp(up * 0.85 - 0.05, high - 0.06, lift);
     const sweep = flying ? -beat * 0.12 : 0.05;
-    d.n.fL.rotation.set(0, sweep, up);
-    d.n.fR.rotation.set(0, -sweep, -up);
-    d.n.hL.rotation.set(0, sweep * 0.5 - 0.15, up * 0.85 - 0.05);
-    d.n.hR.rotation.set(0, -sweep * 0.5 + 0.15, -up * 0.85 + 0.05);
+    d.n.fL.rotation.set(0, sweep - lift * 0.22, fore);
+    d.n.fR.rotation.set(0, -sweep + lift * 0.22, -fore);
+    d.n.hL.rotation.set(0, sweep * 0.5 - 0.15 - lift * 0.22, hind);
+    d.n.hR.rotation.set(0, -sweep * 0.5 + 0.15 + lift * 0.22, -hind);
     // The body rises and falls against each beat; tips into its turns.
     // Legs: an insect's walk, three feet down at a time (fore and hind of one
     // side with the middle of the other); tucked up under her in the air.
@@ -224,12 +250,10 @@ export class Moonmoth extends Beast {
     const bob = flying ? -beat * 0.12 : Math.abs(Math.sin(step)) * 0.025 * walk;
     const pitch = d.pitch.step(flying ? clamp(-a.vy * 0.05, -0.35, 0.35) - a.speed * 0.012 : -a.slope * 0.8, 20, 7, a.dt);
     d.body.position.y += bob;
-    // (Clinging to a rock face, head up, wings spread against it: `s.hang`, 0..1. Whoever has put her there says so.)
-    const hang = d.s.hang ?? 0;
     // (On foot she waddles: a little roll and yaw onto each tripod.)
     const waddle = Math.sin(step) * walk;
-    d.body.rotation.set(pitch * (1 - hang) - (Math.PI / 2) * hang, waddle * 0.05, flying ? a.bank * 1.6 : waddle * 0.04);
+    d.body.rotation.set(pitch * (1 - hang) - (Math.PI / 2 + (d.s.lean ?? 0)) * hang - lift * 0.07 * (1 - hang), waddle * 0.05, flying ? a.bank * 1.6 : waddle * 0.04);
     d.head.rotation.set(-0.1 + (flying ? 0 : 0.15), a.lookYaw * 0.6 - waddle * 0.05, Math.sin(t * 0.6) * 0.1 * a.alert);
-    d.s.lids = rest > 0.5 ? 0.35 : undefined;
+    d.s.lids = lift > 0.4 ? 0.12 : rest > 0.5 ? 0.35 : undefined;
   }
 }

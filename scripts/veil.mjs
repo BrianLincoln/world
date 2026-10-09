@@ -326,6 +326,16 @@ if (kinds.includes('quest')) {
   const end = await run(() => { const b = window.__bot; const a = b.chase({ stop: 3, max: 30, until: () => b.d.debug.last }); const r = b.chase({ sprint: true, stop: 14, max: 60, until: () => b.d.play === 'hide' && b.cell() === 'W2' && b.toHer() < 20 }); b.up(); const at = b.her(); b.tick(360); const now = b.her(); return { a: a.ok, ...r, play: b.d.play, round: b.d.round, her: b.herCell(), moved: +Math.hypot(now[0] - at[0], now[1] - at[1]).toFixed(2), mid: +Math.hypot(now[0] - b.L.at.W2[0], now[1] - b.L.at.W2[1]).toFixed(1), toHer: +b.toHer().toFixed(1) }; });
   check('the last time she is out and through one more veil, and in the room beyond she is waiting in the middle of it and does not run', end.a && end.ok && end.play === 'hide' && end.round === 2 && end.her === 'W2' && end.moved < 0.1 && end.mid < 1, JSON.stringify(end));
   await shot('q-12-waiting');
+  // Come near and she plays, before she's yours: up to you, away again, and once right round you.
+  await run(() => { const b = window.__bot; b.chase({ stop: 3, max: 20, until: () => b.d.play === 'tease' }); b.up(); window.__tease = { me: b.here(), near: 99, far: 0, after: 99, turn: 0, was: null, can: false, f: 0 }; });
+  await cam(0.3, 13);
+  let tease;
+  for (let n = 0; n < 16; n++) {
+    tease = await run(() => { const b = window.__bot, o = window.__tease; for (let i = 0; i < 24 && b.d.play === 'tease'; i++, o.f++) { b.tick(); const h = b.her(), d = b.toHer(); o.can = o.can || b.d.mountable; if (o.f < 95) o.near = Math.min(o.near, d); else if (o.f < 171) o.far = Math.max(o.far, d); const a = Math.atan2(h[1] - o.me[1], h[0] - o.me[0]); if (o.f > 170 && o.was !== null) o.turn += Math.atan2(Math.sin(a - o.was), Math.cos(a - o.was)); o.was = a; o.after = d; } return { play: b.d.play, round: b.d.round, s: +(o.f / 60).toFixed(1), near: +o.near.toFixed(1), far: +o.far.toFixed(1), turn: +Math.abs(o.turn).toFixed(2), after: +o.after.toFixed(1), can: o.can }; });
+    if (tease.play !== 'tease') break;
+    await shot(`q-12-tease-${String(n).padStart(2, '0')}`);
+  }
+  check('come near and she plays first: up to you, away again, once right round you and in', tease.play === 'yours' && tease.round === 3 && tease.near < 3.2 && tease.far > 6 && tease.turn > 5.5 && tease.after < 3.2 && !tease.can && tease.s < 7, JSON.stringify(tease));
   const hearts = await run(() => { const b = window.__bot; let before = 0; b.chase({ stop: 3, max: 30, until: () => b.d.play === 'yours' && b.d.debug.glad > 0, each: () => { before = Math.max(before, b.d.debug.heart); } }); b.up(); let hop = 0, heart = 0; for (let f = 0; f < 70; f++) { b.tick(); hop = Math.max(hop, b.d.she.hop ?? 0); heart = Math.max(heart, b.d.debug.heart); } return { before, hop: +hop.toFixed(2), heart: +heart.toFixed(2), mountable: b.d.mountable }; });
   check('she comes out: then, and only then, a heart over her and she bounces about', hearts.before === 0 && hearts.hop > 0.4 && hearts.heart > 0.8 && !hearts.mountable, JSON.stringify(hearts));
   await shot('q-13-heart');

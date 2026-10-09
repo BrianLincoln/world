@@ -108,7 +108,7 @@ export const TERRAIN_U = {
   uShadowRect: { value: new THREE.Vector4(0, 0, 1, 0) },
   uShadowFade: { value: new THREE.Vector2(55, 85) },
   cPrintWarm: { value: col('#f2a784') },
-  cPrintEarth: { value: col('#a08268') },
+  cPrintEarth: { value: col(BIOME.earth) },
   ...PRINT_U,
   ...FIELD_U,
 };

@@ -419,6 +419,9 @@ export class CharacterRig {
    * It eases between them (FACE_FRAG's uMood).
    */
   mood: Mood | null = null;
+  /** 0..1: she's out in the cold country (main sets it): brows knit, the grin gone, hunched a little, and she shivers. Under any `mood`. */
+  chill = 0;
+  private chillK = 0;
   private moodW = new THREE.Vector4();
 
   /** 'dot' = solid ink ovals, 'round' = whites with small pupils. */
@@ -1147,10 +1150,24 @@ export class CharacterRig {
     // Apply.
     this.hips.position.y = HIP_Y + P.hipY;
     this.hips.rotation.set(P.hipX, P.hipYaw, P.hipRoll);
-    this.spine.rotation.set(P.spX, P.spYaw, P.spRoll);
+    // Cold (owner, 2026-10-07: no shaking about): she holds herself in. Shoulders rounded and arms drawn in to
+    // her sides, head a little down, and only a faint shudder, briefly, every so often. (Rubbing an arm and
+    // blowing into her mittens were both tried and scrapped: her arms are too short for either to read.)
+    this.chillK += (this.chill - this.chillK) * e(1.5);
+    const ck = this.chillK;
+    const busy = this.carryW > 0.01 || this.w.ground / sum < 0.9 || !!this.mood;
+    if (ck > 0.01 && !busy) {
+      P.shLx -= 0.14 * ck; P.shRx -= 0.14 * ck;
+      P.shLz -= 0.07 * ck; P.shRz += 0.07 * ck;
+      P.elL -= 0.3 * ck; P.elR -= 0.3 * ck;
+    }
+    const shudder = ck * 0.012 * Math.sin(t * 40) * Math.pow(Math.max(0, Math.sin(t * 0.9)), 12);
+    this.spine.rotation.set(P.spX + 0.1 * ck, P.spYaw, P.spRoll + shudder);
+    P.hdX += 0.07 * ck;
     // Mood: (sad, worried, frightened, set). Sad hangs her head.
     const mw = this.moodW, md = MOODS[this.mood ?? 'none'], mk = e(this.mood === 'scared' ? 12 : 4);
-    mw.set(mw.x + (md[0] - mw.x) * mk, mw.y + (md[1] - mw.y) * mk, mw.z + (md[2] - mw.z) * mk, mw.w + (md[3] - mw.w) * mk);
+    const cold = this.mood ? 0 : ck;
+    mw.set(mw.x + (md[0] + 0.15 * cold - mw.x) * mk, mw.y + (Math.max(md[1], 0.8 * cold) - mw.y) * mk, mw.z + (md[2] - mw.z) * mk, mw.w + (Math.max(md[3], 0.7 * cold) - mw.w) * mk);
     (this.face.uniforms.uMood.value as THREE.Vector4).copy(mw);
     if (this.holdStill) this.head.rotation.set(0, 0, 0);
     else this.head.rotation.set(P.hdX + 0.16 * mw.x * (this.w.ground / sum), P.hdYaw * (1 - 0.6 * mw.x), P.hdRoll);

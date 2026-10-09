@@ -45,7 +45,7 @@ export const PAT = { beats: [0.6, 1.1, 1.6], end: 2.1, joy: 1.3 };
 
 export type Pose = 'stand' | 'sit' | 'shiver' | 'warm' | 'point';
 /** What it says with its arms to company (the village milling about, story/village.ts). */
-export type Gesture = 'wave' | 'wide' | 'point' | 'hop' | 'cheer' | 'nod';
+export type Gesture = 'wave' | 'wide' | 'point' | 'hop' | 'cheer' | 'nod' | 'dig' | 'toss' | 'saw' | 'hammer' | 'stoop';
 
 export interface Want {
   at: THREE.Vector3;
@@ -137,6 +137,7 @@ function heartGeometry() {
 }
 
 const tv = new THREE.Vector3();
+const UP = new THREE.Vector3(0, 1, 0);
 const tv2 = new THREE.Vector3();
 
 export class Spirit {
@@ -237,6 +238,9 @@ export class Spirit {
    * mouth a firm line, stood up straight.
    */
   mood: 'scared' | 'sad' | 'down' | 'brave' | null = null;
+  /** 0..1: it's out in the cold country (main sets it): it shivers, arms hugged in when it stands, half lids, a small frown. Under any `mood`. */
+  chill = 0;
+  private chillK = 0;
   private brow = 0;
 
   /**
@@ -269,6 +273,13 @@ export class Spirit {
    * points out `pointing`.
    */
   gesture: Gesture | null = null;
+  /** Something in its right hand (`take`): the arm is held out in front with it, and digs or throws with it ('dig', 'toss'), saws ('saw') or knocks with it ('hammer'). */
+  tool: THREE.Object3D | null = null;
+  /** Something balanced on its head (a board, a stone: `overhead` is where): both arms up to steady it, walking or stood. */
+  laden = false;
+  /** Strokes of the saw and blows of the hammer so far, counted as each lands (whoever's watching makes the dust). */
+  strokes = 0;
+  private workT = 0;
   pointing: THREE.Vector3 | null = null;
   private flinchT = 0;
   /** A start: one sharp hop where it stands. */
@@ -314,6 +325,28 @@ export class Spirit {
     this.feet[1].position.set(-0.42 * R, 0, 0.18 * R);
     this.pos.copy(start);
     this.want = { at: start.clone(), face: null, pose: 'stand', icon: null, lead: false };
+  }
+
+  /** It takes `tool` in its right hand (its origin at the hand, its length along -y, down the arm), or with null puts down what it had. */
+  take(tool: THREE.Object3D | null) {
+    if (this.tool && this.tool !== tool && this.tool.parent === this.arms[0]) this.tool.removeFromParent();
+    this.tool = tool;
+    if (!tool) return;
+    this.arms[0].add(tool);
+    tool.position.set(0, -0.19, 0);
+    tool.rotation.set(0, 0, 0);
+  }
+
+  /** Where its right hand is, and which way that arm lies (what `take` would put a tool at): in the world, as last drawn. */
+  handPose(pos: THREE.Vector3, quat: THREE.Quaternion) {
+    this.arms[0].matrixWorld.decompose(pos, quat, tv2);
+    pos.set(0, -0.19, 0).applyMatrix4(this.arms[0].matrixWorld);
+  }
+
+  /** Where something balanced on its head sits (its underside), and which way it's turned: in the world, as last drawn. */
+  overhead(pos: THREE.Vector3, quat: THREE.Quaternion) {
+    pos.set(this.root.position.x, this.root.position.y + this.body.position.y + R * this.body.scale.y * 0.97, this.root.position.z);
+    quat.setFromAxisAngle(UP, this.root.rotation.y);
   }
 
   get busy() { return this.acts.length > 0; }
@@ -471,6 +504,10 @@ export class Spirit {
     let usher = 0, usherOn = 0;
     /** The foreman's arms-wide "build this", 0..1. */
     let present = 0;
+    /** With a shovel: 1 digging, 2 throwing what's on it. */
+    let dig = 0;
+    /** At a chore: 1 sawing, 2 hammering, 3 bent to pick something up or put it down. */
+    let chore = 0;
     /** The lasso lesson: whirling overhead (0..1), and the throw's arm (0..1). */
     let twirl = 0, fling = 0;
     let faceAt: THREE.Vector3 | null = null;
@@ -647,6 +684,11 @@ export class Spirit {
             else if (g === 'hop') bounce = 0.6;
             else if (g === 'cheer') { armsUp = 1; bounce = 0.8; happy = true; }
             else if (g === 'nod') { bounce = 0.2; this.happyT = Math.max(this.happyT, 0.3); }
+            else if (g === 'dig') { dig = 1; bounce = 0.1; }
+            else if (g === 'toss') dig = 2;
+            else if (g === 'saw') chore = 1;
+            else if (g === 'hammer') chore = 2;
+            else if (g === 'stoop') chore = 3;
           }
         } else if (w.rally && w.face) {
           // That way! Hopping, arm out at it; then round to you, waving you over.
@@ -766,7 +808,8 @@ export class Spirit {
     const landing = hopRate > 0 && ph < 0.12 ? 1 - ph / 0.12 : 0;
     const sq = this.squash.step(-landing * (walking ? 0.12 : 0.22) * (hopRate > 0 ? 1 : 0) + air * 0.08, 180, 14, dt);
     const mood = this.mood;
-    const shiver = mood === 'scared' ? 1 : mood === 'sad' ? 0.3 : pose === 'shiver' && !walking && !act ? 1 : pose === 'warm' && this.warmth < 0.9 && !walking && !act ? 0.4 : 0;
+    this.chillK += (this.chill - this.chillK) * e(1.5);
+    const shiver = Math.max(mood === 'scared' ? 1 : mood === 'sad' ? 0.3 : pose === 'shiver' && !walking && !act ? 1 : pose === 'warm' && this.warmth < 0.9 && !walking && !act ? 0.4 : 0, mood || act || happy ? 0 : this.chillK * (walking ? 0.45 : 0.8));
     this.sit += ((pose === 'sit' && !walking && !act ? 1 : 0) - this.sit) * e(5);
 
     this.root.position.copy(this.pos);
@@ -783,7 +826,16 @@ export class Spirit {
       this.body.position.y += Math.max(0, this.hooks.ground(this.pos.x + fx, this.pos.z + fz) - this.pos.y, this.hooks.ground(this.pos.x - fx, this.pos.z - fz) - this.pos.y);
     }
     this.patGlow += ((patted || act?.kind === 'pat' ? 1 : 0) - this.patGlow) * e(patted ? 3 : 0.8);
-    const lean = this.tilt.step(THREE.MathUtils.clamp(hs * 0.05, 0, 0.25) - this.sit * 0.12 + (reach ? -0.2 : 0) + (pose === 'warm' ? 0.1 : 0) - patted * 0.16 + (low ? (0.36 - sigh * 0.1) * (1 - this.sit * 0.6) : 0), 90, 12, dt);
+    const lean = this.tilt.step(THREE.MathUtils.clamp(hs * 0.05, 0, 0.25) - this.sit * 0.12 + (reach ? -0.2 : 0) + (pose === 'warm' ? 0.1 : 0) - patted * 0.16 + (low ? (0.36 - sigh * 0.1) * (1 - this.sit * 0.6) : 0) + (chore === 3 ? 0.55 : chore === 1 ? 0.2 : 0), 90, 12, dt);
+    // Sawing: the whole of it goes to and fro with the stroke. Hammering: back, and down on it.
+    const wt = chore === 1 || chore === 2 ? (this.workT += dt) : (this.workT = 0);
+    const stroke = chore === 1 ? Math.sin(wt * 8.5) : 0;
+    const hp = chore === 2 ? (wt * 1.7) % 1 : 0;
+    /** The hammer arm: 0 cocked back .. 1 struck. */
+    const blow = chore === 2 ? (hp < 0.55 ? 1 - THREE.MathUtils.smoothstep(hp, 0.05, 0.5) : THREE.MathUtils.smoothstep(hp, 0.55, 0.68)) : 0;
+    if (chore === 1 && Math.floor((wt * 8.5 + Math.PI / 2) / (Math.PI * 2)) !== Math.floor(((wt - dt) * 8.5 + Math.PI / 2) / (Math.PI * 2))) this.strokes++;
+    if (chore === 2 && wt > dt && Math.floor(wt * 1.7 - 0.68) !== Math.floor((wt - dt) * 1.7 - 0.68)) this.strokes++;
+    this.body.position.z = stroke * 0.055 + (chore === 2 ? (blow - 0.6) * 0.04 : 0);
     // Patted: a slow contented wiggle under the hand.
     const wiggle = Math.sin(this.t * 6.5) * 0.08 * patted;
     // Bent forward, the seat's front edge drops: lift it clear.
@@ -822,7 +874,7 @@ export class Spirit {
     }
     for (let k = 0; k < 2; k++) {
       const s = k ? -1 : 1;
-      let x = 0.15, z = s * 0.35;
+      let x = 0.15, z = s * 0.35, stiff = 120;
       if (shiver > 0.5) { x = -1.1; z = -s * 0.5; }
       if (pose === 'warm' && !walking && !act) { x = -1.35; z = s * 0.1; }
       if (walking) { x = Math.sin(this.hop * Math.PI * 2 + k * Math.PI) * 0.5; z = s * 0.5; }
@@ -851,8 +903,21 @@ export class Spirit {
       if (ride) { x = -1.25; z = s * 0.32; }
       // Reaching up after them, straining, hands opening and closing.
       if (mood === 'sad' && !walking) { x = -0.3 + Math.sin(this.t * 2.6 + k * 1.4) * 0.1; z = s * (2.6 + Math.sin(this.t * 3.4 + k) * 0.12); }
+      // A shovel in the right hand: carried blade up, clear of the ground; jabbed forward into the heap; swung up and over.
+      if (this.tool && k === 0 && !this.carried) { x = dig === 2 ? -2.2 : dig === 1 ? -1.47 + Math.sin(this.t * 7.5) * 0.1 : -1.85; z = 0.12; }
+      // A saw: low across what's being cut, to and fro. A hammer: up and back, and down.
+      if (this.tool && k === 0 && chore === 1) { x = -1.95 + stroke * 0.13; z = 0.06; }
+      if (this.tool && k === 0 && chore === 2) { x = -3.25 + blow * 1.0; z = 0.1; stiff = 420; }
+      // (The saw's held blade down across the board; the mallet's laid back, and snaps over.)
+      if (this.tool && k === 0) this.tool.rotation.x = chore === 2 ? -0.55 + blow * 0.95 : chore === 1 ? 0.75 : 0;
+      // The other hand out on the work, steadying it.
+      if (k === 1 && (chore === 1 || chore === 2)) { x = -1.2; z = -0.25; }
+      // Bent to something on the ground, both hands to it.
+      if (chore === 3 && !this.carried) { x = -1.0; z = s * 0.2; }
+      // Something on its head: both hands up to it.
+      if (this.laden && !this.carried && chore !== 3) { x = -0.12 + (walking ? Math.sin(this.hop * Math.PI * 2 + k * Math.PI) * 0.05 : 0); z = s * 2.8; }
       if (this.carried) { x = -0.3 + Math.sin(this.t * 15 + k * 2) * 0.3; z = s * (2.7 + Math.sin(this.t * 11 + k) * 0.2); }
-      this.arms[k].rotation.set(this.armX[k].step(x, 120, 12, dt), 0, this.armZ[k].step(z, 120, 12, dt));
+      this.arms[k].rotation.set(this.armX[k].step(x, stiff, stiff > 200 ? 30 : 12, dt), 0, this.armZ[k].step(z, 120, 12, dt));
     }
 
     const wm = this.warmth;
