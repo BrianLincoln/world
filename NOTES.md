@@ -6077,3 +6077,21 @@ sealed the lock's upright strap runs across the sign.
 
 ## The giant's head at the offering's smile (2026-10-14)
 - Once the crow was in and the mouth shut, the head came down off its open-mouth lift and pitched down at the bowl, so on the smile its chin sank into its chest boulder ("phased into its body"). Now while it sits awake (`dormant && awake`: the end of every offering, through the homecoming's crow leaving) its head is held up and out clear of its chest (`SIT` in giant.ts), and `look` pitches it down no more than 0.08 rad. It eases back down as it gets up. The face camera stands 4 m higher (`CAM_ABOVE` 6) and the smile is framed wider (`FOV_SMILE` 30) so the gap under its chin reads. Same for all four offerings.
+
+## The giant comes out of the water (2026-10-14)
+Owner: with one seed, the giant should come from the water and walk a more or
+less straight line through town. `visitRoute` now also tries a lead-in from
+open water (`SEA`: 4 m deep at its middle, water all round for 45 m, at most
+26 steps, at most 0.9 rad of bend), walked back from the first house with the
+same foot on it, scored by steps and bend; it's used if it doubles back no more
+than the land route. On 'hilda' that's the bay north-west of the lane: 21 steps,
+a 10° bend, four footfalls in the water. It lies there as an island from the
+moment you're drawn up the tower (`prepare`), gets up (`Giant.rise`), and sets
+off `WAKE.walk` later. Water: streams off its edges and churn round it while it
+rises, spray where a foot comes down in water (`Visit.spray`, foam colour).
+Camera: tower eyes on the island, then a shore shot 180–270 m off to one side,
+clear of trees near the lens, until it's ashore. The village's beats wait by
+`late` (steps beyond a land walk-in). Music: the first piece starts so it ends
+as the village's comes in; before that (about 30 s: the island and the rise)
+there's only the sea and the stomps. The visit is ~94 s now, against ~63.
+Other seeds: 'troll' also wakes from water; the rest fall back unchanged.

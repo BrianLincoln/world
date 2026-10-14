@@ -199,6 +199,7 @@ npm run shots    # build + headless GPU screenshots -> shots/   (look at them!)
   `visit.ts`: the giant's visit to the village once the hearth is lit
   (its footfalls, the smashing, the taking, the camera, restore from save).
   Its first walk never doubles back (`visitRoute`): it comes up the lane to the yard if it can go on from there, else from the yard's end and down the lane; it comes in on a bend if it must, and walks straight across a hairpin in the way. Check with `scripts/doubleback.mjs [out.png] <seeds>`.
+  **Out of the water where there is some** (owner, 2026-10-14; built, not played by the owner): on 'hilda' it lies in the bay as an island, gets up with the sea pouring off it, wades ashore and comes straight down the lane (`VisitRoute.wakes`, `SEA`, `WAKE`, `Visit.wake`, the shore shot `placeShore`); a seed with no open water near the lane's line keeps the walk above. Check with `scripts/visit.mjs <dir> tower`.
   `birds.ts`: its flock of black crows, which snatch the spirits and carry their lights.
   Just after the village bolts every wild creature about runs or flies off for good (`Mobs.scare`, each species' `bolt`; check with `scripts/visit.mjs <dir> tower mobs fine`).
   `ring.ts`: the dungeon ring once open (forcefield, dark spirit, the two

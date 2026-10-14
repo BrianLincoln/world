@@ -11,6 +11,8 @@ import { Birds, GRIP } from './birds';
 import type { Giant } from './giant';
 import type { Trail } from './trail';
 import { soleSdf } from '../world/prints';
+import { Puffs } from '../gfx/puffs';
+import { BIOME } from '../gfx/palette';
 
 // The giant's visit (giant slice 1, step 4): once the hearth is lit it comes
 // up the lane, half asleep, treading on the other spirits' houses (never
@@ -68,8 +70,18 @@ const FILM = { cut: 0.45, after: 0.7 };
 const GUIDE = { run: 1.9, look: 2.7, lead: 0.5, speed: 7, left: 0.35, right: 1.05, out: 1.75, after: 1.8 };
 /** How many are seen being taken: the lead's, then this many less one in quick succession. */
 const SEEN_TAKEN = 4;
-/** It comes up out of the lake (or the ground) over this long as it sets off. */
+/** It comes up out of the ground over this long as it sets off (when there's no water for it to lie in). */
 const RISE = 9;
+/**
+ * Out of the water (`VisitRoute.wakes`), in seconds from the start: an island
+ * in the bay for `still`; then it gets up (Giant.rise), and sets off `walk`
+ * after that. Watched from the tower, its eyes are on it until `look`, then
+ * it's the shore (see `placeShore`) until it has waded out and taken `dry`
+ * more steps.
+ */
+const WAKE = { still: 2.2, walk: 8.6, look: 3.2, dry: 1.2 };
+/** The scene music's first piece is this long (s), and the second comes in over this much of its end. */
+const EMERGENCE = 24, OVERLAP = 2;
 /** The giant, for a crow to keep out of: half its width and depth (shoulders and arms; hump and belly). */
 const BULK = { w: 44, d: 27 };
 /**
@@ -101,7 +113,19 @@ const FLOOR = 0.6;
 const FOV = 36, HEAD_FOV = 42;
 
 export interface Footfall { x: number; z: number; yaw: number; house: number }
-export interface VisitRoute { start: { x: number; z: number; heading: number }; falls: Footfall[]; firstHouse: number; lastHouse: number }
+/**
+ * `wakes`: it lies in open water at `start`, an island, and gets up out of it
+ * before it walks (see `SEA`); else it comes up out of the ground as it sets off.
+ * `ashore`: footfalls taken by the time it is out of the water.
+ */
+export interface VisitRoute { start: { x: number; z: number; heading: number }; falls: Footfall[]; firstHouse: number; lastHouse: number; wakes: boolean; ashore: number }
+/**
+ * From the sea (or a lake): water it may lie in is this deep at its middle,
+ * and open for `open` m round (every point of those rings water: it reads as
+ * an island, not a headland). It comes no more than `most` steps to the
+ * first house, and bends no more than `bend` (radians) on the way.
+ */
+const SEA = { deep: -4, open: [15, 30, 45], most: 26, bend: 0.9 };
 
 /**
  * Where the giant stands to begin with and every footfall from there to the
@@ -201,7 +225,7 @@ export function visitRoute(gen: WorldGen): VisitRoute | null {
    * village, as it always was. Otherwise it may come in on a bend, and cuts the corner on to the way, so as
    * not to come back beside its own prints.
    */
-  const build = (rev: boolean, plain: boolean): { route: VisitRoute; ok: boolean } => {
+  const build = (rev: boolean, plain: boolean, wet = false): { route: VisitRoute; ok: boolean } => {
     const W = plain ? dg.way : straight;
     const order = rev ? [...inward].reverse() : inward, about = rev ? Math.PI : 0;
     const first = at[order[0]], last = at[order[order.length - 1]];
@@ -296,9 +320,44 @@ export function visitRoute(gen: WorldGen): VisitRoute | null {
       const score = plain ? 0 : Math.min(cabin, 0) * 100 + Math.min(worst, 0) * 10 - awry([...out, ...after]) * 15 - Math.abs(turn) * n * 0.3;
       if (score > top) { top = score; come = out; ok = cabin >= 0; start = n ? { x: cx - Math.sin(h) * STEP * 0.5, z: cz - Math.cos(h) * STEP * 0.5, heading: h } : { x: first.c.x - Math.sin(h) * STEP * (lead + 0.5), z: first.c.z - Math.cos(h) * STEP * (lead + 0.5), heading: h }; }
     };
+    if (wet) {
+      // Out of the water: it lies there, and comes in from it in as straight a line as it can, bending (if it
+      // must) by `turn` a step for `n` steps from `j0` steps out from the first house. Each way is walked back
+      // from the house until it's in water it can lie in, with the same foot on the house as ever.
+      let lieAt = -1;
+      const lies = (x: number, z: number) => ground(x, z) < SEA.deep && SEA.open.every((r) => { for (let k = 0; k < 16; k++) if (ground(x + Math.cos(k / 16 * Math.PI * 2) * r, z + Math.sin(k / 16 * Math.PI * 2) * r) > -0.2) return false; return true; });
+      ok = false;
+      for (const j0 of [0, 2, 4]) for (const n of [0, 2, 3, 4, 6, 8]) for (let k = n ? 1 : 0; k <= (n ? 10 : 0); k++) for (const s of k ? [1, -1] : [1]) {
+        const turn = s * k * 0.03;
+        if (Math.abs(turn) * n > SEA.bend || (!n && j0)) continue;
+        const out: Footfall[] = [];
+        let cx = first.c.x, cz = first.c.z, h = yaw0, cabin = Infinity, worst = Infinity, found = -1;
+        for (let j = 1; j <= SEA.most; j++) {
+          if (j > j0 && j <= j0 + n) h -= turn;
+          cx -= Math.sin(h) * STEP; cz -= Math.cos(h) * STEP;
+          const side = right0 * (j % 2 ? -1 : 1);
+          const x = cx + Math.cos(h) * side * TRACK, z = cz - Math.sin(h) * side * TRACK;
+          const f = fall(x, z, h, -1);
+          worst = Math.min(worst, clear(x, z, true));
+          cabin = Math.min(cabin, gap(f) - KEEP);
+          out.unshift(f);
+          if (worst < 0 || cabin < 0) break;
+          // (It lies half a step behind its first footfall, where its feet are put together.)
+          if (j >= lead && (j - lead) % 2 === 0 && lies(cx - Math.sin(h) * STEP * 0.5, cz - Math.cos(h) * STEP * 0.5)) { found = j; break; }
+        }
+        if (found < 0) continue;
+        const score = -found - Math.abs(turn) * n * 25 - Math.abs(turn) * 40 - j0 * 0.2 - awry([...out, ...after]) * 15;
+        if (score > top) { top = score; come = out; ok = true; lieAt = found; start = { x: cx - Math.sin(h) * STEP * 0.5, z: cz - Math.cos(h) * STEP * 0.5, heading: h }; }
+      }
+      // (Its first footfalls are in the water: it's ashore once one isn't.)
+      let ashore = 0;
+      while (ashore < come.length && ground(come[ashore].x + Math.sin(come[ashore].yaw) * SOLE, come[ashore].z + Math.cos(come[ashore].yaw) * SOLE) < 0.5) ashore++;
+      const off = lieAt - lead;
+      return { route: { start, falls: [...come, ...after], firstHouse: firstHouse + off, lastHouse: lastHouse + off, wakes: true, ashore }, ok };
+    }
     comeIn(0, 0);
     if (!plain) for (const n of [1, 2, 3, 4, 6]) for (let k = 1; k <= 17; k++) for (const turn of [k * 0.1, -k * 0.1]) if (k * 0.1 * n < 2) comeIn(turn, n);
-    return { route: { start, falls: [...come, ...after], firstHouse, lastHouse }, ok };
+    return { route: { start, falls: [...come, ...after], firstHouse, lastHouse, wakes: false, ashore: 0 }, ok };
   };
 
   // As it always was, if that never comes back on itself; else whichever way does so least (up the lane, if it's all one).
@@ -307,7 +366,16 @@ export function visitRoute(gen: WorldGen): VisitRoute | null {
     const b = build(rev, false), n = awry(b.route.falls);
     if (b.ok && n < back) { pick = b.route; back = n; }
   }
-  return pick;
+  // But out of the water, if there's water to come from and it comes back on itself no more than that: the way
+  // that does it in the fewest steps and straightest (up the lane, if it's all one).
+  let wet: VisitRoute | null = null, wetCost = Infinity;
+  for (const [rev, plain] of [[false, true], [false, false], [true, false]]) {
+    const b = build(rev, plain, true);
+    if (!b.ok || awry(b.route.falls) > back) continue;
+    const cost = b.route.firstHouse + (rev ? 2 : 0) + (plain ? 0 : 1);
+    if (cost < wetCost) { wet = b.route; wetCost = cost; }
+  }
+  return wet ?? pick;
 }
 
 /** How many of some footfalls are where a walk shouldn't be: back beside its own prints, or turning on the spot. */
@@ -543,12 +611,29 @@ export class Visit {
   /** The way the lead crow comes in on the huddle, and the spot beside it the camera settles to. */
   private inDir = new THREE.Vector3(0, 0, 1);
   private beside = new THREE.Vector3();
+  /**
+   * Out of the water: seconds since it began (it lies there, gets up, sets off at `walkAt`), and the shot
+   * from the shore where it comes out (`shore`, looking at `shoreAt`). `late`: the steps it takes before it's
+   * as far from the first house as a walk up out of the ground starts, by which the village's beats wait.
+   */
+  private clock = 0;
+  private walkAt = 0;
+  private woke = false;
+  private shore = new THREE.Vector3();
+  private late = 0;
+  /** The sea off it: spray where a foot comes down in water, and water running off it as it gets up. */
+  private spray = new Puffs(BIOME.foam, 200, 0, 0.35);
+  private dripT = 0;
+  /** The streams pouring off it: which way out from its middle (its own frame), how long left, a gap before, and to the next puff. */
+  private spouts = Array.from({ length: 6 }, () => ({ x: 0, z: 1, left: 0, idle: 0, t: 0 }));
 
   constructor(private d: VisitDeps) {
     this.route = visitRoute(d.gen);
     const v = d.story.village;
+    this.group.add(this.spray.group);
     if (!this.route || !v) return;
     this.count = v.spirits.length;
+    this.late = Math.max(0, this.route.firstHouse - (LEAD_IN + 2));
     const lane = d.story.site.village!.lane, mid = (lane.length - 1) / 2;
     let best = -Infinity;
     for (const [i, p] of lane.entries()) {
@@ -638,7 +723,9 @@ export class Visit {
     const r = this.route;
     if (!r || this.state !== 'idle' || this.readied) return;
     this.readied = true;
-    this.d.summon(r.start.x, r.start.z, r.start.heading).submerge();
+    const g = this.d.summon(r.start.x, r.start.z, r.start.heading);
+    // (Out of the water: it's there to be seen, an island with trees on it, as you look about from up there.)
+    if (r.wakes) g.settle(); else g.submerge();
   }
   private readied = false;
 
@@ -653,12 +740,22 @@ export class Visit {
     if (!r || this.state !== 'idle') return false;
     const g = this.d.summon(r.start.x, r.start.z, r.start.heading);
     this.flock(g, vantage ? 0 : 1);
-    g.walkRoute(r.falls);
-    g.emerge(RISE);
-    // It stops a step past the last house, both feet down, by the yard.
-    g.pauseAt = r.lastHouse + 1;
+    this.clock = 0;
+    this.woke = false;
+    if (r.wakes) {
+      // An island in the bay, until it gets up (see `wake`).
+      g.settle();
+      this.walkAt = WAKE.still + WAKE.walk;
+      this.placeShore();
+      this.music = null;
+    } else {
+      g.walkRoute(r.falls);
+      g.emerge(RISE);
+      // It stops a step past the last house, both feet down, by the yard.
+      g.pauseAt = r.lastHouse + 1;
+      this.music = 'giant_emergence';
+    }
     this.state = 'running';
-    this.music = 'giant_emergence';
     this.fallen = 0;
     this.jt = -1;
     this.filming = false;
@@ -687,11 +784,17 @@ export class Visit {
     const f = this.route.falls[this.fallen++];
     this.dip.v -= 2.2 + (f?.house >= 0 ? 2.4 : 0);
     this.d.sound('stomp');
+    // In the water: a burst of spray, and a column of it up its shin.
+    if (this.d.gen.height(at.x, at.z) < 0.5) {
+      v1.set(at.x, 0.3, at.z);
+      this.spray.emit(v1, 16, 4.2, 11, undefined, { life: 1.3, rise: -11, drag: 0.9, up: 9 });
+      this.spray.emit(v1, 7, 3, 2.5, undefined, { life: 1.5, rise: -10, drag: 0.6, up: 15 });
+    }
     // (The last footfall before the first house: the village's piece is in by the time that one goes.)
-    if (this.music === 'giant_emergence' && this.fallen >= this.route.firstHouse - 1) this.music = 'giant_village';
-    if (this.fallen >= 2) this.d.story.spirit.mood = 'scared';
+    if ((this.music === 'giant_emergence' || (!this.music && this.route.wakes)) && this.fallen >= this.route.firstHouse - 1) this.music = 'giant_village';
+    if (this.fallen >= 2 + this.late) this.d.story.spirit.mood = 'scared';
     // The ground jumps under the village: they start, and stare.
-    if (!this.fled && this.fallen >= 2) this.d.story.village!.flinch();
+    if (!this.fled && this.fallen >= 2 + this.late) this.d.story.village!.flinch();
     if (!f || f.house < 0) return;
     // The house bursts (nobody's home: they ran). Out in the lane, they all start.
     const v = this.d.story.village!;
@@ -706,6 +809,8 @@ export class Visit {
     const g = this.giant, r = this.route, fl = this.birds;
     if (!g || !r || !fl || this.state === 'idle') return;
     this.dip.step(0, 60, 9, dt);
+    this.spray.update(dt);
+    if (this.state === 'running' && r.wakes) this.wake(dt);
     g.crown(this.hub);
     // (Its hump and the trees on it stand higher than its head: the flock wheels over the lot.)
     for (let i = 0; i < fl.birds.length; i++) this.hub.y = Math.max(this.hub.y, g.perch(i, v1).y - 2);
@@ -715,12 +820,12 @@ export class Visit {
     if (this.state === 'running') {
       const st = this.d.story, sp = st.spirit, v = st.village!;
       // They hear it: out of their doors and down the lane to the middle, as fast as they can go.
-      if (!this.fled && g.steps >= FRIGHT) {
+      if (!this.fled && g.steps >= FRIGHT + this.late) {
         this.fled = true;
         this.tail = v.panic(this.gather, this.watch, this.front, this.laneTo, this.via, RUN);
         this.d.sound('squeak');
       }
-      if (this.fled && !this.bolted && g.steps >= FRIGHT + BOLT) { this.bolted = true; this.d.scare(g.centre, this.gather); }
+      if (this.fled && !this.bolted && g.steps >= FRIGHT + this.late + BOLT) { this.bolted = true; this.d.scare(g.centre, this.gather); }
       if (this.fled && this.jt < 0) this.chase(dt);
       if (g.paused && this.jt < 0) { this.jt = 0; this.placeGuide(); }
       // (The journey has it by the doorway, facing in: for this it's out in front of it, watching.)
@@ -827,6 +932,101 @@ export class Visit {
       else if (b.light && b.glow >= 1) v.drop(i);
     }
     if (this.state === 'running') this.film(dt);
+  }
+
+  /**
+   * Out of the water: it lies there a while, an island; gets up, the sea
+   * pouring off it; and wades out toward the village. The scene's first piece
+   * of music comes in when it will just have ended as the village's does
+   * (and not before it gets up: before that there's only the sea).
+   */
+  private wake(dt: number) {
+    const g = this.giant!, r = this.route!, t0 = this.clock, t = (this.clock += dt);
+    const passed = (k: number) => t0 < k && t >= k;
+    if (passed(WAKE.still)) {
+      this.woke = true;
+      g.rise();
+      this.d.sound('stomp');
+      this.d.sound('whoosh', 0.6);
+      // The sea heaves up round it.
+      for (let k = 0; k < 10; k++) {
+        const a = (k / 10) * Math.PI * 2 + g.facing, rr = 30 + (k % 3) * 6;
+        v1.set(g.centre.x + Math.sin(a) * rr, 0.4, g.centre.z + Math.cos(a) * rr * 0.75);
+        this.spray.emit(v1, 3, 5 + (k % 2) * 1.5, 6, undefined, { life: 2.6, rise: -7, drag: 0.7, up: 12 });
+      }
+    }
+    if (passed(this.walkAt)) {
+      g.walkRoute(r.falls);
+      // It stops a step past the last house, both feet down, by the yard.
+      g.pauseAt = r.lastHouse + 1;
+    }
+    // (Once it's walking, by its steps; before, by the clock.)
+    const village = this.walkAt + (r.firstHouse - 1) * STEP_TIME + 0.6;
+    if (!this.music && t >= Math.max(WAKE.still, village - EMERGENCE + OVERLAP)) this.music = 'giant_emergence';
+    // The water pours off it while it's coming up out of it, in streams off its edges, and the sea churns
+    // round it; then it runs off it more thinly as it wades. (Presentation only: Math.random, as for dust.)
+    const wading = g.steps < r.ashore + 1;
+    if (!this.woke || (!wading && g.sunk <= 0)) return;
+    const rising = g.sunk > 0.03, cs = Math.cos(g.facing), sn = Math.sin(g.facing);
+    for (const sp of this.spouts) {
+      if ((sp.left -= dt) <= 0) {
+        // A new stream somewhere round its edge: its sides and shoulders mostly, now and then front or back.
+        const a = Math.random() < 0.75 ? (Math.random() < 0.5 ? 1 : -1) * (Math.PI / 2 + (Math.random() - 0.5) * 1.1) : (Math.random() < 0.5 ? 0 : Math.PI) + (Math.random() - 0.5) * 1.2;
+        sp.x = Math.sin(a); sp.z = Math.cos(a);
+        sp.left = (rising ? 0.8 : 0.35) + Math.random() * 0.9;
+        sp.idle = rising ? 0 : Math.random() * 1.5;
+      }
+      if (sp.idle > 0) { sp.idle -= dt; continue; }
+      if ((sp.t -= dt) > 0) continue;
+      sp.t = 1 / 20;
+      // From the outermost stone that way at shoulder height or below: in from its edge until there is some.
+      let x = 0, z = 0, y = -Infinity;
+      for (let rr = 46; rr > 8 && !(y > 3); rr -= 3) {
+        x = g.centre.x + (sp.x * cs + sp.z * sn) * rr * (Math.abs(sp.x) > 0.5 ? 1 : 0.62);
+        z = g.centre.z + (-sp.x * sn + sp.z * cs) * rr * (Math.abs(sp.x) > 0.5 ? 1 : 0.62);
+        y = g.surface(x, z, 1e4, 0);
+      }
+      if (!(y > 3)) continue;
+      v1.set(x, y - 1.2, z);
+      v2.set(x - g.centre.x, 0, z - g.centre.z).setLength(-6);
+      this.spray.emit(v1, 1, rising ? 2.4 : 1.5, 0.3, v2, { life: 1.3, rise: -20, drag: 0.1, up: -2 });
+    }
+    if (rising && (this.dripT -= dt) <= 0) {
+      this.dripT = 0.12;
+      const a = Math.random() * Math.PI * 2, rr = 26 + Math.random() * 16;
+      v1.set(g.centre.x + Math.sin(a) * rr, 0.3, g.centre.z + Math.cos(a) * rr * 0.75);
+      this.spray.emit(v1, 3, 3.5 + Math.random() * 2, 4, undefined, { life: 1.7, rise: -7, drag: 0.8, up: 5 });
+    }
+  }
+
+  /**
+   * The shot from the shore as it gets up and wades out: off to one side of
+   * where it comes ashore and low, somewhere with no trees to stand in or
+   * look through and the ground no higher than it must be, so it rises over
+   * the water and comes on past.
+   */
+  private placeShore() {
+    const r = this.route!, gy = (x: number, z: number) => Math.max(this.d.ground(x, z), 0);
+    const s0 = r.start, h = s0.heading;
+    // (What it walks while this shot lasts, and a few steps more: the camera keeps well off it.)
+    const near = r.falls.slice(0, r.ashore + 5);
+    let best = -Infinity;
+    for (const side of [1, -1]) for (const a of [0.6, 0.8, 1.0, 1.25]) for (const far of [210, 180, 240, 270]) {
+      const x = s0.x + Math.sin(h + side * a) * far, z = s0.z + Math.cos(h + side * a) * far;
+      const g0 = this.d.ground(x, z), y = gy(x, z) + 2.6;
+      let off = Infinity;
+      for (const f of near) off = Math.min(off, Math.hypot(f.x - x, f.z - z));
+      // Room for the camera, and nothing between it and where it lies (trees, or ground over the line to its hump).
+      // (A trunk near the camera hides more of it than one far off: near, the line wants more room.)
+      let room = Math.min(this.d.tree(x, z, 14) - 2, 8), hidden = 0;
+      for (const u of [0.02, 0.04, 0.07, 0.1, 0.14, 0.2, 0.3, 0.45, 0.6, 0.75, 0.9]) {
+        const px = x + (s0.x - x) * u, pz = z + (s0.z - z) * u;
+        room = Math.min(room, this.d.tree(px, pz, 16) - Math.min(14, 1 + 0.3 * far * u));
+        hidden = Math.max(hidden, gy(px, pz) - (y + (14 - y) * u));
+      }
+      const score = Math.min(room, 6) * 2 - Math.max(hidden, 0) * 3 - Math.max(0, y - 16) * 0.5 - Math.max(0, 100 - off) * 0.3 - (g0 < 0.5 ? 6 : 0) - Math.abs(far - 210) * 0.02 - Math.abs(a - 0.9) * 2;
+      if (score > best) { best = score; this.shore.set(x, y, z); }
+    }
   }
 
   /** Who the doorstep shot is of: the one with furthest to run (worked out before they've set off, too). */
@@ -1032,17 +1232,28 @@ export class Visit {
       this.pos.set(this.hub.x + Math.cos(a) * 60, this.hub.y + 9, this.hub.z + Math.sin(a) * 60).lerp(v2, e);
       this.at.copy(this.hub).setY(this.hub.y - 5).lerp(v3.copy(g.centre).setY(g.centre.y - 10), e);
       if (this.vantage) fov = THREE.MathUtils.lerp(FOV, HEAD_FOV, e);
-    } else if (phi < SEEN && this.vantage) {
+    } else if (r.wakes && (this.clock < this.walkAt || phi < r.ashore + WAKE.dry) && !(this.vantage && this.clock < WAKE.look)) {
+      // Out of the water: from the shore, low, as the island gets up and wades out past (see `placeShore`).
+      this.pos.copy(this.shore);
+      // (Its middle while it lies there is under the water: look at where its chest will be, part way.)
+      const up = this.woke ? 1 - g.sunk : 0;
+      this.at.set(g.centre.x, 12 + 22 * up, g.centre.z);
+      if (this.clock > this.walkAt) this.at.lerp(v2.copy(g.centre).setY(g.centre.y - 6), THREE.MathUtils.smoothstep(this.clock - this.walkAt, 0, 3));
+    } else if ((phi < SEEN + this.late && this.vantage) || (r.wakes && this.vantage && this.clock < WAKE.look)) {
       // From the tower's own eyes, turned to it: something very big, a long way off, coming to the village.
+      // (Out of the water, first an island in the bay; then, once it has waded out, coming on over the land.)
       this.pos.copy(this.vantage(g.centre.x, g.centre.z));
-      this.at.copy(g.centre).setY(g.centre.y - 10);
+      this.at.copy(g.centre).setY(g.dormant ? Math.max(this.d.ground(g.centre.x, g.centre.z), 0) + 6 : g.centre.y - 10);
       fov = HEAD_FOV;
-    } else if (phi < 1.6) {
+    } else if (phi < this.late) {
+      // (At home, while it's still a long way off: the whole of it and the lane.)
+      wide(250, 38);
+    } else if (phi < 1.6 + this.late) {
       // The ground thumps. The guide stops and turns.
-      const k = phi / 1.6;
+      const k = (phi - this.late) / 1.6;
       this.pos.set(sp.x - Math.sin(ly) * (4.2 - k * 0.8) + Math.cos(ly) * 1.6, sp.y + 0.9, sp.z - Math.cos(ly) * (4.2 - k * 0.8) - Math.sin(ly) * 1.6);
       this.at.set(sp.x, sp.y + 0.5 + k * 0.5, sp.z);
-    } else if (phi < r.firstHouse - 0.5 && !(this.running && this.runP.y > -1e3 && phi > FRIGHT + 0.3)) {
+    } else if (phi < r.firstHouse - 0.5 && !(this.running && this.runP.y > -1e3 && phi > FRIGHT + this.late + 0.3)) {
       // A doorstep at the far end of the lane: whoever lives there stops, stares, and bolts.
       const h = vil.houses[vil.home[this.tailFirst()]], p = h.plot, d = h.door;
       this.pos.set(d.x + Math.sin(p.rot) * 6 + Math.cos(p.rot) * 2.2, d.y + 0.75, d.z + Math.cos(p.rot) * 6 - Math.sin(p.rot) * 2.2);
