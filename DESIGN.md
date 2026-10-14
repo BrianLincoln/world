@@ -820,6 +820,15 @@ linear story laid over it, and no reason to explore.
   and a causeway over the strait as a stand-in for the first crossing; the
   cabin and rings did stay put. Not on master, not played by the owner:
   `docs/NEXT-islands.md`.)*
+- **The first crossing (owner, 2026-10-13): a wooden bridge that isn't
+  there at first.** When the first island's last dungeon is done you see
+  the giant wade the strait and come up out of it on the far side, like
+  Godzilla. Then your spirit is at that spot and guides you to build the
+  bridge, of a hundred wood or so; by then the village should have some
+  way of gaining resources by itself. *(On the branch: the bridge, which
+  can stand in part; it appears whole once the giant has crossed. The
+  sight of the crossing, the guide, the building and the village's wood
+  aren't made.)*
 - Open: what walls a zone off, fliers included; whether everything built
   so far (the giant's trail and its dungeons) is zone 1; what "progress of
   an area" is besides its dungeons; what the zones after the first are

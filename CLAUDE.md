@@ -73,9 +73,13 @@ count.** Keep this file lean. Depth lives in:
   where they stood; the deep: `isDeep`, drawn darker by `WATER_FRAG` from
   `setSea`). Only the seed everyone plays has them (`WorldGen.sea`).
   Towers: each island its own network, no link over the sea.
-  `src/world/bridge.ts`: the wooden bridge on a crossing (its deck is
-  ground to the world's query, `deckAt`; whole from the start: what breaks
-  or mends it isn't decided).
+  `src/world/bridge.ts`: the wooden bridge over the strait (its deck is
+  ground to the world's query, `deckAt`; `built` 0 to 1, a bay at a time).
+  **Not there at first** (owner): the giant wades across after the first
+  island's last dungeon, then your spirit has you build it of a hundred
+  wood or so, which the village should be making by then. Of that only the
+  bridge is made: it stands whole once the giant has crossed (`?bridge=1` /
+  `0`, `__ow.bridge(k)`). DESIGN.md "The shape of the world".
   `src/story/seaSpirit.ts`: over the deep it warns, then an arm of water
   carries you and your mount back to the shore you left (`?sea=0` off;
   `__ow.sea()`). Check with `scripts/sea.mjs <dir>` (the spirit three ways, and the bridge on foot and riding).

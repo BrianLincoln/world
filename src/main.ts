@@ -185,7 +185,7 @@ let offering4: Offering | null = null;
 const den = () => (dungeon?.inside ? dungeon : cave?.inside ? cave : hall?.inside ? hall : chasm?.inside ? chasm : null);
 // The sea spirit: out over the deep it shows itself, then lifts you back to the shore you left (story/seaSpirit.ts).
 // (`?sea=0`: it lets you be.)
-let bridges: Bridges | null = null;
+let bridges: Bridges | null = null, bridgeDev: number | null = null;
 const sea = new SeaSpirit({ get gen() { return gen; }, height: (x, z) => trail.height(x, z), safe: (x, z, y) => { const d = bridges?.deckAt(x, z, 1.5) ?? -Infinity; return y > d - 1 && y < d + 4; }, get sfx() { return storyHost?.sfx; }, spray: (at, n, size) => puffs.emit(at, n, size, 2.5) });
 scene.add(sea.group);
 const seaOn = params.get('sea') !== '0';
@@ -1174,6 +1174,7 @@ function makeVisit() {
   scene.add(hands.group);
   bridges?.dispose();
   bridges = new Bridges(gen);
+  bridges.built = 0;
   scene.add(bridges.group);
   visit?.dispose();
   ring?.dispose();
@@ -1962,6 +1963,10 @@ function frame(ts?: number) {
   if (player.current.name !== 'fly') colliders.prefetch(player.body.pos.x, player.body.pos.z);
   player.update(ctx);
   // (After you've moved: while it has you, it says where you are, and what you ride goes with you.)
+  // The bridge isn't there until the giant has waded the strait (the last dungeon of the first island done, and it
+  // lying by the next ring). Then you're to build it; that isn't made yet, so it stands whole. No story: it stands.
+  // (`?bridge=1` / `0`, or `__ow.bridge(k)`: by hand.)
+  if (bridges && bridgeDev === null) bridges.built = params.get('bridge') === '1' || (params.get('bridge') !== '0' && (!storyHost?.active || !!homecoming2?.settled)) ? 1 : 0;
   sea.update(dt, player.body, seaOn && !below && !beacons.busy && !journey?.busy && !storyBusy && (!held || sea.busy));
   input.endFrame();
   if (touch) followOnTouch(dt);
@@ -2752,6 +2757,8 @@ window.__ow = {
   siteSearchEach: () => gen.searchMs,
   /** The stone hands about the world: `hands().list` so far, `hands().survey(x, z, cells)` looks further at once. */
   hands: () => hands,
+  /** How much of the bridge stands (0 to 1, from the home shore out); `bridge(null)` gives it back to the story. */
+  bridge: (k: number | null) => { bridgeDev = k; if (bridges && k !== null) bridges.built = k; return bridges?.built; },
   /** The sea spirit: `.phase`, `.dread`, `.busy`, `.deep(x, z)`. */
   sea: () => sea,
   /** Dev: as if you'd just taken the light: the dungeon marked done, and up you come on the rockhopper. (`winDungeon(2)`: the second's, on the glimmer.) */

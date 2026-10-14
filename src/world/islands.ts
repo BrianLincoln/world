@@ -31,15 +31,13 @@ export const RINGS: [number, number][] = [[-203, 1748], [118, 3059], [89, 4408],
 /**
  * A crossing: a way over the sea from one island to the next, as a line from
  * shore to shore. The path-finder treats it as dry level ground, so a way and
- * the giant's trail can go over it. A wooden bridge stands on each
- * (world/bridge.ts), and under it the sea floor is a shoal `half` m either
- * side of the line: shallow enough for the giant to wade astride the
- * bridge, and never the deep. (What breaks a bridge or mends it is the
- * story's, and not decided.)
+ * the giant's trail can go over it. Nothing stands there at first: the sea
+ * under it is the deep like any other, and the giant wades it to its waist.
+ * The bridge (world/bridge.ts) comes later, and is the story's to say when.
  */
-export interface Crossing { name: string; a: [number, number]; b: [number, number]; half: number }
+export interface Crossing { name: string; a: [number, number]; b: [number, number] }
 export const CROSSINGS: Crossing[] = [
-  { name: 'strait', a: [105, 3440], b: [95, 4080], half: 26 },
+  { name: 'strait', a: [105, 3440], b: [95, 4080] },
 ];
 
 /**
@@ -99,10 +97,10 @@ export function sink(h: number, x: number, z: number) {
   const e = inStrait(x, z);
   if (e > 0) h = Math.max(Math.min(h, FLOOR), h - (0.6 * e * e) / (e + 50));
   const d = outside(x, z);
-  if (d <= 0) return Math.max(h, bank(x, z));
+  if (d <= 0) return h;
   // Eased in, so there's no crease along the shape's edge; then all of it, so no peak is left standing far out.
   const s = h - (SLOPE * d * d) / (d + EASE) - Math.max(0, d - GONE) * 1.4;
-  return Math.max(s < FLOOR ? Math.min(h, FLOOR) : s, bank(x, z));
+  return s < FLOOR ? Math.min(h, FLOOR) : s;
 }
 
 /** How far inside a strait's cut (x, z) is (0 or less: not in one). */
@@ -125,20 +123,6 @@ export function isDeep(x: number, z: number, h: number, more = 0) {
 export function seaUniforms() {
   const line = (pts: [number, number][]) => [pts[0][0], pts[0][1], pts[pts.length - 1][0], pts[pts.length - 1][1]];
   return { isles: ISLANDS.map((s) => line(s.pts)), isleR: ISLANDS.map((s) => s.r), straits: STRAITS.map((s) => [s.a[0], s.a[1], s.b[0], s.b[1]]), straitR: STRAITS.map((s) => s.r) };
-}
-
-/** A crossing's shoal at (x, z): its top a little uneven, well under the water, its sides falling away to the sea floor. (None: far below everything.) */
-function bank(x: number, z: number) {
-  let best = -1e9;
-  for (const c of CROSSINGS) {
-    const dx = c.b[0] - c.a[0], dz = c.b[1] - c.a[1];
-    const t = Math.max(0, Math.min(1, ((x - c.a[0]) * dx + (z - c.a[1]) * dz) / (dx * dx + dz * dz)));
-    const off = Math.hypot(x - c.a[0] - dx * t, z - c.a[1] - dz * t) - c.half;
-    if (off > 70) continue;
-    const top = -6 + 0.8 * Math.sin(x / 9 + z / 13) + 0.5 * Math.sin(z / 5.3);
-    best = Math.max(best, off <= 0 ? top : top - off * (0.55 + off * 0.012));
-  }
-  return best;
 }
 
 /** On a crossing's line (and within its half width)? */

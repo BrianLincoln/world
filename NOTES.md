@@ -6142,4 +6142,10 @@ The owner: do a lot, decide as you go, on your own branch. So on `islands`
   mounts swimming on it and the bike tipping you off. The price: swim under
   it and you're on it. The crossing's bank stayed as a shoal 6 m down, so
   the giant (its feet fall 14.5 m off its line) wades astride the bridge.
+- (Later again.) The owner: the bridge isn't there at first; the giant
+  wades across after the first island's last dungeon, and then your spirit
+  has you build it. So the shoal went (the strait is the deep all the way,
+  45 m, about the giant's legs), `Bridges.built` draws and bears only so
+  much of it (draw ranges, a bay at a time), and main stands it whole once
+  `homecoming2.settled`. The building is the next piece of work.
 
