@@ -77,7 +77,7 @@ const camera = new THREE.PerspectiveCamera(36, 1, 0.5, 18000);
  * then thrown away on the next load, before anything reads one, since they
  * hold places (felled trees, lit towers, the dungeon sites) that are gone.
  */
-const WORLD_VERSION = '6';
+const WORLD_VERSION = '7';
 try {
   // The game was Fjellheim until 2026-10-06: saves made under that name come along.
   for (const k of Object.keys(localStorage)) {
@@ -104,7 +104,8 @@ function primeDungeon(g: WorldGen) {
   // v9: a third site, where the giant walks on to after the second dungeon.
   // v10: a fourth, after the third.
   // v12: a fifth, after the fourth.)
-  const key = `embla.dungeon.v12.${g.seed}`;
+  // v13: the one world is islands, its rings pinned (world/islands.ts).
+  const key = `embla.dungeon.v13.${g.seed}`;
   try {
     const raw = localStorage.getItem(key);
     if (raw) g.presetDungeons(JSON.parse(raw));
@@ -119,7 +120,7 @@ function primeDungeon(g: WorldGen) {
  * `findStorySite` changes what it finds.
  */
 function primeStory(g: WorldGen) {
-  const key = `embla.site.v1.${g.seed}`;
+  const key = `embla.site.v2.${g.seed}`;
   try {
     const raw = localStorage.getItem(key);
     if (raw) g.presetStory(JSON.parse(raw));

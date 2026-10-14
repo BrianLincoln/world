@@ -80,6 +80,8 @@ export interface TowerNet {
 interface Field {
   base(x: number, z: number): number;
   forest(x: number, z: number, h: number): number;
+  /** The one world: which island a place is on (-1: none). Towers stand only on islands, and no link crosses the sea: an island's towers are a network of their own. */
+  island?(x: number, z: number): number;
 }
 
 interface Cand { x: number; z: number; h: number; score: number }
@@ -452,7 +454,8 @@ export function buildTowerNet(seed: number, f: Field, site: StorySite): TowerNet
   const tests = { n: 0 };
   // 1. Candidate high points: one summit per cell, around the home cabin.
   const cands: Cand[] = [];
-  const R = TOWER_REGION + TOWER_RANGE;
+  // (The one world: every island, however far it is from home.)
+  const R = f.island ? TOWER_REGION + 3000 : TOWER_REGION + TOWER_RANGE;
   const c0 = Math.floor((site.x - R) / CAND_CELL), c1 = Math.floor((site.x + R) / CAND_CELL);
   const r0 = Math.floor((site.z - R) / CAND_CELL), r1 = Math.floor((site.z + R) / CAND_CELL);
   for (let cj = r0; cj <= r1; cj++) {
@@ -470,6 +473,7 @@ export function buildTowerNet(seed: number, f: Field, site: StorySite): TowerNet
       const c = climb(f, bx, bz, 40);
       if (Math.hypot(c.x - site.x, c.z - site.z) < HOME_MIN + 120) continue;
       if (cands.some((o) => Math.hypot(o.x - c.x, o.z - c.z) < 60)) continue;
+      if (f.island && f.island(c.x, c.z) < 0) continue;
       c.score = siteScore(f, c);
       if (c.score > -Infinity) cands.push(c);
     }
@@ -498,7 +502,7 @@ export function buildTowerNet(seed: number, f: Field, site: StorySite): TowerNet
       if (l.dead) continue;
       const d = Math.hypot(l.c.x - t.x, l.c.z - t.z);
       if (d < TOWER_SPACING) { l.dead = true; continue; }
-      if (l.seen >= 0 || d > TOWER_RANGE || Math.hypot(l.c.x - site.x, l.c.z - site.z) > TOWER_REGION + 400) continue;
+      if (l.seen >= 0 || d > TOWER_RANGE || (f.island ? f.island(l.c.x, l.c.z) !== f.island(t.x, t.z) : Math.hypot(l.c.x - site.x, l.c.z - site.z) > TOWER_REGION + 400)) continue;
       tests.n++;
       if (sees(f, t.flame.x, t.flame.y, t.flame.z, l.c.x, flameOf(l.c), l.c.z)) l.seen = t.id;
     }
@@ -515,12 +519,33 @@ export function buildTowerNet(seed: number, f: Field, site: StorySite): TowerNet
     const t = add(best.c, false, p.id, yawTo(best.c.x, best.c.z, p.x, p.z));
     onAdd(t);
   }
+  // The one world: an island grows its towers from one of its own, never from across the sea. Home's
+  // island has grown; each other starts from its best-placed top (facing home) and grows the same way.
+  if (f.island) {
+    for (let id = 0; id < 16; id++) {
+      if (towers.some((t) => f.island!(t.x, t.z) === id)) continue;
+      let first: Live | null = null;
+      for (const l of live) if (!l.dead && f.island(l.c.x, l.c.z) === id && (!first || l.c.score > first.c.score)) first = l;
+      if (!first) continue;
+      first.dead = true;
+      onAdd(add(first.c, false, -1, yawTo(first.c.x, first.c.z, site.x, site.z)));
+      for (;;) {
+        let best: Live | null = null;
+        for (const l of live) if (!l.dead && l.seen >= 0 && (!best || l.c.score > best.c.score)) best = l;
+        if (!best) break;
+        best.dead = true;
+        const p = towers[best.seen];
+        onAdd(add(best.c, false, p.id, yawTo(best.c.x, best.c.z, p.x, p.z)));
+      }
+    }
+  }
 
-  // 3. Links: every pair in range that can see each other.
+  // 3. Links: every pair in range that can see each other (and are on the same island).
+  const same = (a: Tower, b: Tower) => !f.island || f.island(a.x, a.z) === f.island(b.x, b.z);
   for (let i = 0; i < towers.length; i++) {
     for (let j = i + 1; j < towers.length; j++) {
       const a = towers[i], b = towers[j];
-      if (Math.hypot(a.x - b.x, a.z - b.z) > TOWER_RANGE) continue;
+      if (Math.hypot(a.x - b.x, a.z - b.z) > TOWER_RANGE || !same(a, b)) continue;
       const known = b.parent === a.id || a.parent === b.id;
       if (!known) tests.n++;
       if (known || sees(f, a.flame.x, a.flame.y, a.flame.z, b.flame.x, b.flame.y, b.flame.z)) { a.links.push(b.id); b.links.push(a.id); }
@@ -528,7 +553,7 @@ export function buildTowerNet(seed: number, f: Field, site: StorySite): TowerNet
   }
   // The parent link was tested against the candidate's estimated flame; the
   // real stack is a little different, so make sure it's in.
-  for (const t of towers) if (t.parent >= 0 && !t.links.includes(t.parent)) { t.links.push(t.parent); towers[t.parent].links.push(t.id); }
+  for (const t of towers) if (t.parent >= 0 && same(t, towers[t.parent]) && !t.links.includes(t.parent)) { t.links.push(t.parent); towers[t.parent].links.push(t.id); }
 
   return { towers, home: towers[0], ms: performance.now() - t0, tests: tests.n, yard: homeYard(site) };
 }
@@ -555,6 +580,6 @@ export function ringTower(seed: number, id: number, site: { x: number; z: number
   for (const o of [t, t.head, t.flame, t.door, t.door.ground, ...t.boulders]) { o.x += dx; o.z += dz; }
   t.door.ground.y = f.base(t.door.ground.x, t.door.ground.z);
   t.parent = -1;
-  t.links = net.towers.filter((o) => sees(f, t.flame.x, t.flame.y, t.flame.z, o.flame.x, o.flame.y, o.flame.z)).map((o) => o.id);
+  t.links = net.towers.filter((o) => (!f.island || f.island(o.x, o.z) === f.island(site.x, site.z)) && sees(f, t.flame.x, t.flame.y, t.flame.z, o.flame.x, o.flame.y, o.flame.z)).map((o) => o.id);
   return t;
 }

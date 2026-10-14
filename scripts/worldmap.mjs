@@ -38,6 +38,8 @@ const r = await page.evaluate((extra) => {
   // ---- What's in the world. Each source gives features: { kind, x, z, r?, pts?, name?, fit? }.
   // (fit: false = drawn if it's in the picture, but the picture isn't stretched to hold it. left / dy: where its name goes.)
   const SOURCES = {
+    islands: () => (gen.islands ?? []).flatMap((s) => [{ kind: 'isle', pts: s.pts.flatMap((p) => [[p[0] - s.r, p[1] - s.r], [p[0] + s.r, p[1] + s.r]]) }, { kind: 'place', big: true, name: s.name, x: s.pts.reduce((a, p) => a + p[0], 0) / s.pts.length, z: s.pts.reduce((a, p) => a + p[1], 0) / s.pts.length - s.r * 0.72 }]),
+    crossings: () => (gen.crossings ?? []).map((c) => ({ kind: 'crossing', name: c.name, pts: [c.a, c.b] })),
     cabin: () => [{ kind: 'cabin', name: 'the cabin', x: st.x, z: st.z }],
     village: () => (st.village ? [{ kind: 'lane', pts: st.village.lane.map((p) => [p.x, p.z]) }] : []),
     farCabin: () => [{ kind: 'house', name: 'the far cabin', x: st.far.x, z: st.far.z, left: true, dy: 8 }],
@@ -51,7 +53,7 @@ const r = await page.evaluate((extra) => {
     pois: (box) => { const o = []; for (let cx = Math.floor(box[0] / 420); cx <= Math.floor(box[2] / 420); cx++) for (let cz = Math.floor(box[1] / 420); cz <= Math.floor(box[3] / 420); cz++) for (const p of gen.poisInCell(cx, cz)) if ((p.kind === 'cabin' || p.kind === 'circle') && !p.story) o.push({ kind: p.kind === 'cabin' ? 'house' : 'circle', x: p.x, z: p.z, fit: false }); return o; },
   };
   let feats = [];
-  for (const k of ['cabin', 'village', 'farCabin', 'towers', 'rides', 'rings', 'ways', 'trail']) feats.push(...SOURCES[k]());
+  for (const k of ['islands', 'crossings', 'cabin', 'village', 'farCabin', 'towers', 'rides', 'rings', 'ways', 'trail']) feats.push(...SOURCES[k]());
   feats.push(...(extra.features ?? []));
   // ---- The picture is fitted round them.
   let box = [Infinity, Infinity, -Infinity, -Infinity];
@@ -70,14 +72,14 @@ const r = await page.evaluate((extra) => {
   // ---- The land: height bands, hill shade, woods, bog, the cold above 200 m, a line every 50 m.
   const hs = new Float32Array(W * H);
   // (A mock: how far outside every island's shape, and the land sunk by that.)
-  const mock = extra.mock, isl = mock?.islands ?? [];
+  const mock = extra.mock, isl = mock?.islands ?? [], sea = !mock && gen.sea;
   const outside = (x, z) => { let best = Infinity; for (const s of isl) for (let k = 0; k < Math.max(1, s.pts.length - 1); k++) { const a = s.pts[k], b = s.pts[Math.min(s.pts.length - 1, k + 1)], dx = b[0] - a[0], dz = b[1] - a[1], t = Math.max(0, Math.min(1, ((x - a[0]) * dx + (z - a[1]) * dz) / (dx * dx + dz * dz || 1))); best = Math.min(best, Math.hypot(x - a[0] - dx * t, z - a[1] - dz * t) - s.r); } return best; };
   const ground = (x, z) => { const h = gen.height(x, z); if (!mock) return h; const d = outside(x, z); return d <= 0 ? h : Math.max(-60, h - d * (mock.slope ?? 0.2)); };
   for (let j = 0; j < H; j++) for (let i = 0; i < W; i++) hs[j * W + i] = ground(box[0] + (i + 0.5) * mpp, box[1] + (j + 0.5) * mpp);
   // (The deep: water further than `deep` metres from any shore, by a coarse sweep of the grid.)
   const far = new Uint8Array(W * H);
-  if (mock) {
-    const R = Math.round((mock.deep ?? 150) / mpp), dist = new Float32Array(W * H).fill(1e9);
+  if (mock || sea) {
+    const R = Math.round((mock?.deep ?? 120) / mpp), dist = new Float32Array(W * H).fill(1e9);
     for (let k = 0; k < W * H; k++) if (hs[k] >= 0.5) dist[k] = 0;
     for (let j = 0; j < H; j++) for (let i = 0; i < W; i++) { const k = j * W + i; if (i) dist[k] = Math.min(dist[k], dist[k - 1] + 1); if (j) dist[k] = Math.min(dist[k], dist[k - W] + 1); if (i && j) dist[k] = Math.min(dist[k], dist[k - W - 1] + 1.41); if (j && i < W - 1) dist[k] = Math.min(dist[k], dist[k - W + 1] + 1.41); }
     for (let j = H - 1; j >= 0; j--) for (let i = W - 1; i >= 0; i--) { const k = j * W + i; if (i < W - 1) dist[k] = Math.min(dist[k], dist[k + 1] + 1); if (j < H - 1) dist[k] = Math.min(dist[k], dist[k + W] + 1); if (i < W - 1 && j < H - 1) dist[k] = Math.min(dist[k], dist[k + W + 1] + 1.41); if (j < H - 1 && i) dist[k] = Math.min(dist[k], dist[k + W - 1] + 1.41); }
@@ -88,7 +90,7 @@ const r = await page.evaluate((extra) => {
   for (let j = 0; j < H; j++) for (let i = 0; i < W; i++) {
     const h = hs[j * W + i], o = (j * W + i) * 4, x = box[0] + (i + 0.5) * mpp, z = box[1] + (j + 0.5) * mpp;
     let col;
-    if (h < 0.5) col = far[j * W + i] ? [104, 132, 158] : h < -6 && !mock ? [150, 176, 190] : [170, 194, 203];
+    if (h < 0.5) col = far[j * W + i] ? [104, 132, 158] : h < -6 && !mock && !sea ? [150, 176, 190] : [170, 194, 203];
     else {
       land++; top = Math.max(top, h);
       const hn = hs[Math.max(0, j - 1) * W + Math.max(0, i - 1)], shade = Math.max(0.78, Math.min(1.14, 1 + ((hn - h) / mpp) * 0.55));
@@ -122,6 +124,7 @@ const r = await page.evaluate((extra) => {
   const name = (f, px, dx = 9, col = INK, it = false) => { if (f.name) names.push({ t: f.name, q: P(f.x, f.z), px, dx: f.left ? -dx : dx, dy: f.dy ?? 0, left: f.left, col, it }); };
   const mid = (pts) => { let x = 0, z = 0; for (const p of pts) { x += p[0]; z += p[1]; } return { x: x / pts.length, z: z / pts.length }; };
   const DRAW = {
+    isle: () => {},
     zone: (f) => { c.strokeStyle = 'rgba(160,50,40,0.75)'; c.lineWidth = 3; c.setLineDash([14, 8]); c.beginPath(); if (f.pts) { f.pts.forEach((p, i) => { const q = P(p[0], p[1]); i ? c.lineTo(...q) : c.moveTo(...q); }); c.closePath(); } else c.arc(...P(f.x, f.z), f.r / mpp, 0, 7); c.stroke(); c.setLineDash([]); name({ name: f.name, ...(f.pts ? mid(f.pts) : f) }, 30, 0, 'rgba(140,40,30,0.85)', true); },
     links: (f) => { for (const l of f.links ?? []) line([[f.x, f.z], l], 'rgba(90,60,50,0.16)', 1); },
     lane: (f) => line(f.pts, INK, 2.5),
@@ -141,7 +144,7 @@ const r = await page.evaluate((extra) => {
     place: (f) => name(f, f.big ? 30 : 17, 0, f.big ? 'rgba(140,40,30,0.9)' : INK, true),
     planned: (f) => { dot(f.x, f.z, Math.max(7, (f.r ?? 0) / mpp), null, '#a02a20', 2.5); name(f, 17, 12, '#a02a20', true); },
   };
-  const ORDER = ['zone', 'links', 'way', 'ride', 'lane', 'trail', 'line', 'crossing', 'circle', 'house', 'hand', 'tower', 'second', 'home', 'ring', 'cabin', 'place', 'planned'];
+  const ORDER = ['isle', 'zone', 'links', 'way', 'ride', 'lane', 'trail', 'line', 'crossing', 'circle', 'house', 'hand', 'tower', 'second', 'home', 'ring', 'cabin', 'place', 'planned'];
   // (In a mock, what would be under the sea isn't drawn, the rings and the cabin apart: they'd be found again.)
   if (mock) for (const f of feats) delete f.links;
   if (mock) feats = feats.filter((f) => f.pts || ['ring', 'cabin', 'place'].includes(f.kind) || ground(f.x, f.z) >= 0.5);
@@ -183,6 +186,7 @@ const r = await page.evaluate((extra) => {
     box, size: [W, H], mpp, landShare: +(land / (W * H)).toFixed(2), coldShareOfLand: +(cold / Math.max(1, land)).toFixed(3), highest: Math.round(top),
     cabin: [Math.round(st.x), Math.round(st.z)], towers: net.towers.length, towerReach: Math.round(Math.max(...net.towers.map((t) => d(t, st)))),
     rings: rings.map((s, n) => ({ n: n + 1, at: [Math.round(s.x), Math.round(s.z)], h: Math.round(s.y), fromCabin: d(s, st), fromPrev: n ? d(s, rings[n - 1]) : null })),
+    crossings: (gen.crossings ?? []).map((k) => { const n = Math.round(Math.hypot(k.b[0] - k.a[0], k.b[1] - k.a[1]) / 4); let wet = 0, deep = 0; for (let i = 0; i <= n; i++) { const x = k.a[0] + (k.b[0] - k.a[0]) * i / n, z = k.a[1] + (k.b[1] - k.a[1]) * i / n; if (gen.height(x, z) < 0.5) { wet++; if (far[Math.floor((z - box[1]) / mpp) * W + Math.floor((x - box[0]) / mpp)]) deep++; } } return { name: k.name, endsAt: [Math.round(gen.height(...k.a)), Math.round(gen.height(...k.b))], length: n * 4, water: wet * 4, deep: deep * 4 }; }),
     hands: feats.filter((f) => f.kind === 'hand').length, cabins: feats.filter((f) => f.kind === 'house').length, circles: feats.filter((f) => f.kind === 'circle').length,
   };
 }, extra);
