@@ -59,6 +59,13 @@ count.** Keep this file lean. Depth lives in:
   decision.
 - `docs/WORKFLOW.md`: how to verify with screenshots and perf, plus the
   gotchas that have already bitten.
+- `docs/worldmap.png`: the map of the one world (owner, 2026-10-13: it
+  grows as the story does). `node scripts/worldmap.mjs` draws it from the
+  world itself, so a new ring or tower is on it the next time it runs:
+  **run it again when you add or move something in the world.** Names, and
+  things decided but not built (zones, crossings), go in
+  `docs/worldmap.json` by hand. The direction it serves is DESIGN.md "The
+  shape of the world": one world, to be bounded, in zones. Not built.
 
 ## Stack
 Three.js (hand-written GLSL3 `ShaderMaterial`s, no built-in lighting) +

@@ -6062,3 +6062,48 @@ sealed the lock's upright strap runs across the sign.
   the sawhorse (they go by one side of it), and whoever saws stands clear
   of it. The saw and the mallet lie on the ground when nobody has them
   (leant up, the saw hung in the air).
+
+## The map of the world (2026-10-13)
+
+The owner wants one world (not one per player), bounded, in zones, each
+unlocking the next (DESIGN.md "The shape of the world": a direction,
+nothing built). To talk about it we needed to see the land we have.
+
+- `scripts/worldmap.mjs` draws `docs/worldmap.png`: the land (height bands,
+  hill shade, woods, bog, the cold above 200 m, a line every 50 m), a square
+  every kilometre numbered in world kilometres, and everything built, read
+  from the world: the cabin and lane, towers and their links, the guided
+  rides, the rings, the ways to them, every footfall of the giant, the
+  stone hands, the cabins and stone circles.
+- **It grows.** The picture is fitted round what's in the world at a fixed
+  8 m to a pixel, so a sixth ring further on makes a bigger map. A new kind
+  of thing is one line in `SOURCES` (collect it) and one in `DRAW`.
+- What the game can't know is `docs/worldmap.json`, kept by hand: the
+  rings' names, and features of kinds `place`, `planned`, `zone`,
+  `crossing`, `line`, for things decided before they're built.
+- What it showed (seed "hilda", a box 12.4 by 13.4 km): the land is not an
+  island, it is lakes in land and runs off every edge. The trail goes almost
+  due south from the cabin: the rings are 1.4, 2.7, 4.1, 5.3 and 6.4 km from
+  it, 1.2 to 1.35 km apart. Towers reach 5.6 km, so ring 5 is already past
+  the last of them. In the box: 63 towers, 65 hands, 376 cabins, 30 stone
+  circles, nearly all of them doing nothing.
+
+## Islands, mocked on the map (2026-10-13)
+
+The owner is open to zones being islands, with a sea spirit (not stamina)
+turning you back from the deep: DESIGN.md "The shape of the world".
+
+- `scripts/worldmap.mjs out.png mock=<file.json>` draws a mock of a shape
+  for the land and touches nothing in the game: each island is a line of
+  points and a radius; inside it the land is today's, outside it sinks
+  `slope` metres a metre, so high ground reaches further out and the coast
+  follows the hills. Water more than `deep` m from any shore is drawn dark.
+- Three were drawn (`docs/mock/islands-a|b|c`): one long island, two along
+  the trail, an archipelago. **The owner chose C, the archipelago.**
+- Seen in them: a strait fits between rings 2 and 3 (B's came out too
+  narrow, C's is about 400 m); under the cabin, rings and trail the land
+  is unchanged, so they might not have to move. Not proved: the site
+  searches read land further off (routes, towers, POIs).
+- Not done: the land itself (`worldgen.ts`), which wipes every save; the
+  sea spirit (a prototype was proposed as its own session and not started).
+
