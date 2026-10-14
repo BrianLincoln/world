@@ -51,6 +51,15 @@ export class OrbitCamera {
   private dip = 0;
   private dipVel = 0;
   private lead = new THREE.Vector2();
+  /** How much of the orbit distance is clear of the occluder (eased; 1 = all of it). */
+  private pull = 1;
+  private probe = new THREE.Vector3();
+  /**
+   * Something solid the camera shouldn't sit behind: given the focus and
+   * where the camera would be, how far along that line is clear (0..1).
+   * The camera pulls in quickly to stay in front of it and eases back out.
+   */
+  occluder: ((from: THREE.Vector3, to: THREE.Vector3) => number) | null = null;
 
   constructor(public camera: THREE.PerspectiveCamera) {
     this.baseFov = camera.fov;
@@ -83,6 +92,7 @@ export class OrbitCamera {
       this.fovKick = hints.fovKick;
       this.dip = this.dipVel = 0;
       this.lead.set(0, 0);
+      this.pull = 1;
       this.initialized = true;
     }
     const e = (rate: number) => 1 - Math.exp(-rate * dt);
@@ -123,16 +133,25 @@ export class OrbitCamera {
     const orbitPitch = Math.max(this.pitch, ORBIT_MIN_PITCH);
     const lookUp = orbitPitch - this.pitch;
     const upK = lookUp / (ORBIT_MIN_PITCH - MIN_PITCH);
-    const dist = this.distance * this.distScale * (1 - 0.3 * upK * (2 - upK));
+    const full = this.distance * this.distScale * (1 - 0.3 * upK * (2 - upK));
     const cp = Math.cos(orbitPitch);
     const tx = this.target.x + this.lead.x;
     const tz = this.target.z + this.lead.y;
     const c = this.camera.position;
-    c.set(
-      tx + Math.sin(this.yaw) * cp * dist,
-      this.target.y + Math.sin(orbitPitch) * dist + this.dip,
-      tz + Math.cos(this.yaw) * cp * dist,
+    const place = (d: number) => c.set(
+      tx + Math.sin(this.yaw) * cp * d,
+      this.target.y + Math.sin(orbitPitch) * d + this.dip,
+      tz + Math.cos(this.yaw) * cp * d,
     );
+    place(full);
+    let want = 1;
+    if (this.occluder) {
+      const f = this.occluder(this.probe.set(tx, this.target.y, tz), c);
+      if (f < 1) want = THREE.MathUtils.clamp((f * full - 0.7) / full, Math.min(1, 1.6 / full), 1);
+    }
+    this.pull += (want - this.pull) * (want < this.pull ? e(14) : e(2));
+    const dist = full * this.pull;
+    place(dist);
     const floor = floorAt(c.x, c.z) + 0.6;
     if (c.y < floor) c.y = floor;
     const ay = this.target.y + 0.3 + this.dip * 0.6;

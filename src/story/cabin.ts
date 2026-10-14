@@ -202,6 +202,27 @@ export class RuinCabin implements Buildable {
     return Math.abs(l.x) < CAB.W / 2 - CAB.thick - margin && Math.abs(l.z) < CAB.D / 2 - CAB.thick - margin;
   }
 
+  /**
+   * How far along the line from a (the explorer) to b (the camera) it gets
+   * before the cabin's shell is in the way: 0..1, 1 = clear. A box to the
+   * eaves, then the gable's two slopes. Lines that start inside are left to
+   * the cutaway.
+   */
+  sightline(a: THREE.Vector3, b: THREE.Vector3): number {
+    const la = siteToLocal(this.site, a.x, a.z), lb = siteToLocal(this.site, b.x, b.z);
+    const ay = a.y - this.site.y, by = b.y - this.site.y;
+    const hw = CAB.W / 2 + CAB.over, hd = CAB.D / 2 + CAB.over;
+    const top = (z: number) => CAB.wallTop + CAB.rise * Math.max(0, 1 - Math.abs(z) / (CAB.D / 2));
+    const solid = (x: number, y: number, z: number) => Math.abs(x) < hw && Math.abs(z) < hd && y > -0.5 && y < top(z);
+    if (solid(la.x, ay, la.z)) return 1;
+    const N = 24;
+    for (let i = 1; i <= N; i++) {
+      const t = i / N;
+      if (solid(la.x + (lb.x - la.x) * t, ay + (by - ay) * t, la.z + (lb.z - la.z) * t)) return (i - 1) / N;
+    }
+    return 1;
+  }
+
   /** Horizontal camera right vector (slot rows face the viewer). */
   private camRight = new THREE.Vector3(1, 0, 0);
 

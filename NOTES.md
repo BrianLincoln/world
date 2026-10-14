@@ -6062,3 +6062,15 @@ sealed the lock's upright strap runs across the sign.
   the sawhorse (they go by one side of it), and whoever saws stands clear
   of it. The saw and the mallet lie on the ground when nobody has them
   (leant up, the saw hung in the air).
+
+## The camera never sits behind the cabin (2026-10-14)
+- Owner: getting on the gift bike in the yard, the camera often had the cabin in the way. On 'hilda' it ended up
+  inside the cabin (the cutaway hid the walls, but the door was left standing between it and you); on 'fjord' it
+  was pressed against the eaves.
+- The orbit camera has an `occluder` (the focus and where the camera would be → how far along that line is clear,
+  0..1): it comes in quickly to stay in front of it and eases back out (`pull`; never nearer than 1.6 m). Main sets it
+  to `RuinCabin.sightline` (a box to the eaves plus the gable) whenever the story is on and you're above ground.
+  No movement mode knows about it, and lines that start inside the cabin are left to the cutaway.
+- Only the cabin for now: the stable and the village houses could be added the same way if they get in the way.
+- `scripts/giftmount.mjs <dir> [seeds=..] [from=..]`: the gift shot, a walk to the bike by the keys, E, and two
+  seconds of riding off; prints per seed whether the cabin was between the camera and you (exits 1 if so).

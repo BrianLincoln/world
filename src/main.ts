@@ -2228,6 +2228,9 @@ function frame(ts?: number) {
   const bikeK = mode === 'bike' ? THREE.MathUtils.clamp((hs - 8) / 50, 0, 1.4) : 0;
   // (Down in the dungeon its own clamp keeps the camera over the floor: the plan's floor out in the rock,
   // where an unclamped camera often is, is no floor at all, and lifting the camera to it made it jump.)
+  // The camera never sits behind the cabin: it comes in in front of it (getting on the gift bike in the yard, it often did).
+  const cabin = !den() && storyHost?.active ? storyHost.story?.cabin : null;
+  orbit.occluder = cabin ? (a, b) => cabin.sightline(a, b) : null;
   orbit.update(focus, dt, (x, z) => (den() ? -1e9 : Math.max(trail.height(x, z), SEA_LEVEL)), {
     fovKick: 3.5 * sprint + 7 * fall + (3 + THREE.MathUtils.clamp((hs - 9) / 6, 0, 1) * 4) * glide + 8 * flyK + 6 * rideK + 9 * bikeK,
     distScale: 1 + 0.12 * sprint + 0.15 * fall + 0.4 * glide + (mode === 'ride' ? (den() ? 0.08 : 0.25 + 0.2 * rideK) : 0) + 0.3 * bikeK + (mode === 'ride' ? 1.5 * wallCamK : 0),
