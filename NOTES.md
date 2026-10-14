@@ -6148,4 +6148,11 @@ The owner: do a lot, decide as you go, on your own branch. So on `islands`
   45 m, about the giant's legs), `Bridges.built` draws and bears only so
   much of it (draw ranges, a bay at a time), and main stands it whole once
   `homecoming2.settled`. The building is the next piece of work.
+- (And again.) The building and the mill. `story/bridgeWork.ts` is its own
+  small thing and not a `Part` of the director's: build.ts gives every
+  piece of material a slot, and a hundred slots is a wall of them, so ten
+  slots stand for ten wood each. It reads and takes `story.inv.logs`
+  directly. `story/mill.ts` adds to the same count. Both are made in the
+  frame loop once the story is up, and thrown away in `makeVisit`.
+  Gotcha met in the test: `?t=` switches the story off.
 

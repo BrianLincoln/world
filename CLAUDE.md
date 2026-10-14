@@ -77,12 +77,17 @@ count.** Keep this file lean. Depth lives in:
   ground to the world's query, `deckAt`; `built` 0 to 1, a bay at a time).
   **Not there at first** (owner): the giant wades across after the first
   island's last dungeon, then your spirit has you build it of a hundred
-  wood or so, which the village should be making by then. Of that only the
-  bridge is made: it stands whole once the giant has crossed (`?bridge=1` /
-  `0`, `__ow.bridge(k)`). DESIGN.md "The shape of the world".
+  wood. `src/story/bridgeWork.ts`: the building (its sketch and ten slots
+  once `homecoming2.settled`; wood goes in from anywhere within reach;
+  nothing bears you until all 100 are in; `embla.bridge.<seed>`;
+  `?bridge=1` / `0`, `__ow.bridge(k)`, `__ow.bridgeWork().debug(n)`).
+  `src/story/mill.ts`: the village's lumber mill (a board a minute of
+  play on to its stack, yours when you walk up; stands once a spirit is
+  home; `embla.mill.<seed>`, `__ow.mill()`). Not made: the camera on the
+  giant wading over, and the guide at the water's edge.
   `src/story/seaSpirit.ts`: over the deep it warns, then an arm of water
   carries you and your mount back to the shore you left (`?sea=0` off;
-  `__ow.sea()`). Check with `scripts/sea.mjs <dir>` (the spirit three ways, and the bridge on foot and riding).
+  `__ow.sea()`). Check with `scripts/sea.mjs <dir>` (the spirit three ways, the bridge on foot and riding, and `build`: mill, sketch and crossing in the story).
 
 ## Stack
 Three.js (hand-written GLSL3 `ShaderMaterial`s, no built-in lighting) +

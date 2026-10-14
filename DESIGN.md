@@ -825,10 +825,13 @@ linear story laid over it, and no reason to explore.
   the giant wade the strait and come up out of it on the far side, like
   Godzilla. Then your spirit is at that spot and guides you to build the
   bridge, of a hundred wood or so; by then the village should have some
-  way of gaining resources by itself. *(On the branch: the bridge, which
-  can stand in part; it appears whole once the giant has crossed. The
-  sight of the crossing, the guide, the building and the village's wood
-  aren't made.)*
+  way of gaining resources by itself. **It is a sketch you feed, like the
+  stable's fence, from anywhere in reach, and see-through until it's
+  complete, so nobody sneaks over early. And the village gets a lumber
+  mill, which adds lumber as you play: the first of "more and more ways to
+  expand the village"** (owner, the same day). *(On the branch: the
+  bridge, its building for 100 wood, and a mill making a board a minute.
+  The sight of the giant crossing and the guide at the spot aren't made.)*
 - Open: what walls a zone off, fliers included; whether everything built
   so far (the giant's trail and its dungeons) is zone 1; what "progress of
   an area" is besides its dungeons; what the zones after the first are
