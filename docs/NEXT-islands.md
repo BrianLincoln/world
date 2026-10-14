@@ -28,9 +28,13 @@ DESIGN.md "The shape of the world".
    carry on and an arm of water lifts you, with whatever you ride, and sets
    you down on the shore of the island you left. Swimming, riding and
    flying all the same. `?sea=0` switches it off.
-5. **A causeway crosses the strait**, a low sandy bank on the giant's line,
-   so the story can still be played from ring 2 to ring 3. The giant walks
-   over it. **It is a stand-in:** nothing gates it.
+5. **A wooden bridge crosses the strait** (`src/world/bridge.ts`), on
+   trestles, about 440 m long, on the giant's line, so the story can still
+   be played from ring 2 to ring 3. Its deck is ground to everything that
+   walks, rides or cycles, and the spirit leaves you be on it. Under it the
+   sea floor is a shoal, so the giant wades astride it, a foot either side.
+   (First it was a sandy causeway; the owner: not that, a wooden bridge.)
+   **Nothing gates it yet:** it stands whole from the start.
 6. **Each island has its own towers** (47 in all), and no link crosses the
    sea, so a tower can't carry you to another island.
 7. Every save is wiped (`WORLD_VERSION` 7).
@@ -45,14 +49,17 @@ DESIGN.md "The shape of the world".
 5. It sets you down toward where you last stood on dry ground, on that
    island, never on the nearest shore of all.
 6. Islands apply to the one seed only.
-7. The first crossing is a plain causeway for now, open from the start.
+7. The first crossing is a whole bridge for now, open from the start.
 8. Towers: each island grows its own from its best hilltop.
 
 ## Known rough
 - **The spirit is a first shape**: a column of beads, a palm, two flat
   eyes. No face, no sound of its own (it borrows three), nothing in the
   music. The camera does nothing special.
-- **The causeway is bare sand in a straight line.**
+- **The bridge is a first shape**, dead straight, no ramp or gate at its
+  ends, and you can walk off its side between the posts. Swimming under it
+  lifts you on to it. Nobody has watched the giant walk astride it: its
+  second walk now counts as wading in `scripts/sites.mjs`, as meant.
 - Not measured: frame rate (less land is drawn than before, and the water's
   shader does more), and load time.
 - Not played: the story from a fresh save on this land. The ways to the

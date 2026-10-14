@@ -31,14 +31,15 @@ export const RINGS: [number, number][] = [[-203, 1748], [118, 3059], [89, 4408],
 /**
  * A crossing: a way over the sea from one island to the next, as a line from
  * shore to shore. The path-finder treats it as dry level ground, so a way and
- * the giant's trail can go over it. For now each is a causeway: a low bank of
- * ground `half` m either side of the line, just clear of the water, with the
- * deep on both sides of it. (A stand-in, so the story can be played across:
- * what a crossing is, and what opens it, is the story's and not decided.)
+ * the giant's trail can go over it. A wooden bridge stands on each
+ * (world/bridge.ts), and under it the sea floor is a shoal `half` m either
+ * side of the line: shallow enough for the giant to wade astride the
+ * bridge, and never the deep. (What breaks a bridge or mends it is the
+ * story's, and not decided.)
  */
 export interface Crossing { name: string; a: [number, number]; b: [number, number]; half: number }
 export const CROSSINGS: Crossing[] = [
-  { name: 'strait', a: [105, 3440], b: [95, 4080], half: 11 },
+  { name: 'strait', a: [105, 3440], b: [95, 4080], half: 26 },
 ];
 
 /**
@@ -126,7 +127,7 @@ export function seaUniforms() {
   return { isles: ISLANDS.map((s) => line(s.pts)), isleR: ISLANDS.map((s) => s.r), straits: STRAITS.map((s) => [s.a[0], s.a[1], s.b[0], s.b[1]]), straitR: STRAITS.map((s) => s.r) };
 }
 
-/** A causeway's bank at (x, z): its top a little uneven, its sides falling away to the sea floor. (No bank: far below everything.) */
+/** A crossing's shoal at (x, z): its top a little uneven, well under the water, its sides falling away to the sea floor. (None: far below everything.) */
 function bank(x: number, z: number) {
   let best = -1e9;
   for (const c of CROSSINGS) {
@@ -134,7 +135,7 @@ function bank(x: number, z: number) {
     const t = Math.max(0, Math.min(1, ((x - c.a[0]) * dx + (z - c.a[1]) * dz) / (dx * dx + dz * dz)));
     const off = Math.hypot(x - c.a[0] - dx * t, z - c.a[1] - dz * t) - c.half;
     if (off > 70) continue;
-    const top = 2.6 + 0.5 * Math.sin(x / 9 + z / 13) + 0.35 * Math.sin(z / 5.3);
+    const top = -6 + 0.8 * Math.sin(x / 9 + z / 13) + 0.5 * Math.sin(z / 5.3);
     best = Math.max(best, off <= 0 ? top : top - off * (0.55 + off * 0.012));
   }
   return best;
@@ -145,7 +146,7 @@ export function onCrossing(x: number, z: number, more = 0) {
   for (const c of CROSSINGS) {
     const dx = c.b[0] - c.a[0], dz = c.b[1] - c.a[1];
     const t = Math.max(0, Math.min(1, ((x - c.a[0]) * dx + (z - c.a[1]) * dz) / (dx * dx + dz * dz)));
-    if (Math.hypot(x - c.a[0] - dx * t, z - c.a[1] - dz * t) < c.half + more) return true;
+    if (Math.hypot(x - c.a[0] - dx * t, z - c.a[1] - dz * t) < 9 + more) return true;
   }
   return false;
 }

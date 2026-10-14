@@ -6134,4 +6134,12 @@ The owner: do a lot, decide as you go, on your own branch. So on `islands`
   each island without a tower starts from its best top.
 - Left: the first crossing as a thing in the story; frame rate; a play
   through. `docs/NEXT-islands.md`.
+- (Later the same day.) The causeway went: the owner pictured a wooden
+  bridge. `world/bridge.ts` builds one along each crossing where the ground
+  is below its deck. Its deck is in the world's `groundHeight` and
+  `floorHeight`, not a collider: walking, riding and the bicycle all ask
+  `groundHeight` for "is this water", so anything less would have had
+  mounts swimming on it and the bike tipping you off. The price: swim under
+  it and you're on it. The crossing's bank stayed as a shoal 6 m down, so
+  the giant (its feet fall 14.5 m off its line) wades astride the bridge.
 

@@ -69,13 +69,16 @@ count.** Keep this file lean. Depth lives in:
   **On the branch `islands` (not master, not played by the owner) the one
   world is five islands in a sea**: `docs/NEXT-islands.md`.
   `src/world/islands.ts` (the shapes, the strait cut between home and
-  south, the crossing over it: a causeway, a stand-in; the rings pinned
+  south, the crossing over it; the rings pinned
   where they stood; the deep: `isDeep`, drawn darker by `WATER_FRAG` from
   `setSea`). Only the seed everyone plays has them (`WorldGen.sea`).
   Towers: each island its own network, no link over the sea.
+  `src/world/bridge.ts`: the wooden bridge on a crossing (its deck is
+  ground to the world's query, `deckAt`; whole from the start: what breaks
+  or mends it isn't decided).
   `src/story/seaSpirit.ts`: over the deep it warns, then an arm of water
   carries you and your mount back to the shore you left (`?sea=0` off;
-  `__ow.sea()`). Check with `scripts/sea.mjs <dir>`.
+  `__ow.sea()`). Check with `scripts/sea.mjs <dir>` (the spirit three ways, and the bridge on foot and riding).
 
 ## Stack
 Three.js (hand-written GLSL3 `ShaderMaterial`s, no built-in lighting) +

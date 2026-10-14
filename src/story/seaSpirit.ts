@@ -30,6 +30,8 @@ export interface SeaDeps {
   /** The ground as you stand on it (prints, pads and all). */
   height(x: number, z: number): number;
   sfx?: Sfx;
+  /** Somewhere it leaves you be, deep or not (on a bridge). */
+  safe?(x: number, z: number, y: number): boolean;
   /** A burst of spray at a place: how many, how big. */
   spray?(at: THREE.Vector3, n: number, size: number): void;
 }
@@ -85,7 +87,7 @@ export class SeaSpirit {
     const p = body.pos, ground = this.d.height(p.x, p.z);
     // Where you last stood on dry ground: that's the island you left.
     if (!this.busy && body.grounded && ground > 0.8 && p.y - ground < 1.5) { const id = islandAt(p.x, p.z); if (id >= 0) { this.home.copy(p); this.homeIsle = id; this.hasHome = true; } }
-    const over = on && this.hasHome && p.y < 600 && this.deep(p.x, p.z);
+    const over = on && this.hasHome && p.y < 600 && this.deep(p.x, p.z) && !this.d.safe?.(p.x, p.z, p.y);
     switch (this.phase) {
       case 'calm':
         if (over) { this.phase = 'warn'; this.t = 0; this.d.sfx?.sink(); }

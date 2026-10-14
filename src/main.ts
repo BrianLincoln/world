@@ -46,6 +46,7 @@ import { Homecoming } from './giant/homecoming';
 import { Offering, OFFER_SHORT } from './giant/offering';
 import { Hands } from './world/hands';
 import { DEEP, DEEP_OUT, seaUniforms } from './world/islands';
+import { Bridges } from './world/bridge';
 import { SeaSpirit } from './story/seaSpirit';
 import { Ring, type RingDeps } from './giant/ring';
 import { restOf, Visit } from './giant/visit';
@@ -184,14 +185,16 @@ let offering4: Offering | null = null;
 const den = () => (dungeon?.inside ? dungeon : cave?.inside ? cave : hall?.inside ? hall : chasm?.inside ? chasm : null);
 // The sea spirit: out over the deep it shows itself, then lifts you back to the shore you left (story/seaSpirit.ts).
 // (`?sea=0`: it lets you be.)
-const sea = new SeaSpirit({ get gen() { return gen; }, height: (x, z) => trail.height(x, z), get sfx() { return storyHost?.sfx; }, spray: (at, n, size) => puffs.emit(at, n, size, 2.5) });
+let bridges: Bridges | null = null;
+const sea = new SeaSpirit({ get gen() { return gen; }, height: (x, z) => trail.height(x, z), safe: (x, z, y) => { const d = bridges?.deckAt(x, z, 1.5) ?? -Infinity; return y > d - 1 && y < d + 4; }, get sfx() { return storyHost?.sfx; }, spray: (at, n, size) => puffs.emit(at, n, size, 2.5) });
 scene.add(sea.group);
 const seaOn = params.get('sea') !== '0';
 // Stone hands standing about the world, on islands and summits (world/hands.ts). They do nothing yet.
 let hands: Hands | null = null;
 const world: WorldQuery = {
-  groundHeight: (x, z) => den()?.floorAt(x, z) ?? trail.height(x, z),
-  floorHeight: (x, z, feetY, r) => den()?.floorAt(x, z, feetY) ?? Math.max(trail.height(x, z), colliders.surface(x, z, feetY, r), storyHost?.story?.surface(x, z, feetY, r, 0.5) ?? -Infinity, beacons?.surface(x, z, feetY) ?? -Infinity, giant?.surface(x, z, feetY, 0.6) ?? -Infinity),
+  // (A bridge's deck is ground to everything that moves: world/bridge.ts.)
+  groundHeight: (x, z) => den()?.floorAt(x, z) ?? Math.max(trail.height(x, z), bridges?.deckAt(x, z) ?? -Infinity),
+  floorHeight: (x, z, feetY, r) => den()?.floorAt(x, z, feetY) ?? Math.max(trail.height(x, z), bridges?.deckAt(x, z) ?? -Infinity, colliders.surface(x, z, feetY, r), storyHost?.story?.surface(x, z, feetY, r, 0.5) ?? -Infinity, beacons?.surface(x, z, feetY) ?? -Infinity, giant?.surface(x, z, feetY, 0.6) ?? -Infinity),
   collide: (pos, vel, r, rampMax, noTrees) => {
     const d = den();
     if (d) { d.collide(pos, vel, r); return; }
@@ -1169,6 +1172,9 @@ function makeVisit() {
   hands?.dispose();
   hands = new Hands(gen);
   scene.add(hands.group);
+  bridges?.dispose();
+  bridges = new Bridges(gen);
+  scene.add(bridges.group);
   visit?.dispose();
   ring?.dispose();
   ring2?.dispose();
