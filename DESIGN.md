@@ -816,6 +816,10 @@ linear story laid over it, and no reason to explore.
   the story doesn't use yet. Today's land kept inside each shape and sunk
   outside it, so the cabin, rings and trail may be able to stay where they
   are (not proved). A picture so far: the land hasn't moved.
+  *(2026-10-13, later: built on the branch `islands`, with the sea spirit
+  and a causeway over the strait as a stand-in for the first crossing; the
+  cabin and rings did stay put. Not on master, not played by the owner:
+  `docs/NEXT-islands.md`.)*
 - Open: what walls a zone off, fliers included; whether everything built
   so far (the giant's trail and its dungeons) is zone 1; what "progress of
   an area" is besides its dungeons; what the zones after the first are

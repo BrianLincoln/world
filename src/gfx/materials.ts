@@ -118,7 +118,25 @@ export const WATER_U = {
   cShallow: { value: col(BIOME.waterShallow) },
   cFoam: { value: col(BIOME.foam) },
   cReflect: { value: col('#f4e6d4') },
+  // The one world's sea (world/islands.ts): the islands and straits, for drawing the deep darker.
+  uSea: { value: 0 },
+  uIsle: { value: Array.from({ length: 8 }, () => new THREE.Vector4()) },
+  uIsleR: { value: new Float32Array(8) },
+  uStrait: { value: Array.from({ length: 2 }, () => new THREE.Vector4()) },
+  uStraitR: { value: new Float32Array(2) },
+  uDeep: { value: new THREE.Vector2(25, 40) },
 };
+
+/** The one world has a sea: hand its shape to the water (`seaUniforms()` of world/islands.ts), or `null` for none. */
+export function setSea(s: { isles: number[][]; isleR: number[]; straits: number[][]; straitR: number[] } | null, deep = 25, out = 40) {
+  WATER_U.uSea.value = s ? 1 : 0;
+  if (!s) return;
+  WATER_U.uIsleR.value.fill(-1e6);
+  s.isles.forEach((l, i) => { WATER_U.uIsle.value[i].set(l[0], l[1], l[2], l[3]); WATER_U.uIsleR.value[i] = s.isleR[i]; });
+  WATER_U.uStraitR.value.fill(-1e6);
+  s.straits.forEach((l, i) => { WATER_U.uStrait.value[i].set(l[0], l[1], l[2], l[3]); WATER_U.uStraitR.value[i] = s.straitR[i]; });
+  WATER_U.uDeep.value.set(deep, out);
+}
 
 export const SKY_U = {
   uInvProj: { value: new THREE.Matrix4() },

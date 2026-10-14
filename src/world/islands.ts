@@ -13,6 +13,7 @@ import { seedFromString } from '../core/rng';
 /** The seed everyone plays. */
 export const ONE_WORLD = seedFromString('hilda');
 
+/** (Two points each, so far: the water's shader takes a shape as one line.) */
 export interface Island { name: string; pts: [number, number][]; r: number }
 
 /** `home` has the cabin and rings 1 and 2; `south`, across the strait, rings 3 to 5. The rest the story hasn't reached. */
@@ -30,11 +31,14 @@ export const RINGS: [number, number][] = [[-203, 1748], [118, 3059], [89, 4408],
 /**
  * A crossing: a way over the sea from one island to the next, as a line from
  * shore to shore. The path-finder treats it as dry level ground, so a way and
- * the giant's trail can go over it. (What stands there is the story's.)
+ * the giant's trail can go over it. For now each is a causeway: a low bank of
+ * ground `half` m either side of the line, just clear of the water, with the
+ * deep on both sides of it. (A stand-in, so the story can be played across:
+ * what a crossing is, and what opens it, is the story's and not decided.)
  */
 export interface Crossing { name: string; a: [number, number]; b: [number, number]; half: number }
 export const CROSSINGS: Crossing[] = [
-  { name: 'strait', a: [105, 3440], b: [95, 4080], half: 9 },
+  { name: 'strait', a: [105, 3440], b: [95, 4080], half: 11 },
 ];
 
 /**
@@ -46,8 +50,13 @@ export const STRAITS: { a: [number, number]; b: [number, number]; r: number }[] 
   { a: [-1100, 3770], b: [1300, 3770], r: 215 },
 ];
 
-/** Water further than this from every shore is the deep (m). */
-export const DEEP = 120;
+/**
+ * The deep: sea this far down or more (m), out past an island's shape or in
+ * a strait. It's drawn darker (`WATER_FRAG` does this same sum), and it is
+ * what the sea spirit keeps (story/seaSpirit.ts). A lake inland is never the
+ * deep, however far down it goes.
+ */
+export const DEEP = 25, DEEP_OUT = 40;
 
 /** How fast the land sinks outside a shape (m a metre, once it's going), and how far out it has all gone. */
 const SLOPE = 0.3, EASE = 90, GONE = 260, FLOOR = -45;
@@ -86,17 +95,49 @@ export function islandAt(x: number, z: number) {
 
 /** The land's height `h` at (x, z), sunk for the sea round the islands. */
 export function sink(h: number, x: number, z: number) {
+  const e = inStrait(x, z);
+  if (e > 0) h = Math.max(Math.min(h, FLOOR), h - (0.6 * e * e) / (e + 50));
+  const d = outside(x, z);
+  if (d <= 0) return Math.max(h, bank(x, z));
+  // Eased in, so there's no crease along the shape's edge; then all of it, so no peak is left standing far out.
+  const s = h - (SLOPE * d * d) / (d + EASE) - Math.max(0, d - GONE) * 1.4;
+  return Math.max(s < FLOOR ? Math.min(h, FLOOR) : s, bank(x, z));
+}
+
+/** How far inside a strait's cut (x, z) is (0 or less: not in one). */
+function inStrait(x: number, z: number) {
+  let best = 0;
   for (const c of STRAITS) {
     const dx = c.b[0] - c.a[0], dz = c.b[1] - c.a[1];
     const t = Math.max(0, Math.min(1, ((x - c.a[0]) * dx + (z - c.a[1]) * dz) / (dx * dx + dz * dz)));
-    const e = c.r + 0.5 * wander(z, x) - Math.hypot(x - c.a[0] - dx * t, z - c.a[1] - dz * t);
-    if (e > 0) h = Math.max(Math.min(h, FLOOR), h - (0.6 * e * e) / (e + 50));
+    best = Math.max(best, c.r + 0.5 * wander(z, x) - Math.hypot(x - c.a[0] - dx * t, z - c.a[1] - dz * t));
   }
-  const d = outside(x, z);
-  if (d <= 0) return h;
-  // Eased in, so there's no crease along the shape's edge; then all of it, so no peak is left standing far out.
-  const s = h - (SLOPE * d * d) / (d + EASE) - Math.max(0, d - GONE) * 1.4;
-  return s < FLOOR ? Math.min(h, FLOOR) : s;
+  return best;
+}
+
+/** Is the water at (x, z), over ground at height `h`, the deep? (`more`: only once this much further down.) */
+export function isDeep(x: number, z: number, h: number, more = 0) {
+  return h < -(DEEP + more) && (inStrait(x, z) > 0 || outside(x, z) > DEEP_OUT);
+}
+
+/** The islands and straits as the water's shader wants them: lines as (ax, az, bx, bz), and their radii. */
+export function seaUniforms() {
+  const line = (pts: [number, number][]) => [pts[0][0], pts[0][1], pts[pts.length - 1][0], pts[pts.length - 1][1]];
+  return { isles: ISLANDS.map((s) => line(s.pts)), isleR: ISLANDS.map((s) => s.r), straits: STRAITS.map((s) => [s.a[0], s.a[1], s.b[0], s.b[1]]), straitR: STRAITS.map((s) => s.r) };
+}
+
+/** A causeway's bank at (x, z): its top a little uneven, its sides falling away to the sea floor. (No bank: far below everything.) */
+function bank(x: number, z: number) {
+  let best = -1e9;
+  for (const c of CROSSINGS) {
+    const dx = c.b[0] - c.a[0], dz = c.b[1] - c.a[1];
+    const t = Math.max(0, Math.min(1, ((x - c.a[0]) * dx + (z - c.a[1]) * dz) / (dx * dx + dz * dz)));
+    const off = Math.hypot(x - c.a[0] - dx * t, z - c.a[1] - dz * t) - c.half;
+    if (off > 70) continue;
+    const top = 2.6 + 0.5 * Math.sin(x / 9 + z / 13) + 0.35 * Math.sin(z / 5.3);
+    best = Math.max(best, off <= 0 ? top : top - off * (0.55 + off * 0.012));
+  }
+  return best;
 }
 
 /** On a crossing's line (and within its half width)? */

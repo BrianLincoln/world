@@ -65,7 +65,17 @@ count.** Keep this file lean. Depth lives in:
   **run it again when you add or move something in the world.** Names, and
   things decided but not built (zones, crossings), go in
   `docs/worldmap.json` by hand. The direction it serves is DESIGN.md "The
-  shape of the world": one world, to be bounded, in zones. Not built.
+  shape of the world": one world, bounded, in zones.
+  **On the branch `islands` (not master, not played by the owner) the one
+  world is five islands in a sea**: `docs/NEXT-islands.md`.
+  `src/world/islands.ts` (the shapes, the strait cut between home and
+  south, the crossing over it: a causeway, a stand-in; the rings pinned
+  where they stood; the deep: `isDeep`, drawn darker by `WATER_FRAG` from
+  `setSea`). Only the seed everyone plays has them (`WorldGen.sea`).
+  Towers: each island its own network, no link over the sea.
+  `src/story/seaSpirit.ts`: over the deep it warns, then an arm of water
+  carries you and your mount back to the shore you left (`?sea=0` off;
+  `__ow.sea()`). Check with `scripts/sea.mjs <dir>`.
 
 ## Stack
 Three.js (hand-written GLSL3 `ShaderMaterial`s, no built-in lighting) +

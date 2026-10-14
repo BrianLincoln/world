@@ -6107,3 +6107,31 @@ turning you back from the deep: DESIGN.md "The shape of the world".
 - Not done: the land itself (`worldgen.ts`), which wipes every save; the
   sea spirit (a prototype was proposed as its own session and not started).
 
+## The islands, for real, on a branch (2026-10-13)
+
+The owner: do a lot, decide as you go, on your own branch. So on `islands`
+(a worktree, so the other session's checkout wasn't touched):
+
+- `world/islands.ts`: `sink()` at the end of `baseHeight` for the one seed
+  (`WorldGen.sea`). Inside a shape nothing changes (the coast's wander stops
+  200 m in), which is why the start site and the rings stayed where they
+  were; the rings are pinned all the same (`RINGS`, `pinnedSites`), since
+  the tower network did change and the old search read it.
+- The strait is its own cut (`STRAITS`), because the two shapes' spill left
+  only a couple of hundred metres of shallow water between them.
+- The deep is by depth (25 m) and place (outside a shape, or in a strait),
+  because the water's vertex shader already has the depth: the fragment
+  shader repeats `outside` / `inStrait` from uniforms, so TS and GLSL agree
+  on where the dark water is. By distance from shore would have wanted a
+  baked field.
+- The spirit moves the body after `player.update` and the frame loop keeps
+  its hands off (`held`), so whatever is ridden goes where the body goes:
+  no dismount, no mode of its own.
+- A crossing is dry level ground to `route()` (`onCrossing`), so the way to
+  ring 3 and the giant's walk go over the strait. For now it is also a real
+  bank of ground (`bank`), so anything can cross: a stand-in.
+- Towers: candidates only on islands, seen only from their own island, and
+  each island without a tower starts from its best top.
+- Left: the first crossing as a thing in the story; frame rate; a play
+  through. `docs/NEXT-islands.md`.
+

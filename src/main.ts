@@ -4,7 +4,7 @@ import './style.css';
 import { seedFromString } from './core/rng';
 import { Environment } from './gfx/environment';
 import { GroundShadow, groundShadowSettings } from './gfx/groundShadow';
-import { initMaterials, TERRAIN_U, U, DUNGEON_U } from './gfx/materials';
+import { initMaterials, setSea, TERRAIN_U, U, DUNGEON_U } from './gfx/materials';
 import { PostPipeline, postSettings } from './gfx/post';
 import { Warmth } from './story/warmth';
 import { Snow } from './story/snow';
@@ -45,6 +45,8 @@ import { HOME, type DigSite } from './story/village';
 import { Homecoming } from './giant/homecoming';
 import { Offering, OFFER_SHORT } from './giant/offering';
 import { Hands } from './world/hands';
+import { DEEP, DEEP_OUT, seaUniforms } from './world/islands';
+import { SeaSpirit } from './story/seaSpirit';
 import { Ring, type RingDeps } from './giant/ring';
 import { restOf, Visit } from './giant/visit';
 import { TowerDebug } from './ui/towerDebug';
@@ -130,6 +132,9 @@ function primeStory(g: WorldGen) {
 }
 /** Dev: how long the search for the dungeon sites took on this load (0: they were cached). */
 let siteSearchMs = 0;
+// The one world's sea: the water draws its deep darker (world/islands.ts).
+const seaLook = () => setSea(gen.sea ? seaUniforms() : null, DEEP, DEEP_OUT);
+seaLook();
 const terrain = new Terrain(gen.seed);
 terrain.dungeons = primeDungeon(gen);
 terrain.story = gen.story;
@@ -177,6 +182,11 @@ let chasm: DropCave | null = null;
 let offering4: Offering | null = null;
 /** Whichever dungeon you're down in (while you are, it is the world), or null. */
 const den = () => (dungeon?.inside ? dungeon : cave?.inside ? cave : hall?.inside ? hall : chasm?.inside ? chasm : null);
+// The sea spirit: out over the deep it shows itself, then lifts you back to the shore you left (story/seaSpirit.ts).
+// (`?sea=0`: it lets you be.)
+const sea = new SeaSpirit({ get gen() { return gen; }, height: (x, z) => trail.height(x, z), get sfx() { return storyHost?.sfx; }, spray: (at, n, size) => puffs.emit(at, n, size, 2.5) });
+scene.add(sea.group);
+const seaOn = params.get('sea') !== '0';
 // Stone hands standing about the world, on islands and summits (world/hands.ts). They do nothing yet.
 let hands: Hands | null = null;
 const world: WorldQuery = {
@@ -1686,6 +1696,7 @@ if (params.get('mode') === 'fly') {
 function setSeed(s: string) {
   seedText = s;
   gen = new WorldGen(seedFromString(s));
+  seaLook();
   wayHome = null;
   terrain.dungeons = primeDungeon(gen);
   terrain.story = gen.story;
@@ -1904,7 +1915,7 @@ function frame(ts?: number) {
 
   const storyBusy = !!storyHost?.story?.busy || !!visit?.busy || !!offering?.busy || !!homecoming?.busy || !!offering2?.busy || !!homecoming2?.busy || !!offering3?.busy || !!homecoming3?.busy || !!homecoming4?.busy || !!offering4?.busy;
   /** In a ring's arms (either way), and down in a dungeon. */
-  const held = !!ring?.busy || !!ring2?.busy || !!ring3?.busy || !!ring4?.busy || !!dungeon?.busy || !!cave?.busy || !!hall?.busy || !!chasm?.busy, below = !!den();
+  const held = !!ring?.busy || !!ring2?.busy || !!ring3?.busy || !!ring4?.busy || !!dungeon?.busy || !!cave?.busy || !!hall?.busy || !!chasm?.busy || sea.busy, below = !!den();
   if (devFly.on && input.pressed('KeyF') && !riding && !cycling && !beacons.busy && !journey?.busy && !storyBusy && !held && !below) player.set(player.current.name === 'fly' ? 'walk' : 'fly', ctx);
   // Only take the press (pressed() consumes it) when a tower is on offer.
   const beaconUsed = !!beacons.action(player.current.name) && (input.pressed('KeyE') || input.pressed('Mouse0')) && beacons.act(player.current.name);
@@ -1944,6 +1955,8 @@ function frame(ts?: number) {
   stelkWork(dt);
   if (player.current.name !== 'fly') colliders.prefetch(player.body.pos.x, player.body.pos.z);
   player.update(ctx);
+  // (After you've moved: while it has you, it says where you are, and what you ride goes with you.)
+  sea.update(dt, player.body, seaOn && !below && !beacons.busy && !journey?.busy && !storyBusy && (!held || sea.busy));
   input.endFrame();
   if (touch) followOnTouch(dt);
 
@@ -2733,6 +2746,8 @@ window.__ow = {
   siteSearchEach: () => gen.searchMs,
   /** The stone hands about the world: `hands().list` so far, `hands().survey(x, z, cells)` looks further at once. */
   hands: () => hands,
+  /** The sea spirit: `.phase`, `.dread`, `.busy`, `.deep(x, z)`. */
+  sea: () => sea,
   /** Dev: as if you'd just taken the light: the dungeon marked done, and up you come on the rockhopper. (`winDungeon(2)`: the second's, on the glimmer.) */
   winDungeon,
   /** The second dungeon, the Veil Cave (null until you've been down): `.round`, `.play`, `.she`, `.layout.at`, `.goTo(name)`, `.debugRound(n)`, `.debugYours()`. `enterCave()` is its ring taking you; `enterCave(x, z)` stands you at a point of its plan; `leaveCave()` brings you up. */
