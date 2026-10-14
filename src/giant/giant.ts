@@ -62,6 +62,8 @@ const MOUTH = [-0.3, 0.95];
 const GAPE = new THREE.Vector3(0, -0.458, 0.889);
 /** With its mouth open it lifts its head and tips it back, clear of its chest: how far up and forward (m), and back (rad). */
 const CHIN_UP = 3.5, CHIN_OUT = 1.5, CHIN_BACK = 0.45;
+/** Sat awake (the offering's end, its smile): its head stays up and out clear of its chest (m), tipped back a little (rad). Let down, it sank its chin into its chest. */
+const SIT: [number, number, number] = [4.5, 3.5, 0.12];
 /** The head bone on the torso. */
 const NECK: [number, number] = [26, 13.5];
 /** The head boulder: where on the head bone, and its radii. */
@@ -201,6 +203,8 @@ export class Giant {
   private mouthNow = 0;
   /** Its head lifted for its open mouth (0..1): up with the mouth, and down again slowly once that's shut. */
   private chinNow = 0;
+  /** Its head held up while it sits awake (0..1). */
+  private sitNow = 0;
   private lidNow = 0.45;
   private grinNow = 0;
   private lookNow = new THREE.Vector2();
@@ -417,6 +421,7 @@ export class Giant {
     this.grinNow = this.grin;
     this.mouthNow = this.mouth;
     this.chinNow = this.mouth > 0 ? 1 : 0;
+    this.sitNow = this.dormant && this.awake ? 1 : 0;
     this.lidNow = this.lidWant();
     this.pose(0);
   }
@@ -696,13 +701,15 @@ export class Giant {
         const dx = this.look.x - va.x, dz = this.look.z - va.z;
         yaw = Math.atan2(dx, dz) - this.pelvis.rotation.y;
         yaw = THREE.MathUtils.clamp(Math.atan2(Math.sin(yaw), Math.cos(yaw)), -0.55, 0.55);
-        pitch = THREE.MathUtils.clamp(Math.atan2(va.y - this.look.y, Math.hypot(dx, dz)) - 0.1, -0.1, 0.3);
+        // (Only a little down: any further and its chin goes into its chest.)
+        pitch = THREE.MathUtils.clamp(Math.atan2(va.y - this.look.y, Math.hypot(dx, dz)) - 0.1, -0.12, 0.08);
       }
       const k = 1 - Math.exp(-1.1 * dt);
       this.lookNow.x += (yaw - this.lookNow.x) * k;
       this.lookNow.y += (pitch - this.lookNow.y) * k;
     }
     this.chinNow = this.mouth > 0 ? Math.min(1, this.chinNow + dt / 2.2) : this.mouthNow > 0 ? this.chinNow : Math.max(0, this.chinNow - dt / 2.6);
+    this.sitNow = this.dormant && this.awake ? Math.min(1, this.sitNow + dt / 2.2) : Math.max(0, this.sitNow - dt / 2.6);
     const on = this.footing();
     this.pose(dt);
     if (on) this.carry(on);
@@ -793,9 +800,10 @@ export class Giant {
 
     torso.rotation.set(LEAN + UP.lean * squat + UP.push * push + 0.035 * Math.sin(phi * Math.PI * 2) * (this.walking ? 1 : 0) + 0.012 * breathe, -twist * 1.5, -0.07 * sway);
     torso.scale.setScalar(1 + 0.008 * breathe);
-    const chin = this.chinNow * this.chinNow * (3 - 2 * this.chinNow);
-    head.position.set(0, NECK[0] + CHIN_UP * chin, NECK[1] + CHIN_OUT * chin);
-    head.rotation.set(-LEAN * 0.7 - 0.6 * (UP.lean * squat + UP.push * push) - 0.02 * breathe + this.lookNow.y - CHIN_BACK * chin, twist * 0.6 + this.lookNow.x, 0.03 * sway);
+    const chin = this.chinNow * this.chinNow * (3 - 2 * this.chinNow), sat = this.sitNow * this.sitNow * (3 - 2 * this.sitNow);
+    const tip = Math.max(CHIN_BACK * chin, SIT[2] * sat);
+    head.position.set(0, NECK[0] + Math.max(CHIN_UP * chin, SIT[0] * sat), NECK[1] + Math.max(CHIN_OUT * chin, SIT[1] * sat));
+    head.rotation.set(-LEAN * 0.7 - 0.6 * (UP.lean * squat + UP.push * push) - 0.02 * breathe + this.lookNow.y - tip, twist * 0.6 + this.lookNow.x, 0.03 * sway);
     pelvis.updateMatrixWorld(true);
 
     // The limbs' bones hang off the group, not the pelvis, so they're placed in the group's own space: what

@@ -113,11 +113,11 @@ const HEAVE_HOLD = 1.0, RISE_HOLD = 1.3, TOP_BACK = 8.2, TOP_ASIDE = 4.8, TOP_UP
 /** The crow's swoop: how far out from the bowl it's down and level (m), how far round from the giant toward the near camera it comes in (rad), how long before the bowl its claws start down (s), and how far over the bowl it hangs afterwards (m). */
 const LEVEL = 20, ASKEW = 0.7, CLAWS = 0.8, HANG = 3.5;
 /** The camera for the giant's face: how far in front of it (toward the ring), how far to one side, and how far above (m). */
-const CAM_FRONT = 40, CAM_ASIDE = 15, CAM_ABOVE = 2;
+const CAM_FRONT = 40, CAM_ASIDE = 15, CAM_ABOVE = 6;
 /** The light's size in your mittens and in the bowl, and under the crow (as the lights the other crows carry). */
 const ORB = 0.34, ORB_CROW = 0.95;
 /** The cameras' field of view: by the shrine, close on the giant's face as it wakes, back for the crow flying in, and on the smile. */
-const FOV = 36, FOV_RISE = 64, FOV_TOP = 40, FOV_FACE = 20, FOV_WIDE = 40, FOV_SMILE = 25;
+const FOV = 36, FOV_RISE = 64, FOV_TOP = 40, FOV_FACE = 20, FOV_WIDE = 40, FOV_SMILE = 30;
 /** The crow's way in: how far out in front of the lips it lines up, and how far past the middle of the head it gets (see `Giant.throat`). */
 const LINE_UP = 5, DEEP_IN = -0.2;
 /** The crow flies in this far over the middle of the mouth (m): the light hangs under its feet, and it's the two of them together that go through the middle, clear of both lips. */

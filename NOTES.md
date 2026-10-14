@@ -6074,3 +6074,6 @@ sealed the lock's upright strap runs across the sign.
 - Only the cabin for now: the stable and the village houses could be added the same way if they get in the way.
 - `scripts/giftmount.mjs <dir> [seeds=..] [from=..]`: the gift shot, a walk to the bike by the keys, E, and two
   seconds of riding off; prints per seed whether the cabin was between the camera and you (exits 1 if so).
+
+## The giant's head at the offering's smile (2026-10-14)
+- Once the crow was in and the mouth shut, the head came down off its open-mouth lift and pitched down at the bowl, so on the smile its chin sank into its chest boulder ("phased into its body"). Now while it sits awake (`dormant && awake`: the end of every offering, through the homecoming's crow leaving) its head is held up and out clear of its chest (`SIT` in giant.ts), and `look` pitches it down no more than 0.08 rad. It eases back down as it gets up. The face camera stands 4 m higher (`CAM_ABOVE` 6) and the smile is framed wider (`FOV_SMILE` 30) so the gap under its chin reads. Same for all four offerings.
