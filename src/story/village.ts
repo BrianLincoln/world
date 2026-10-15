@@ -8,7 +8,7 @@ import { colored, merge as mergeParts, PartBatch } from '../mobs/parts';
 import type { Plot, VillageSite } from '../world/storySite';
 import { gable, K, kbox, merge, rbox } from './geometry';
 import { glintMat, propMesh } from './props';
-import { buildLadder, buildMallet, buildSaw, buildSawhorse, CUT_Z, HORSE_TOP } from './chores';
+import { buildHatchet, buildLadder, buildLog, buildMallet, buildSaw, buildSawhorse, CUT_Z, HORSE_TOP } from './chores';
 import { Spirit } from './spirit';
 import type { Gesture } from './spirit';
 
@@ -178,7 +178,7 @@ export interface House {
   doorX: number; leaf: THREE.Object3D; ajar: number;
 }
 
-type Doing = 'home' | 'stroll' | 'look' | 'back' | 'meet' | 'chat' | 'part' | 'in' | 'inside' | 'out' | 'work' | 'toBed' | 'bed' | 'toDig' | 'grab' | 'stow' | 'scoop' | 'carry' | 'toss' | 'job';
+type Doing = 'home' | 'stroll' | 'look' | 'back' | 'meet' | 'chat' | 'part' | 'in' | 'inside' | 'out' | 'work' | 'toBed' | 'bed' | 'toDig' | 'grab' | 'stow' | 'scoop' | 'carry' | 'toss' | 'job' | 'mjob';
 /** At the heap with a shovel, or on the way there. */
 const DIGGING = new Set<Doing>(['toDig', 'grab', 'stow', 'scoop', 'carry', 'toss']);
 
@@ -230,6 +230,8 @@ interface Pose { pos: THREE.Vector3; quat: THREE.Quaternion; size?: THREE.Vector
  */
 interface Thing {
   stone: boolean; pos: THREE.Vector3; quat: THREE.Quaternion; size: THREE.Vector3; tint: THREE.Color;
+  /** A log (the mill's): drawn round, its length along x. */
+  log?: boolean;
   /** Whose yard it's in (a house), and on whose head it is (-1: nobody's). */
   yard: number; on: number;
   /** On its way somewhere: from where, to where (null: up on to `on`'s head), and how far along. */
@@ -266,6 +268,40 @@ interface Job {
   t: number; left: number; seen: number; n: number;
   thing: Thing | null; piece: Piece | null;
 }
+/**
+ * The lumber mill, for the village to work (story/mill.ts; the bridge, docs/NEXT-bridge.md): its sawhorse,
+ * its pile of logs and where boards go once they're sawn (its own stack, or a wagon being loaded). Looks and
+ * counts both: a log carried in is one on the pile, three boards stacked are three more.
+ */
+export interface MillWorks {
+  /** The sawhorse (its local z along the log), and the pile's near side. */
+  horse: THREE.Object3D;
+  pileAt: THREE.Vector3;
+  logs(): number;
+  takeLog(): boolean;
+  addLog(): void;
+  /** Where sawn boards are wanted now: who carries them stands at `at` facing `face`, and `add` puts them there. */
+  boardsTo(): { at: THREE.Vector3; face: THREE.Vector3; add(n: number): void };
+  /** A standing tree to fell for `k`, near the mill (null: none in reach). */
+  tree(k: number, from: THREE.Vector3): { x: number; z: number; r: number } | null;
+  /** It falls (away from `from`) and is gone: no wood to anybody's pack. */
+  fell(tree: { x: number; z: number }, from: THREE.Vector3): void;
+  /** Through the night too (the wagon's being loaded). */
+  urgent(): boolean;
+  /** A sound of the work, as loud as you're near it: 'chop' at a trunk, 'saw' at the horse. */
+  sound(n: 'chop' | 'saw' | 'fall', at: THREE.Vector3): void;
+}
+/** A turn at the mill: felling a tree and carrying the log in, or sawing a log into boards and taking them where they're wanted. */
+interface MillJob {
+  kind: 'fell' | 'saw'; stage: string; t: number;
+  thing: Thing | null; tree: { x: number; z: number; r: number } | null;
+  /** Boards cut from the log on the horse, and the strokes counted so far. */
+  n: number; seen: number;
+  boards: Thing[];
+}
+/** A log as it's carried (length, across), boards cut from one, and a stroke of the hatchet's worth of chopping. */
+const LOG = { L: 1.7, D: 0.3, BOARDS: 3, CHOPS: 9 };
+
 /** A board on the sawhorse: how long a fresh one is, what's sawn off it each time, and its section. */
 const BOARD = 2.2, CUT = 0.45, THICK = 0.1, WIDE = 0.36;
 /** How far to the side of its middle a spirit's tool hand is, and how far above its feet a mallet lands. */
@@ -298,6 +334,8 @@ interface Life {
   shovel: number; loads: number;
   /** At a chore in a yard (`doing` is 'job'), and how far up a ladder it is (m). */
   job: Job | null; up: number;
+  /** At the lumber mill (`MillWorks`): felling, or sawing and stacking; and until it next thinks of going there. */
+  mj: MillJob | null; millT?: number;
 }
 /** Eye height (for looking one another in the face). */
 const EYE = 0.34;
@@ -380,6 +418,14 @@ export class Village {
   private sawB = new PartBatch(buildSaw(), { keep: 0.5 }, 6);
   private malletB = new PartBatch(buildMallet(), { keep: 0.5 }, 6);
   private dust = new Puffs(BIOME.cutWood, 30, 0, 0.5);
+  /** The lumber mill, once it stands (null: none to work), its saw, the fellers' hatchets, and the log on its sawhorse. */
+  private works: MillWorks | null = null;
+  private millSaw = new THREE.Object3D();
+  private hatchets: THREE.Object3D[] = [];
+  private onHorse: Thing | null = null;
+  private logB = new PartBatch(buildLog(), { keep: 0.5 }, 16);
+  private hatchetB = new PartBatch(buildHatchet(), { keep: 0.5 }, 6);
+  private chips = new Puffs(BIOME.cutWood, 24, 0, 0.6);
 
   constructor(readonly site: VillageSite, d: VillageDeps) {
     this.seed = d.seed;
@@ -443,7 +489,7 @@ export class Village {
         spirit.haste = 1.6 + hash01(n, 3, d.seed, 979) * 0.5;
         this.life.push({
           doing: 'home', t: 1.5 + hash01(n, 4, d.seed, 979) * 10, mate: -1, turn: 0, next: 0, spot: at.clone(), sits, face: this.mid, gt: 0, due: null,
-          hailT: 3 + hash01(n, 5, d.seed, 979) * 12, greetT: 0, side: (n % 2 ? 1 : -1) * (0.5 + hash01(n, 6, d.seed, 979) * 0.8), shovel: -1, loads: 0, job: null, up: 0,
+          hailT: 3 + hash01(n, 5, d.seed, 979) * 12, greetT: 0, side: (n % 2 ? 1 : -1) * (0.5 + hash01(n, 6, d.seed, 979) * 0.8), shovel: -1, loads: 0, job: null, up: 0, mj: null,
         });
         this.eyes.push(at.clone().setY(at.y + EYE));
         this.spirits.push(spirit);
@@ -456,6 +502,8 @@ export class Village {
     this.mid.set(mid.x, d.ground(mid.x, mid.z) + EYE, mid.z);
     this.group.add(this.smoke.group, this.boards.mesh, this.stones.mesh, this.heapB.mesh, this.dirtB.mesh, this.shovelB.mesh, this.dirt.group);
     this.group.add(this.plankB.mesh, this.rockB.mesh, this.horseB.mesh, this.ladderB.mesh, this.sawB.mesh, this.malletB.mesh, this.dust.group);
+    this.group.add(this.logB.mesh, this.hatchetB.mesh, this.chips.group);
+    for (let i = 0; i < 4; i++) this.hatchets.push(new THREE.Object3D());
     this.yards = this.houses.map(() => null);
   }
 
@@ -945,6 +993,8 @@ export class Village {
     for (const [k, l] of this.life.entries()) if (l.shovel >= 0 && (!this.calm || this.taken[k] || this.held.has(k) || !DIGGING.has(l.doing))) this.putDown(k);
     // (Nor is anyone at a chore who has been called off to something else.)
     for (const [k, l] of this.life.entries()) if (l.job && (!this.calm || this.taken[k] || this.held.has(k) || l.doing !== 'job')) this.quit(k);
+    for (const [k, l] of this.life.entries()) if (l.mj && (!this.calm || this.taken[k] || this.held.has(k) || l.doing !== 'mjob' || !this.works)) this.quitMill(k);
+    this.chips.update(dt);
     if (this.calm) this.mill(dt, player);
     this.dirt.update(dt);
     this.dust.update(dt);
@@ -1178,8 +1228,8 @@ export class Village {
     this.say(k, g, secs + 0.1, l.face, at);
   }
 
-  private thing(yard: number, stone: boolean, pos: THREE.Vector3, quat: THREE.Quaternion, size: THREE.Vector3, tint: THREE.Color): Thing {
-    const t: Thing = { stone, pos: pos.clone(), quat: quat.clone(), size: size.clone(), tint, yard, on: -1, flit: null };
+  private thing(yard: number, stone: boolean, pos: THREE.Vector3, quat: THREE.Quaternion, size: THREE.Vector3, tint: THREE.Color, log = false): Thing {
+    const t: Thing = { stone, log, pos: pos.clone(), quat: quat.clone(), size: size.clone(), tint, yard, on: -1, flit: null };
     this.things.push(t);
     return t;
   }
@@ -1336,6 +1386,307 @@ export class Village {
   }
 
   /** `k` is done with its chore, or called off it: tools back where they're kept, and anything on its head back where it came from. */
+  // ------------------------------------------------------------ the lumber mill
+
+  /** The lumber mill stands, to be worked (or with null, nothing to work): whoever's home and free takes a turn at it. */
+  millWorks(w: MillWorks | null) {
+    if (this.works === w) return;
+    this.works = w;
+    for (const [k, l] of this.life.entries()) { if (l.mj) { this.quitMill(k); if (!this.taken[k] && !this.held.has(k) && this.calm) this.goHome(k); } l.millT = 0; }
+    if (w) this.restSaw();
+  }
+
+  /** Who's at the mill now, and at what (dev: `fell` / `saw` and the stage). */
+  get millHands(): { k: number; kind: string; stage: string }[] {
+    return this.life.flatMap((l, k) => (l.mj ? [{ k, kind: l.mj.kind, stage: l.mj.stage }] : []));
+  }
+
+  /** The saw where it's kept: lying along the sawhorse's beam. */
+  private restSaw() {
+    const w = this.works, sw = this.millSaw;
+    if (!w) return;
+    sw.removeFromParent();
+    sw.position.copy(w.horse.localToWorld(v1.set(0.06, HORSE_TOP + 0.02, -0.42)));
+    sw.quaternion.copy(w.horse.quaternion).multiply(q2.setFromEuler(e1.set(0, 0, Math.PI / 2)));
+    sw.updateMatrixWorld(true);
+  }
+
+  /** Where the sawyer stands, and what it looks at. */
+  private sawSpot(out: THREE.Vector3) { return this.works!.horse.localToWorld(out.set(0.66, 0, CUT_Z - HAND)); }
+  private sawFaceAt() { return this.works!.horse.localToWorld(new THREE.Vector3(0, 0.3, CUT_Z - HAND)); }
+
+  /** A log lying on the sawhorse, its end `lead` past the cut. */
+  private horseLog(len: number): Pose {
+    const w = this.works!;
+    return { pos: w.horse.localToWorld(new THREE.Vector3(0, HORSE_TOP + LOG.D / 2, CUT_Z + 0.25 - len / 2)), quat: w.horse.quaternion.clone().multiply(q2.setFromAxisAngle(UP, -Math.PI / 2)), size: new THREE.Vector3(len, LOG.D, LOG.D) };
+  }
+
+  /** A turn at the mill for `k`: the sawhorse if nobody's at it and there's a log for it (or one coming), else off to fell one. */
+  private millJob(k: number): boolean {
+    const w = this.works!, s = this.spirits[k], l = this.life[k];
+    const jobs = this.life.filter((o) => o.mj);
+    const sawyer = jobs.some((o) => o.mj!.kind === 'saw'), fellers = jobs.filter((o) => o.mj!.kind === 'fell').length;
+    let kind: 'fell' | 'saw';
+    if (!sawyer && (w.logs() > 0 || fellers > 0 || !!this.onHorse)) kind = 'saw';
+    else if (fellers < 3) kind = 'fell';
+    else return false;
+    l.mate = -1;
+    l.mj = { kind, stage: '', t: 0, thing: null, tree: null, n: 0, seen: 0, boards: [] };
+    if (kind === 'saw') { this.toPile(k); return true; }
+    const tr = w.tree(k, s.pos);
+    if (!tr) { l.mj = null; return false; }
+    l.mj.tree = tr;
+    // (Round on the mill's side of it, so it falls away from the village.)
+    const mx = w.pileAt.x - tr.x, mz = w.pileAt.z - tr.z, md = Math.hypot(mx, mz) || 1;
+    this.mwalk(k, 'toTree', v1.set(tr.x + (mx / md) * (tr.r + 0.42), 0, tr.z + (mz / md) * (tr.r + 0.42)), new THREE.Vector3(tr.x, this.gy(tr.x, tr.z) + 0.45, tr.z));
+    return true;
+  }
+
+  /** The sawyer: to the log on the horse, or to the pile for one, or to wait by the horse for one to come. */
+  private toPile(k: number) {
+    const w = this.works!;
+    if (this.onHorse) this.mwalk(k, 'to', this.sawSpot(v1), this.sawFaceAt());
+    else if (w.logs() > 0) this.mwalk(k, 'toPile', w.pileAt.clone(), w.pileAt.clone().setY(w.pileAt.y + 0.3));
+    else this.mwalk(k, 'wait', this.sawSpot(v1), w.pileAt.clone().setY(w.pileAt.y + 0.3));
+  }
+
+  /** On with the mill job: walk to `at` and be at `stage` there, turned to `face`. */
+  private mwalk(k: number, stage: string, at: THREE.Vector3, face: THREE.Vector3) {
+    const l = this.life[k], p = this.spirits[k].pos, to = at.clone();
+    // (There's work on: a brisker pace than a potter.)
+    this.spirits[k].haste = 2.7;
+    l.mj!.stage = stage;
+    l.face = face;
+    // (Straight there: the mill and the woods round it are off the lane.)
+    this.go(k, to, 'mjob', null);
+    void p;
+  }
+
+  /** On with the mill job where it stands: `stage` for `secs`, saying `g`. */
+  private mpause(k: number, stage: string, secs: number, g: Gesture | null) {
+    const l = this.life[k], j = l.mj!;
+    j.stage = stage;
+    j.t = secs;
+    this.say(k, g, secs + 0.1, l.face);
+  }
+
+  /** `k` bends to `t` and has it up on its head. */
+  private mlift(k: number, t: Thing, stage: string) {
+    t.on = k;
+    this.life[k].mj!.thing = t;
+    this.send(t, null, 0.45, 0.22);
+    this.mpause(k, stage, 0.5, 'stoop');
+  }
+
+  /** And puts it down, at `pose` (where it's taken off the books: it's in a pile now). */
+  private mdrop(k: number, pose: Pose, stage: string) {
+    const j = this.life[k].mj!, t = j.thing!;
+    this.spirits[k].laden = false;
+    t.on = -1;
+    this.send(t, pose, 0.45, 0.15);
+    this.mpause(k, stage, 0.55, 'stoop');
+  }
+
+  private forget(t: Thing | null) { if (t) this.things = this.things.filter((o) => o !== t); }
+
+  private millChore(k: number, dt: number) {
+    const s = this.spirits[k], l = this.life[k], j = l.mj!, w = this.works!;
+    // (Held up on the way, it gets there anyway: nobody watches a villager stand pushing at a tree for long.)
+    const there = () => s.arrived || ((l.t += dt) > 30 && (s.teleport(s.want.at), true));
+    const wait = () => (j.t -= dt) <= 0;
+    switch (j.kind + ' ' + j.stage) {
+      // ---- Felling: up to the trunk with a hatchet, a good few blows, stand back while it goes over, and the log in on its head.
+      case 'fell toTree': {
+        if (!there()) break;
+        const hx = this.hatchets.find((h) => !h.parent);
+        if (hx) s.take(hx);
+        j.seen = s.strokes;
+        j.n = 0;
+        this.mpause(k, 'chop', 99, 'hammer');
+        break;
+      }
+      case 'fell chop': {
+        const tr = j.tree!;
+        // (A blow as the hatchet lands; if its arm isn't swinging, one every so often anyway.)
+        j.t -= dt;
+        if (s.strokes !== j.seen || j.t < 99 - 0.65) {
+          j.seen = s.strokes;
+          j.t = 99;
+          j.n++;
+          const at = v3.set(tr.x, this.gy(tr.x, tr.z) + 0.45, tr.z).lerp(s.pos, 0.35);
+          this.chips.emit(at, 3, 0.05, 1.6, undefined, { life: 0.45, rise: -7, drag: 1.4, up: 1.8 });
+          w.sound('chop', at);
+        }
+        if (j.n < LOG.CHOPS) break;
+        s.take(null);
+        w.fell(tr, s.pos);
+        // It watches it go over.
+        v1.set(tr.x - s.pos.x, 0, tr.z - s.pos.z).normalize();
+        l.face = new THREE.Vector3(tr.x + v1.x * 5, this.gy(tr.x, tr.z) + 1, tr.z + v1.z * 5);
+        this.mpause(k, 'watch', 2.9, null);
+        break;
+      }
+      case 'fell watch': {
+        if (!wait()) break;
+        const tr = j.tree!;
+        v1.set(tr.x - s.pos.x, 0, tr.z - s.pos.z).normalize();
+        const at = new THREE.Vector3(tr.x + v1.x * 2.4 - v1.z * 0.7, 0, tr.z + v1.z * 2.4 + v1.x * 0.7);
+        this.mwalk(k, 'toLog', at, new THREE.Vector3(tr.x + v1.x * 2.4, this.gy(tr.x, tr.z), tr.z + v1.z * 2.4));
+        break;
+      }
+      case 'fell toLog': {
+        if (!there()) break;
+        const f = l.face, yaw = Math.atan2(f.x - s.pos.x, f.z - s.pos.z);
+        // The log lies across in front of it; up on to its head.
+        const t = this.thing(-1, false, v1.set(f.x, this.gy(f.x, f.z) + LOG.D / 2, f.z), q.setFromAxisAngle(UP, yaw), v2.set(LOG.L, LOG.D, LOG.D), WHITE, true);
+        this.mlift(k, t, 'lift');
+        break;
+      }
+      case 'fell lift':
+        if (!wait()) break;
+        s.laden = true;
+        this.mwalk(k, 'carry', w.pileAt.clone(), w.pileAt.clone().setY(w.pileAt.y + 0.3));
+        break;
+      case 'fell carry': {
+        if (!there()) break;
+        v1.set(w.pileAt.x - s.pos.x, 0, w.pileAt.z - s.pos.z);
+        this.mdrop(k, { pos: w.pileAt.clone().addScaledVector(v1.normalize(), 0.5).setY(w.pileAt.y + 0.35), quat: q.setFromAxisAngle(UP, Math.atan2(v1.x, v1.z) + Math.PI / 2).clone() }, 'drop');
+        break;
+      }
+      case 'fell drop':
+        if (!wait()) break;
+        this.forget(j.thing);
+        j.thing = null;
+        w.addLog();
+        this.millDone(k);
+        break;
+
+      // ---- Sawing: a log off the pile on to the sawhorse, three boards off it, and the three on its head to where they're wanted.
+      case 'saw toPile': {
+        if (!there()) break;
+        if (!w.takeLog()) { this.toPile(k); break; }
+        const t = this.thing(-1, false, v1.copy(w.pileAt).setY(w.pileAt.y + 0.3), q.setFromAxisAngle(UP, Math.atan2(s.pos.x - w.pileAt.x, s.pos.z - w.pileAt.z) + Math.PI / 2), v2.set(LOG.L, LOG.D, LOG.D), WHITE, true);
+        this.mlift(k, t, 'take');
+        break;
+      }
+      case 'saw take':
+        if (!wait()) break;
+        s.laden = true;
+        this.mwalk(k, 'bring', this.sawSpot(v1), this.sawFaceAt());
+        break;
+      case 'saw bring': {
+        if (!there()) break;
+        const t = j.thing!;
+        s.laden = false;
+        t.on = -1;
+        j.thing = null;
+        this.forget(this.onHorse);
+        this.onHorse = t;
+        j.n = 0;
+        this.send(t, this.horseLog(LOG.L), 0.45, 0.12);
+        this.mpause(k, 'lay', 0.6, 'stoop');
+        break;
+      }
+      case 'saw to':
+        if (!there()) break;
+        if (!this.onHorse) { this.toPile(k); break; }
+        this.mpause(k, 'lay', 0.3, null);
+        break;
+      case 'saw lay':
+        if (!wait()) break;
+        this.millSaw.removeFromParent();
+        s.take(this.millSaw);
+        j.seen = s.strokes;
+        this.mpause(k, 'saw', 3.6, 'saw');
+        break;
+      case 'saw saw': {
+        const cut = w.horse.localToWorld(v3.set(0, HORSE_TOP + LOG.D, CUT_Z));
+        if (s.strokes !== j.seen) { j.seen = s.strokes; this.dust.emit(cut, 2, 0.07, 0.6, undefined, { life: 0.5, rise: -1.6, drag: 1.4, up: 0.9 }); if (s.strokes % 3 === 0) w.sound('saw', cut); }
+        if (!wait()) break;
+        // A board off it: on to the others at the end of the horse; the log's that much shorter.
+        const log = this.onHorse!, len = LOG.L * (1 - (j.n + 1) * 0.22);
+        const b = this.thing(-1, false, cut, log.quat, v2.set(LOG.L * 0.9, 0.06, 0.24), new THREE.Color(BIOME.cutWood).lerp(new THREE.Color(BIOME.cabinWall2), 0.3));
+        const out = w.horse.localToWorld(v1.set(((j.n % 3) - 1) * 0.3, 0.04 + 0.06 * Math.floor(j.n / 3), CUT_Z + 0.75));
+        this.send(b, { pos: out.clone(), quat: w.horse.quaternion.clone().multiply(q2.setFromAxisAngle(UP, -Math.PI / 2 + ((j.n * 37) % 10 - 5) * 0.04)) }, 0.4, 0.15);
+        j.boards.push(b);
+        this.send(log, this.horseLog(len), 0.3, 0);
+        this.dust.emit(cut, 6, 0.11, 0.6, undefined, { life: 0.5, rise: -1.6, drag: 1.4, up: 0.9 });
+        j.n++;
+        this.mpause(k, 'cut', 0.6, 'nod');
+        break;
+      }
+      case 'saw cut':
+        if (!wait()) break;
+        if (j.n < LOG.BOARDS) { j.seen = s.strokes; this.mpause(k, 'saw', 3.6, 'saw'); break; }
+        // Through it: the saw back on the horse, what's left of the log to the stove (gone), and the boards gathered up.
+        s.take(null);
+        this.restSaw();
+        this.forget(this.onHorse);
+        this.onHorse = null;
+        this.mwalk(k, 'toBoards', w.horse.localToWorld(v1.set(0.62, 0, CUT_Z + 0.75)), w.horse.localToWorld(new THREE.Vector3(0, 0.05, CUT_Z + 0.75)));
+        break;
+      case 'saw toBoards': {
+        if (!there()) break;
+        for (const b of j.boards) this.forget(b);
+        j.boards = [];
+        const t = this.thing(-1, false, w.horse.localToWorld(v1.set(0, 0.12, CUT_Z + 0.75)), w.horse.quaternion.clone().multiply(q2.setFromAxisAngle(UP, -Math.PI / 2)), v2.set(LOG.L * 0.9, 0.18, 0.26), new THREE.Color(BIOME.cutWood).lerp(new THREE.Color(BIOME.cabinWall2), 0.3));
+        this.mlift(k, t, 'lift');
+        break;
+      }
+      case 'saw lift': {
+        if (!wait()) break;
+        s.laden = true;
+        const to = w.boardsTo();
+        this.mwalk(k, 'carry', to.at, to.face);
+        break;
+      }
+      case 'saw carry': {
+        if (!there()) break;
+        const to = w.boardsTo();
+        this.mdrop(k, { pos: to.face.clone(), quat: q.setFromAxisAngle(UP, Math.atan2(to.face.x - s.pos.x, to.face.z - s.pos.z) + Math.PI / 2).clone() }, 'stack');
+        break;
+      }
+      case 'saw stack':
+        if (!wait()) break;
+        this.forget(j.thing);
+        j.thing = null;
+        w.boardsTo().add(LOG.BOARDS);
+        this.millDone(k);
+        break;
+      case 'saw wait':
+        if (!there()) break;
+        this.mpause(k, 'idle', 3 + Math.random() * 2, Math.random() < 0.5 ? 'nod' : null);
+        break;
+      case 'saw idle':
+        if (!wait()) break;
+        if (w.logs() > 0 || this.onHorse) this.toPile(k);
+        else if ((j.n += 1) > 6) this.millDone(k);
+        else this.mpause(k, 'idle', 3 + Math.random() * 2, null);
+        break;
+      default:
+        this.millDone(k);
+    }
+  }
+
+  /** Called off the mill job (or done with it): whatever's on its head goes, and any tool. */
+  private quitMill(k: number) {
+    const l = this.life[k], j = l.mj, s = this.spirits[k];
+    if (!j) return;
+    if (j.thing && (j.thing.on === k || j.thing.flit)) this.forget(j.thing);
+    for (const b of j.boards) this.forget(b);
+    if (s.tool === this.millSaw) { s.take(null); this.restSaw(); }
+    else if (s.tool && this.hatchets.includes(s.tool)) s.take(null);
+    s.laden = false;
+    s.haste = 1.6 + hash01(k, 3, this.seed, 979) * 0.5;
+    l.mj = null;
+  }
+
+  /** On to the next turn at the mill (or home, if there's nothing to do there). */
+  private millDone(k: number) {
+    this.quitMill(k);
+    if (!this.works || !this.millJob(k)) this.goHome(k);
+  }
+
   private quit(k: number) {
     const l = this.life[k], j = l.job, s = this.spirits[k];
     if (!j) return;
@@ -1610,8 +1961,14 @@ export class Village {
 
   /** The yards as they are now. */
   private drawYards() {
-    const all = [this.plankB, this.rockB, this.horseB, this.ladderB, this.sawB, this.malletB];
+    const all = [this.plankB, this.rockB, this.horseB, this.ladderB, this.sawB, this.malletB, this.logB, this.hatchetB];
     for (const b of all) b.begin();
+    if (this.works) {
+      this.horseB.push(this.works.horse.matrixWorld, WHITE);
+      this.millSaw.updateWorldMatrix(true, false);
+      this.sawB.push(this.millSaw.matrixWorld, WHITE);
+      for (const h of this.hatchets) if (h.parent) this.hatchetB.push(h.matrixWorld, WHITE);
+    }
     for (const y of this.yards) {
       if (!y) continue;
       this.horseB.push(y.horse.matrixWorld, WHITE);
@@ -1620,7 +1977,7 @@ export class Village {
       this.ladderB.push(y.ladder.matrixWorld, WHITE);
       this.malletB.push(y.mallet.obj.matrixWorld, WHITE);
     }
-    for (const t of this.things) (t.stone ? this.rockB : this.plankB).push(m4.compose(t.pos, t.quat, t.size), t.tint);
+    for (const t of this.things) (t.log ? this.logB : t.stone ? this.rockB : this.plankB).push(m4.compose(t.pos, t.quat, t.size), t.tint);
     for (const b of all) b.end();
   }
 
@@ -1689,6 +2046,24 @@ export class Village {
     for (const [k, s] of this.spirits.entries()) {
       if (this.taken[k] || this.held.has(k)) continue;
       const l = this.life[k], h = this.houses[this.home[k]];
+      // The mill wants hands: whoever's idling, strolling or wandering home is off to it (while the wagon's being
+      // loaded, everyone; else most of them, most of the time).
+      // (A chore, or the digging, it drops: where you'd see it put down what it had, only once it's put it down.)
+      const unseen = Math.hypot(player.x - s.pos.x, player.z - s.pos.z) > 25;
+      const chore = l.doing === 'job' && !!l.job && l.up <= 0 && (unseen || l.job.thing?.on !== k);
+      const digging = DIGGING.has(l.doing) && (unseen || l.doing === 'toDig');
+      if (this.works && !l.mj && (l.doing === 'home' || l.doing === 'look' || l.doing === 'stroll' || l.doing === 'back' || l.doing === 'work' || chore || digging) && !l.due && l.gt <= 0) {
+        l.millT = (l.millT ?? 0) - dt;
+        if (l.millT <= 0) {
+          l.millT = 6 + Math.random() * 8;
+          if (this.works.urgent() || Math.random() < 0.8) {
+            if (chore) this.quit(k);
+            if (digging) this.putDown(k);
+            if (this.millJob(k)) continue;
+            if (chore || digging) { this.goHome(k); continue; }
+          }
+        }
+      }
       if (l.due && (l.due.t -= dt) <= 0) { this.say(k, l.due.g, l.due.secs, l.due.face); l.due = null; }
       if (l.gt > 0 && (l.gt -= dt) <= 0) { s.gesture = null; s.want.face = l.face; }
       const idle = (l.doing === 'home' || l.doing === 'look') && l.gt <= 0 && !l.due;
@@ -1702,7 +2077,8 @@ export class Village {
       // Night: indoors. Into its own house if that's whole, else to your cabin's hearth; and out again in the morning.
       const night = this.night();
       // (Whatever's on its head is put down first, and nobody goes to bed off a ladder.)
-      if (night && l.doing !== 'toBed' && l.doing !== 'bed' && l.doing !== 'in' && l.doing !== 'inside' && l.doing !== 'chat' && l.doing !== 'meet' && !(l.job && (l.job.thing?.on === k || l.up > 0))) {
+      // (While the wagon's being loaded, the mill works on through the night.)
+      if (night && !(l.mj && this.works?.urgent()) && l.doing !== 'toBed' && l.doing !== 'bed' && l.doing !== 'in' && l.doing !== 'inside' && l.doing !== 'chat' && l.doing !== 'meet' && !(l.job && (l.job.thing?.on === k || l.up > 0))) {
         this.putDown(k);
         if (!h.smashed) { const inside = this.world(h, h.doorX, h.hd - 0.85, new THREE.Vector3()); this.go(k, inside, 'in', [...(this.along(k, this.laneAt[k], h.door) ?? [h.door.clone()]), inside]); continue; }
         if (this.toBed(k)) continue;
@@ -1729,6 +2105,8 @@ export class Village {
           }
           if ((l.t -= dt) > 0 || !idle) break;
           const r = Math.random();
+          // The mill stands: almost always, it's at that.
+          if (this.works && r < 0.9 && this.millJob(k)) break;
           // Its house is being built again: mostly, it's at that.
           if (this.yards.some((y) => y) && r < (h.stack ? 0.6 : 0.45)) { this.work(k); break; }
           // A print's being filled in: a turn with a shovel.
@@ -1763,6 +2141,9 @@ export class Village {
           break;
         case 'job':
           if (l.job) this.chore(k, dt); else this.goHome(k);
+          break;
+        case 'mjob':
+          if (l.mj) this.millChore(k, dt); else this.goHome(k);
           break;
         case 'toDig':
           // At the heap: its shovel out of it (or, back for more, in again), and a few good digs.

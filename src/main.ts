@@ -48,7 +48,6 @@ import { Hands } from './world/hands';
 import { DEEP, DEEP_OUT, inStrait, seaUniforms } from './world/islands';
 import { Bridges } from './world/bridge';
 import { BridgeWork } from './story/bridgeWork';
-import { LumberMill } from './story/mill';
 import { BridgeQuest } from './story/bridgeQuest';
 import { SeaSpirit } from './story/seaSpirit';
 import { Ring, type RingDeps } from './giant/ring';
@@ -192,7 +191,7 @@ const den = () => (dungeon?.inside ? dungeon : cave?.inside ? cave : hall?.insid
 // (`?sea=0`: it lets you be.)
 let bridges: Bridges | null = null, bridgeDev: number | null = null;
 // Building it (story/bridgeWork.ts), and the village's lumber mill (story/mill.ts): made once the story is up.
-let bridgeWork: BridgeWork | null = null, mill: LumberMill | null = null;
+let bridgeWork: BridgeWork | null = null;
 const sea = new SeaSpirit({ get gen() { return gen; }, height: (x, z) => trail.height(x, z), safe: (x, z, y) => { const d = bridges?.deckAt(x, z, 1.5) ?? -Infinity; return y > d - 1 && y < d + 4; }, get sfx() { return storyHost?.sfx; }, spray: (at, n, size) => puffs.emit(at, n, size, 2.5) });
 scene.add(sea.group);
 const seaOn = params.get('sea') !== '0';
@@ -1192,7 +1191,6 @@ function makeVisit() {
   bridges.built = 0;
   scene.add(bridges.group);
   bridgeWork?.dispose(); bridgeWork = null;
-  mill?.dispose(); mill = null;
   visit?.dispose();
   ring?.dispose();
   ring2?.dispose();
@@ -2009,14 +2007,6 @@ function frame(ts?: number) {
   {
     const st = storyHost?.active ? storyHost.story : null;
     if (st && bridges && !bridgeWork) bridgeWork = new BridgeWork(bridges, storyHost!.overlay, `embla.bridge.${seedText}`, storyHost!.sfx);
-    if (st && !mill) {
-      // (The free plot furthest from any of the giant's prints.)
-      const falls = visit?.route?.falls ?? [], free = (st.village?.site.plots ?? []).filter((p) => !p.house);
-      const clear = (p: { x: number; z: number }) => falls.reduce((m, f) => Math.min(m, Math.hypot(f.x - p.x, f.z - p.z)), Infinity);
-      const plot = free.sort((a, b) => clear(b) - clear(a))[0];
-      if (plot) { mill = new LumberMill(plot, `embla.mill.${seedText}`, storyHost!.sfx); scene.add(mill.group); }
-    }
-    if (st && mill) mill.update(below || storyBusy ? 0 : dt, mendedTo >= 1, player.body.pos, (n) => { st.inv.logs += n; });
     const open = !quest && !!homecoming2?.settled && !below && !storyBusy;
     if (st && bridgeWork?.update(dt, open, player.body.pos, () => st.inv.logs, () => { st.inv.logs--; })) st.save();
     if (bridges && bridgeDev === null) bridges.built = params.get('bridge') === '1' || (params.get('bridge') !== '0' && (!st || !!bridgeWork?.done)) ? 1 : 0;
@@ -2820,7 +2810,7 @@ window.__ow = {
   bridgeWork: () => bridgeWork,
   /** The bridge quest (`.stage`, `.part`, `.clock`, `.debug(stage)`, `.waiting`). */
   quest: () => quest,
-  mill: () => mill,
+  mill: () => storyHost?.story?.mill ?? null,
   /** The sea spirit: `.phase`, `.dread`, `.busy`, `.deep(x, z)`. */
   sea: () => sea,
   /** Dev: as if you'd just taken the light: the dungeon marked done, and up you come on the rockhopper. (`winDungeon(2)`: the second's, on the glimmer.) */

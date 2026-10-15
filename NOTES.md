@@ -6190,3 +6190,26 @@ The owner: do a lot, decide as you go, on your own branch. So on `islands`
   second dungeon done); `cp=mill` at home after the ride. `cp=offer2` plays
   the crossing after the offering. `cp=ring3` is still the third ring
   (the moth's scripts use it), with the quest not done.
+
+## The bridge quest, slice B: the mill (2026-10-15)
+
+- The mill is a `Buildable` of the director's, as the stable is: phase 4
+  (`story/phase4.ts`), parts `mfoot` (6 stones), `mframe` (7 logs), `mroof`
+  (5 logs). It stands on the village's free plot nearest the cabin and clear
+  of the prints (`visitRoute` is pure, so the Story picks it itself). The old
+  `LumberMill` (a board a minute, built by nobody) is gone; its save key
+  `embla.mill.<seed>` now keeps the pile and the stack.
+- The villagers' work is real but made inside `Village` (`MillWorks`, jobs
+  `fell` and `saw`), reusing its things-on-heads, tools and pauses: a feller
+  takes a hatchet to a real world tree (the director's `knockTree` with no
+  logs to your pack, so it falls, leaves a stump and regrows), carries the
+  log in on its head to the pile; the sawyer takes it to the sawhorse, saws
+  three boards off it and carries them to the stack (or, loading, to the
+  wagon). About three boards every 50 s with two villagers.
+- Getting them to the mill took three fixes: idle villagers are drawn to it
+  every few seconds (house chores and the digging are dropped for it, out of
+  your sight), they walk straight there at a brisker pace (the lane route
+  was a long way round), and a villager held up on its way for 30 s is put
+  where it was going. The mill's stack is yours to walk up and take, except
+  while the wagon is being loaded.
+- While the wagon's loaded the mill works through the night (`urgent`).

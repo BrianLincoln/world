@@ -163,6 +163,8 @@ export class BridgeQuest {
       case 'cross': this.playCrossing(dt); break;
       case 'shore': this.atShore(dt); break;
       case 'ride': this.playRide(dt); break;
+      // (Home: the mill and the wagon are the director's phase 4, story/phase4.ts.)
+      case 'mill': if (this.d.story.phaseIndex < 2) this.d.story.startBridge(); break;
       default: break;
     }
     if (this.gBike && this.stage !== 'ride') this.parkGuideBike(dt);
@@ -536,6 +538,7 @@ export class BridgeQuest {
     this.enter('mill');
     this.afterYaw = this.d.body.heading + Math.PI;
     this.d.story.lent = false;
+    this.d.story.startBridge();
   }
 
   /** The guide's bike once it's off: on its stand. */
@@ -594,6 +597,13 @@ export class BridgeQuest {
   debug(s: QuestStage) {
     this.enter(s);
     if (s === 'shore') { this.stageCrossing(); this.resume(); }
-    if (s === 'mill') this.d.story.lent = false;
+    if (s === 'mill') {
+      this.d.story.lent = false;
+      this.d.story.startBridge();
+      // Where the ride home ends: in the yard, off your bike.
+      const R = this.railNow(), p = R.at(RIDE.stop, w1);
+      this.d.place(p.x, p.y, R.heading(RIDE.stop) + Math.PI);
+      this.spirit.teleport(v1.set(p.x + 1.5, this.d.ground(p.x + 1.5, p.y), p.y));
+    }
   }
 }
