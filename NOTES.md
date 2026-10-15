@@ -6156,3 +6156,37 @@ The owner: do a lot, decide as you go, on your own branch. So on `islands`
   frame loop once the story is up, and thrown away in `makeVisit`.
   Gotcha met in the test: `?t=` switches the story off.
 
+
+## The bridge as a quest, slice A (2026-10-15; `docs/NEXT-bridge.md`)
+
+- One director for the quest's own beats, `story/bridgeQuest.ts`, beside
+  the journey's: it lends the guide (`story.lent`, and `Journey.held` so
+  the journey's done stage doesn't send it home to its fire) while it has
+  it. Its stage is saved as `embla.quest.<seed>`; a cutscene is saved as
+  the stage it ends in, so a reload never plays half of one.
+- The crossing: four shots after the second homecoming hands you back, the
+  giant jumped along its route between them (`Giant.jumpTo`, the skipped
+  prints stamped by the quest). The giant used to walk on a floor 6 m under
+  any water (`SEA_LEVEL - 6` in main); in the strait it now walks the real
+  seabed (`inStrait`, 45 m), which puts the water at its waist, and its
+  footfalls there throw spray at the surface instead of dust.
+- The guide "just appears" at the water's edge under the veil (owner's
+  words in the brief). Its thought is a new pictogram, `bridge`. In a
+  cutscene `Spirit.think` shows its thought with you far off, and
+  `Spirit.hold` keeps it looking out across the water.
+- The ride home is your own bike steered by the quest: `quest.drive` is fed
+  to the bike as input (a heading as the camera's yaw, and how hard to
+  pedal), so the bike's own physics, rig and dust all just work. The
+  guide's little bike is posed at your right hand from your body, not from
+  the rail: posed from the rail, it drifted metres off you when you
+  weren't on the line. The camera is a moving two-shot off the rail
+  (`dolly`): ahead of you riding up from the shore, behind you riding into
+  the village. Left/right gotcha: `(cos h, -sin h)` is the rider's LEFT
+  (dismountBike's "kickstand side"), whatever older comments call it.
+- `story/rail.ts`: the giant's trail as a line with arc length (the middle
+  of each two footfalls, smoothed, any stretch that comes back on itself
+  cut out, stopped at the water). The ride uses it now; the wagon will.
+- `?fresh=1&cp=shore` starts at the strait with the guide waiting (the
+  second dungeon done); `cp=mill` at home after the ride. `cp=offer2` plays
+  the crossing after the offering. `cp=ring3` is still the third ring
+  (the moth's scripts use it), with the quest not done.

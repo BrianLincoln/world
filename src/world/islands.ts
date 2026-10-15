@@ -104,7 +104,7 @@ export function sink(h: number, x: number, z: number) {
 }
 
 /** How far inside a strait's cut (x, z) is (0 or less: not in one). */
-function inStrait(x: number, z: number) {
+export function inStrait(x: number, z: number) {
   let best = 0;
   for (const c of STRAITS) {
     const dx = c.b[0] - c.a[0], dz = c.b[1] - c.a[1];

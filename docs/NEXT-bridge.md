@@ -1,4 +1,4 @@
-# Next: the bridge, as a quest (agreed with the owner 2026-10-14/15; not built)
+# Next: the bridge, as a quest (agreed with the owner 2026-10-14/15; being built)
 
 Brief for a fresh session, on the branch `islands` (worktree
 `.claude/worktrees/islands`). Read `docs/NEXT-islands.md` first: it says what
@@ -84,3 +84,40 @@ Master has moved on since the branch was made (the giant now wakes in the
 bay on the old land, walks through the village). That collides with the
 islands' land and needs sorting before the branch can merge: a job of its
 own, not part of this.
+
+## What's built (2026-10-15; none of it played by the owner)
+
+**Slice A** (`story/bridgeQuest.ts`, `story/rail.ts`; check with
+`node scripts/bridge.mjs <dir> cross,shore,reload,skip`, `DIST=` your build):
+- After the second homecoming hands you back, a veil, and four shots from
+  the home shore: the giant walking down into the water (side on, 175 m
+  off), waist-deep out in the deep (low over the water, behind it), coming
+  up the far beach (a long lens from the guide's shore), and the guide at
+  the water's edge watching it go with its bridge thought up. About 40 s;
+  hold Space to skip. Then back to you by the shrine.
+- The guide stays at the water's edge where the prints go in, its thought
+  a bridge (a new pictogram). The pointer points to it from far off.
+- Come within 5 m: it waves, thinks of bikes, two bikes appear in a puff
+  (yours, unless you're on it, and its little one), and hands off you ride
+  off up the trail together; a veil; you ride in along the trail into the
+  village and stop in the yard on your bike. About 20 s; skippable.
+- Saved: the crossing as "at the shore" (a reload puts you on the trail
+  16 m short of the guide), the ride as "home".
+
+Defaults taken in slice A:
+- The giant walks the strait's real bed (45 m), so it's in to the waist;
+  footfalls in water throw spray. Elsewhere it still walks a floor 6 m
+  under any water (lakes).
+- The guide appears under the veil before the shots and is in the last one.
+- You aren't moved to the shore after the crossing: you walk down the
+  prints from the shrine (about 400 m), the pointer helping.
+- Whatever creature you're on when you reach the guide is left at the
+  shore (it's tame; it stays there).
+- Checkpoints: `cp=shore` (the strait, the guide waiting) and `cp=mill`
+  (home after the ride). `cp=offer2` plays the crossing after the offering.
+
+Questions for the owner (slice A):
+1. Is the crossing too long at about 40 s, and is "from the home shore" the
+   right side (we see its back as it comes up the far beach)?
+2. Should you be carried to the shore after the crossing, rather than walk
+   down from the shrine?

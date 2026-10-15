@@ -6,7 +6,7 @@ import * as THREE from 'three';
 // in-world billboards (as textures), so an icon always looks the same
 // wherever it appears.
 
-export type IconName = 'axe' | 'log' | 'stone' | 'flame' | 'heart' | 'home' | 'check' | 'hand' | 'hammer' | 'pick' | 'smash' | 'antlers' | 'up' | 'down' | 'ember' | 'bike' | 'finger' | 'mouse' | 'mouseDown' | 'fingerDown' | 'pat' | 'lasso' | 'stable' | 'creature' | 'parachute' | 'prints' | 'jar';
+export type IconName = 'axe' | 'log' | 'stone' | 'flame' | 'heart' | 'home' | 'check' | 'hand' | 'hammer' | 'pick' | 'smash' | 'antlers' | 'up' | 'down' | 'ember' | 'bike' | 'finger' | 'mouse' | 'mouseDown' | 'fingerDown' | 'pat' | 'lasso' | 'stable' | 'creature' | 'parachute' | 'prints' | 'jar' | 'bridge';
 
 const INK = '#4a2e36';
 const SIZE = 128;
@@ -705,6 +705,46 @@ function drawPrints(g: CanvasRenderingContext2D) {
   one(80, 91, 0.92, 0.2, 1, 1);
 }
 
+/** The bridge: a plank deck in a low arch over water, on two trestles, a rail along its top. What the guide wants at the strait. */
+function drawBridge(g: CanvasRenderingContext2D) {
+  // The water under it: two rows of flat waves.
+  for (const [y, x0, x1] of [[104, 6, 122], [118, 22, 106]]) {
+    g.beginPath();
+    for (let x = x0; x <= x1; x += 2) { const yy = y + Math.sin((x - x0) / 7) * 3; if (x === x0) g.moveTo(x, yy); else g.lineTo(x, yy); }
+    g.strokeStyle = '#6f8fa4';
+    g.lineWidth = 6;
+    g.stroke();
+  }
+  // Trestles: two splayed legs each, down into the water.
+  g.beginPath();
+  for (const x of [42, 86]) { g.moveTo(x - 4, 66); g.lineTo(x - 11, 104); g.moveTo(x + 4, 66); g.lineTo(x + 11, 104); }
+  ink(g, 13);
+  g.strokeStyle = '#7a5236';
+  g.lineWidth = 7;
+  g.stroke();
+  // The deck: a thick plank band in a low arch, bank to bank.
+  const arch = (y0: number) => { g.moveTo(6, y0 + 10); g.quadraticCurveTo(64, y0 - 16, 122, y0 + 10); };
+  g.beginPath();
+  arch(62);
+  g.lineTo(122, 72 + 12);
+  g.quadraticCurveTo(64, 58, 6, 72 + 12);
+  g.closePath();
+  g.fillStyle = '#c99a62';
+  g.fill();
+  ink(g, 6);
+  // Plank joints across it.
+  g.beginPath();
+  for (let x = 20; x < 120; x += 13) { const t = (x - 6) / 116, y = 72 + 10 - 4 * 26 * t * (1 - t); g.moveTo(x, y - 9); g.lineTo(x, y + 1); }
+  g.strokeStyle = 'rgba(74, 46, 54, 0.55)';
+  g.lineWidth = 3;
+  g.stroke();
+  // The rail: posts and a bar along the top.
+  g.beginPath();
+  for (const x of [14, 40, 64, 88, 114]) { const t = (x - 6) / 116, y = 62 + 10 - 4 * 26 * t * (1 - t); g.moveTo(x, y); g.lineTo(x, y - 16); }
+  arch(46);
+  ink(g, 6);
+}
+
 /** A spark as it's drawn flat: a four-pointed star, hollow-sided, white-hot with an amber edge. */
 function drawSpark(g: CanvasRenderingContext2D, x: number, y: number, r: number, turn = 0) {
   g.save();
@@ -838,7 +878,7 @@ export function jarCanvas(n: number, of: number): HTMLCanvasElement {
 
 const DRAW: Record<IconName, (g: CanvasRenderingContext2D) => void> = {
   jar: (g) => drawJar(g),
-  prints: drawPrints,
+  prints: drawPrints, bridge: drawBridge,
   parachute: drawParachute,
   up: drawUp, down: drawDown, ember: drawEmber, bike: drawBike,
   antlers: drawAntlers, pat: drawPat, lasso: drawLasso, stable: drawStable, creature: drawCreature,

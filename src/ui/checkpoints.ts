@@ -28,6 +28,9 @@ export const CHECKPOINTS: Checkpoint[] = [
   // The first dungeon done and the giant walked on: by the second ring, opened; and that one done too.
   { id: 'ring2', label: '5.1 ring (dungeon 2)', kind: 'ring', giantGone: true },
   { id: 'offer2', label: '5.2 offering (dungeon 2 done)', kind: 'ring', giantGone: true },
+  // The bridge over the strait, as a quest (story/bridgeQuest.ts): the guide at the water's edge; then home, at the mill.
+  { id: 'shore', label: '5.3 the strait (the guide waits)', kind: 'ring', giantGone: true },
+  { id: 'mill', label: '5.4 the mill (home again)', kind: 'ring', giantGone: true },
   // Both done and the giant walked on again: by the third ring, opened; and that one done too.
   { id: 'ring3', label: '6.1 ring (dungeon 3)', kind: 'ring', giantGone: true },
   { id: 'offer3', label: '6.2 offering (dungeon 3 done)', kind: 'ring', giantGone: true },

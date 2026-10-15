@@ -81,6 +81,11 @@ count.** Keep this file lean. Depth lives in:
   once `homecoming2.settled`; wood goes in from anywhere within reach;
   nothing bears you until all 100 are in; `embla.bridge.<seed>`;
   `?bridge=1` / `0`, `__ow.bridge(k)`, `__ow.bridgeWork().debug(n)`).
+  **The bridge is becoming a quest** (`docs/NEXT-bridge.md`, slices A to E;
+  not played by the owner): `src/story/bridgeQuest.ts` (the giant wading the
+  strait, the guide at the shore, the bikes home, and on), `story/rail.ts`
+  (the trail as a line). Check with `scripts/bridge.mjs <dir>`;
+  `?fresh=1&cp=shore` starts it.
   `src/story/mill.ts`: the village's lumber mill (a board a minute of
   play on to its stack, yours when you walk up; stands once a spirit is
   home; `embla.mill.<seed>`, `__ow.mill()`). Not made: the camera on the

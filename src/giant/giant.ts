@@ -369,6 +369,20 @@ export class Giant {
 
   /** Steps taken so far (fractional), and whether a route has been walked to its end. */
   get steps() { return this.phi; }
+  /**
+   * On a route, straight to `phi` steps along it, walking (a film's cut: the bridge quest's crossing shot).
+   * Nothing is stamped for the steps skipped: whoever jumps it lays those prints.
+   */
+  jumpTo(phi: number) {
+    if (!this.route) return;
+    this.phi = Math.min(phi, this.route.length + 1);
+    this.walkT = 2;
+    this.walking = this.phi < this.route.length + 1;
+    for (const f of this.feet) f.air = false;
+    this.pose(0);
+  }
+  /** The footfalls it's walking (null: none). */
+  get footfalls() { return this.route; }
   /** The way its body faces now (on a route, not the way it set out). */
   get facing() { return this.pelvis.rotation.y; }
   get arrived() { return !!this.route && this.phi >= this.route.length + 1; }
