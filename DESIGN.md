@@ -832,6 +832,15 @@ linear story laid over it, and no reason to explore.
   expand the village"** (owner, the same day). *(On the branch: the
   bridge, its building for 100 wood, and a mill making a board a minute.
   The sight of the giant crossing and the guide at the spot aren't made.)*
+- **The bridge as a quest (owner, 2026-10-14/15), replacing the sketch at
+  the shore:** the giant crosses; your spirit is at the shore like a quest
+  giver and shows it wants a bridge; you both bike into the village (a
+  short shot, a veil cut); you build a lumber mill and the villagers help
+  gather wood; you build a wagon and its stack of wood fills; you yoke the
+  stelk to it and drive it to the strait yourself (on the trail only: it
+  can't be driven off or back); the villagers build the bridge in a scene;
+  everyone celebrates, then walks home, and your spirit points you across.
+  `docs/NEXT-bridge.md`. Not built.
 - Open: what walls a zone off, fliers included; whether everything built
   so far (the giant's trail and its dungeons) is zone 1; what "progress of
   an area" is besides its dungeons; what the zones after the first are
