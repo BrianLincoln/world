@@ -962,13 +962,17 @@ export class Story {
         this.marked.delete(k);
         const c = m.local(0, 0), taken = [...this.marked.values()];
         let best: { x: number; z: number; r: number } | null = null, bd = Infinity;
-        for (const row of d.colliders.treesNear(c.x, c.z, 75)) {
-          const x = row[0], z = row[2], dm = Math.hypot(x - c.x, z - c.z);
-          // (Out of the yard and the lane, about level with the mill, and nobody else's.)
-          if (dm < 14 || Math.hypot(x - site.x, z - site.z) < 28 || Math.abs(row[1] - c.y) > 7) continue;
-          if (taken.some((t) => Math.hypot(t.x - x, t.z - z) < 4)) continue;
-          const score = dm + Math.hypot(x - from.x, z - from.z) * 0.3;
-          if (score < bd) { bd = score; best = { x, z, r: 0.32 * row[3] }; }
+        // (Further out as the near ones are felled: they grow back in a while.)
+        for (const reach of [75, 130, 190]) {
+          for (const row of d.colliders.treesNear(c.x, c.z, reach)) {
+            const x = row[0], z = row[2], dm = Math.hypot(x - c.x, z - c.z);
+            // (Out of the yard and the lane, not far above or below the mill, and nobody else's.)
+            if (dm < 14 || Math.hypot(x - site.x, z - site.z) < 28 || Math.abs(row[1] - c.y) > 12) continue;
+            if (taken.some((t) => Math.hypot(t.x - x, t.z - z) < 4)) continue;
+            const score = dm + Math.hypot(x - from.x, z - from.z) * 0.3;
+            if (score < bd) { bd = score; best = { x, z, r: 0.32 * row[3] }; }
+          }
+          if (best) break;
         }
         if (best) this.marked.set(k, best);
         return best;

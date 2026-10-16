@@ -35,6 +35,7 @@ DESIGN.md "The shape of the world".
    trestles, about 440 m long. **It isn't there at first.** Its deck is
    ground to everything that walks, rides or cycles, and the spirit leaves
    you be on it.
+   *(Superseded 2026-10-15 by the bridge quest, `docs/NEXT-bridge.md`; bridgeWork.ts is gone.)*
    **You build it** (`src/story/bridgeWork.ts`): once the giant has crossed
    and lain down by ring 3, the whole bridge shows as a sketch with ten
    slots over its near end. Stand within 16 m of its line with wood and the

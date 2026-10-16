@@ -75,24 +75,18 @@ count.** Keep this file lean. Depth lives in:
   Towers: each island its own network, no link over the sea.
   `src/world/bridge.ts`: the wooden bridge over the strait (its deck is
   ground to the world's query, `deckAt`; `built` 0 to 1, a bay at a time).
-  **Not there at first** (owner): the giant wades across after the first
-  island's last dungeon, then your spirit has you build it of a hundred
-  wood. `src/story/bridgeWork.ts`: the building (its sketch and ten slots
-  once `homecoming2.settled`; wood goes in from anywhere within reach;
-  nothing bears you until all 100 are in; `embla.bridge.<seed>`;
-  `?bridge=1` / `0`, `__ow.bridge(k)`, `__ow.bridgeWork().debug(n)`).
-  **The bridge is becoming a quest** (`docs/NEXT-bridge.md`, slices A to E;
-  not played by the owner): `src/story/bridgeQuest.ts` (the giant wading the
-  strait, the guide at the shore, the bikes home, and on), `story/rail.ts`
-  (the trail as a line). Check with `scripts/bridge.mjs <dir>`;
-  `?fresh=1&cp=shore` starts it.
-  `src/story/mill.ts`: the village's lumber mill (a board a minute of
-  play on to its stack, yours when you walk up; stands once a spirit is
-  home; `embla.mill.<seed>`, `__ow.mill()`). Not made: the camera on the
-  giant wading over, and the guide at the water's edge.
+  **Not there at first**: the bridge quest builds it (`?bridge=1` / `0`,
+  `__ow.bridge(k)` by hand).
+  **The bridge is a quest** (`docs/NEXT-bridge.md`; built, not played by the
+  owner): `src/story/bridgeQuest.ts` (the crossing shot, the guide at the
+  shore, bikes home, the yoking, the haul, the building, the party),
+  `story/phase4.ts` + `mill.ts` + `wagon.ts` (built by sketch and slots; the
+  village works the mill: `MillWorks` in `village.ts`), `WagonMode` (the
+  haul, on `story/rail.ts`). Check with `scripts/bridge.mjs <dir>
+  cross,shore,mill,wagon,haul,build`; `?fresh=1&cp=shore` starts it.
   `src/story/seaSpirit.ts`: over the deep it warns, then an arm of water
   carries you and your mount back to the shore you left (`?sea=0` off;
-  `__ow.sea()`). Check with `scripts/sea.mjs <dir>` (the spirit three ways, the bridge on foot and riding, and `build`: mill, sketch and crossing in the story).
+  `__ow.sea()`). Check with `scripts/sea.mjs <dir>` (the spirit three ways, the bridge on foot and riding).
 
 ## Stack
 Three.js (hand-written GLSL3 `ShaderMaterial`s, no built-in lighting) +

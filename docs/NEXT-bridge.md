@@ -121,3 +121,73 @@ Questions for the owner (slice A):
    right side (we see its back as it comes up the far beach)?
 2. Should you be carried to the shore after the crossing, rather than walk
    down from the shrine?
+
+**Slices B to E** (check with `node scripts/bridge.mjs <dir> mill,wagon,haul,build`):
+- **The mill** (`story/mill.ts`, phase 4 of the director, `story/phase4.ts`):
+  home from the strait, the guide walks you to the free plot nearest the
+  cabin and shows the mill as a sketch: 6 stones for its footing, then 12
+  logs for its frame and roof. Once it stands, the villagers home work it
+  for real (`story/village.ts`, `MillWorks`): one takes a hatchet to a real
+  tree about the village (it falls, leaves a stump, regrows), carries the
+  log in on its head to the pile; another saws it into boards at the
+  sawhorse and carries them to the stack. The stack is yours to take.
+- **The wagon** (`story/wagon.ts`): the guide shows it in front of the mill
+  (12 logs: wheels, then bed, bench and shafts). Then the villagers carry
+  the mill's boards out to it, and any wood you walk up with goes in; the
+  guide's thought is the wood still wanted. 21 boards.
+- **The haul** (`WagonMode` in `player/movement.ts`): loaded, the guide
+  points at the village's stelk; walk up to the bench and it's yoked and
+  you're on. W on at a walk (Shift a trot), S reins in and backs at most
+  4 m (the stelk balks), A/D across the trail no further than its edges.
+  The guide sits beside you; two villagers walk alongside. A veil skips
+  the long middle about 50 s out; about 110 s of driving in all.
+- **The building**: at the water's edge a hands-off scene (about 25 s,
+  skippable): the crew carrying boards from the wagon to the first bays,
+  the bridge growing across the strait seen from out on the water, the last
+  of it reaching the far shore along the deck. Then hands back: everyone
+  cheers round you for about 20 s, walks off home up the trail and is home
+  once out of sight; the stelk goes with them; the wagon stays at the
+  bridgehead; the guide points you across and is home by its fire once
+  you're away. You walk over.
+- Saved per beat: the mill and wagon as parts of the director's save, the
+  pile and stack (`embla.mill.<seed>`), the load (`embla.wagon.<seed>`),
+  the quest stage (`embla.quest.<seed>`) and where the haul is
+  (`embla.quest.<seed>.haul`: a reload puts you back on the bench there).
+  The building scene is saved as done (a reload finds the bridge standing).
+- Checkpoints: `cp=shore`, `mill`, `yoke` (loaded), `haul` (on the bench).
+  `cp=offer2` plays all of it from the second offering. `cp=ring3` and later
+  now find the bridge standing. `story/bridgeWork.ts` is gone.
+
+Defaults taken in B to E (the brief's, and where it was silent):
+- The mill and the wagon together cost about what the stable did (6 stones,
+  24 logs); a log a tree from the villagers, three boards a log.
+- The villagers work the mill whenever it stands (they drop house chores and
+  the digging for it); by night they go in, except while the wagon's being
+  loaded (then they work on).
+- The stelk is the village's own, kept by the mill; nobody can ride it.
+- You can't get down off the bench during the haul (E does nothing): it's
+  two minutes, and it keeps the haul from being left half way.
+- The bridge goes up in the scene; the wagon's load goes into it.
+- The party is about 20 s, not a minute (with hands back you can walk away
+  from it at any time and they'll go home).
+
+Rough, and not looked at:
+- With two villagers home (after dungeon 2 that's all there are) the mill
+  and the bridge crew are thin. The crew in the building scene is drawn
+  carrying boards and knocking, but far out on the bridge they're simply
+  kept at its growing end.
+- How long the wagon takes to fill depends on how far the nearest standing
+  trees are: if you've cleared round the mill yourself, longer.
+- No sound of its own for the mill, the wagon or the building (borrowed:
+  chop, fall, a soft step for the saw, thunk, fanfare). No music.
+- The wagon pitches hard in the giant's prints. The stelk's walk is its own
+  gait at the wagon's pace; it isn't tied to the shafts beyond being put at
+  their end.
+- Not played by the owner; not looked at at night; frame rate not measured.
+
+Questions for the owner (B to E):
+1. Is two villagers enough to read as "the village" working, or should more
+   come home for it (or should spirits not yet saved be... not)?
+2. The fill: about four minutes with nobody helping. Too long, too short?
+3. Should you be able to get down off the wagon mid-haul?
+4. The party is short (20 s); a minute felt long in a scene you can't leave.
