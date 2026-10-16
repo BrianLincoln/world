@@ -90,6 +90,8 @@ const RIDE = { off: 4.6, from: 58, stop: 11 };
  * either side of it (m).
  */
 const HAUL = { cut: 125, tail: 150, end: 9, side: 2.7 };
+/** From the wagon's back axle to where the stelk stands in the shafts (m). */
+const TOW = WAG.HL - 0.4 + WAG.SHAFT + WAG.AX;
 /**
  * The building, in seconds: off the wagon (`down`), the first bays at the bridgehead (`head`), the rest across the
  * water seen from out on it (`across`), the last of it reaching the far shore (`last`); then everyone cheering
@@ -679,17 +681,18 @@ export class BridgeQuest {
   /** On the bench, the stelk in the shafts: off down the trail (or, a reload, on from where you were). */
   private startHaul(fresh: boolean) {
     const R = this.haulRail(), st = this.d.story, sp = this.spirit;
-    if (fresh) { this.haul = { s: 0, off: 0, cut: false }; this.saveHaul(); this.enter('haul'); }
+    if (fresh) { this.haul = { s: TOW - WAG.AX, off: 0, cut: false }; this.saveHaul(); this.enter('haul'); }
     else { this.stage = 'haul'; this.t = 0; }
     this.beat = '';
     const wm = this.d.wagonMode;
     wm.far = this.haul.s;
     wm.set(R, this.haul.s, this.haul.off, this.d.ground);
     wm.stop = R.L - HAUL.end;
-    const p = R.beside(this.haul.s, this.haul.off, w1);
-    this.d.body.pos.set(p.x, this.d.ground(p.x, p.y), p.y);
-    this.d.body.heading = R.heading(this.haul.s, 5);
+    // The wagon's back axle straight behind the stelk.
+    const h0 = R.heading(this.haul.s, 5);
+    this.axle.set(wm.lead.x - Math.sin(h0) * TOW, 0, wm.lead.z - Math.cos(h0) * TOW);
     this.d.drive(true);
+    this.tow();
     this.afterYaw = this.d.body.heading + Math.PI;
     // The guide beside you on the bench.
     sp.cancelActs();
@@ -703,16 +706,34 @@ export class BridgeQuest {
     this.place(0);
   }
 
+  /** The wagon's back axle, dragged along behind the stelk as a cart is. */
+  private axle = new THREE.Vector3();
+  /**
+   * The wagon towed: its back axle is pulled straight toward the stelk, never pushed sideways, so the stelk leads
+   * into a turn and the wagon swings round after it. The body (you, on the bench) goes with the wagon.
+   */
+  private tow() {
+    const wm = this.d.wagonMode, b = this.d.body, L = wm.lead, A = this.axle;
+    const dx = L.x - A.x, dz = L.z - A.z, d = Math.hypot(dx, dz) || 1;
+    A.set(L.x - (dx / d) * TOW, 0, L.z - (dz / d) * TOW);
+    const yaw = Math.atan2(dx, dz);
+    const cx = A.x + Math.sin(yaw) * WAG.AX, cz = A.z + Math.cos(yaw) * WAG.AX;
+    this.d.story.wagon!.place(cx, cz, yaw, this.d.ground);
+    b.pos.set(cx, this.d.ground(cx, cz), cz);
+    b.heading = yaw;
+  }
+
   /** The wagon, the stelk, the guide on the bench and the two walking, from where the drive has you. */
   private place(dt: number) {
     const b = this.d.body, st = this.d.story, w = st.wagon!, m = this.d.stelk(), sp = this.spirit, wm = this.d.wagonMode;
-    w.place(b.pos.x, b.pos.z, b.heading, this.d.ground);
+    this.tow();
     if (m) {
       m.ridden = true;
-      const h = w.hitch(v1);
       m.vel.copy(b.vel);
-      m.pos.set(h.x, this.d.ground(h.x, h.z), h.z);
-      m.heading = b.heading;
+      m.pos.copy(wm.lead);
+      // In the shafts, but turning its head and shoulders into the way it's going.
+      const lean = Math.atan2(Math.sin(wm.leadHeading - w.heading), Math.cos(wm.leadHeading - w.heading));
+      m.heading = w.heading + THREE.MathUtils.clamp(lean, -0.3, 0.3);
       m.grounded = true;
     }
     const seat = w.local(-0.42, WAG.HL - 0.2, WAG.DECK + 0.42);
@@ -720,7 +741,7 @@ export class BridgeQuest {
     const v = st.village, R = this.haulRail();
     if (!v) return;
     for (const [n, k] of this.marchers.entries()) {
-      const s = v.spirits[k], q = R.beside(wm.s + 0.6, wm.off + (n ? -1 : 1) * HAUL.side, w2);
+      const s = v.spirits[k], q = R.beside(wm.s - 3.6, wm.off + (n ? -1 : 1) * HAUL.side, w2);
       s.want.at.set(q.x, this.d.ground(q.x, q.y), q.y);
       s.want.face = null;
       s.want.settled = false;
@@ -741,7 +762,7 @@ export class BridgeQuest {
     if (this.beat === '' && !this.haul.cut && wm.s > HAUL.cut) { this.beat = 'cut'; this.t = 0; this.frames = 0; }
     if (this.beat === 'cut') {
       // The long middle under a veil: down the trail to near the strait.
-      if (this.veil < 1) { this.veil = Math.min(1, this.veil + dt / VEIL.fade); if (this.veil >= 1) { this.t = 0; this.frames = 0; this.haul = { s: R.L - HAUL.tail, off: wm.off, cut: true }; this.saveHaul(); this.startHaul(false); this.beat = 'cutWait'; } return; }
+      if (this.veil < 1) { this.veil = Math.min(1, this.veil + dt / VEIL.fade); if (this.veil >= 1) { this.t = 0; this.frames = 0; this.haul = { s: R.L - HAUL.tail, off: 0, cut: true }; this.saveHaul(); this.startHaul(false); this.beat = 'cutWait'; } return; }
     }
     if (this.beat === 'cutWait') {
       this.veil = 1;
@@ -750,7 +771,7 @@ export class BridgeQuest {
     }
     if (this.beat === 'lift') { this.veil = Math.max(0, this.veil - dt / VEIL.fade); if (this.veil <= 0) this.beat = ''; }
     // At the water's edge: stopped. (The building is slice E.)
-    if (wm.s >= wm.stop - 0.05 && Math.abs(wm.speed) < 0.05) this.arrive();
+    if (wm.s >= wm.stop - 1.5 && Math.abs(wm.speed) < 0.05) this.arrive();
   }
   private balkT = -9;
 

@@ -1255,23 +1255,25 @@ export interface RailLike {
   at(s: number, out?: THREE.Vector2): THREE.Vector2;
   heading(s: number, span?: number): number;
   beside(s: number, side: number, out?: THREE.Vector2): THREE.Vector2;
+  project(x: number, z: number, all?: boolean): { s: number; off: number };
 }
 
 /**
- * Driving the wagon (the bridge quest, story/bridgeQuest.ts): on a rail, the
- * giant's trail. W goes on at a walk (Shift: a trot), S reins in, and held
- * on a standstill backs it up a little; A and D turn it, as you'd steer a
- * bike, and it goes the way it faces, no further than the trail's edges
- * (at one it's turned back along it). Let go and the stelk drifts back to
- * following the trail. It never turns round, and it won't go back more
- * than `BACK` metres from the furthest it has been (the stelk balks:
- * `balked` is set for whoever shows it). Nothing else moves it, so it can't
- * be driven off the trail or get stuck.
+ * Driving the wagon (the bridge quest, story/bridgeQuest.ts) down the giant's
+ * trail. The stelk is steered as a mount is: W goes on the way it faces at a
+ * walk (Shift: a trot), S reins in and, held on a standstill, backs it up a
+ * little; A and D turn it. Let go of A and D and it steers itself back to the
+ * middle of the trail, a little way ahead. The trail is only a leash: past
+ * `LEASH` metres off it the stelk is drawn back harder, and it never goes past
+ * `HOLD` off it or `BACK` back from the furthest it has been, nor into
+ * water or beyond the quest's stop: up against any of those it stops and
+ * swings round toward the trail ahead (backing into one, it balks: `balked`). All of that is the
+ * stelk's way: the wagon is towed behind it (story/bridgeQuest.ts, `place`).
  */
 export class WagonMode implements MovementMode {
   readonly name = 'wagon';
   rail: RailLike | null = null;
-  /** How far along, the furthest it's been, how far to the left of the middle, and its speed (m/s; - backing). */
+  /** How far along the trail, the furthest it's been, how far to the left of the middle, and its speed (m/s; - backing). */
   s = 0;
   far = 0;
   off = 0;
@@ -1283,26 +1285,31 @@ export class WagonMode implements MovementMode {
   walk = 2.6;
   trot = 4.6;
   back = 0.9;
-  /** Half the width it may steer across; how far it may turn off the trail's line (rad), how fast (rad/s), and how fast it settles back. */
-  half = 4.5;
-  /** Which way it faces against the trail's line (rad, + left). */
-  rel = 0;
-  maxRel = 0.7;
-  turnRate = 1.1;
-  settle = 0.5;
-  static readonly BACK = 4;
+  /** How fast A/D turn it (rad/s), how fast it steers itself back on its own, and how far ahead on the trail it aims (m). */
+  turnRate = 1.3;
+  homing = 1.4;
+  aim = 9;
+  /** Where the stelk is, and which way it faces. */
+  readonly lead = new THREE.Vector3();
+  leadHeading = 0;
+  static readonly BACK = 40;
+  static readonly LEASH = 22;
+  static readonly HOLD = 34;
   private ground: (x: number, z: number) => number = () => 0;
   private v2 = new THREE.Vector2();
 
-  /** Put it on `rail` at `s`, `off` to the side. */
+  /** Put it on `rail` at `s`, `off` to the side, facing along it. */
   set(rail: RailLike, s: number, off: number, ground: (x: number, z: number) => number) {
     this.rail = rail;
     this.s = s;
     this.far = Math.max(s, this.far);
     this.off = off;
-    this.rel = 0;
     this.speed = 0;
     this.ground = ground;
+    const p = rail.beside(s, off, this.v2);
+    this.lead.set(p.x, ground(p.x, p.y), p.y);
+    this.leadHeading = rail.heading(s, 5);
+    rail.project(p.x, p.y, true);
   }
 
   enter(b: Body) { b.vel.set(0, 0, 0); b.grounded = true; }
@@ -1316,31 +1323,42 @@ export class WagonMode implements MovementMode {
     let want = input.y > 0.2 ? (input.run ? this.trot : this.walk) * Math.min(1, input.y) : 0;
     // Reining in to a stop, and only then backing, a few steps at most.
     if (input.y < -0.2) want = this.speed > 0.25 ? 0 : -this.back;
-    if (want < 0 && this.s <= this.far - WagonMode.BACK + 0.05) { want = 0; if (input.y < -0.2) this.balked = 0; }
+    if (want > 0 && this.s >= end - 0.05) want = 0;
     this.balked += dt;
     this.speed += (want - this.speed) * e(want === 0 ? 2.6 : want > this.speed ? 0.9 : 2);
-    // Turning: A/D swing it round (more readily under way), and let go it settles back to the trail's line.
-    const turn = -input.x * this.turnRate * Math.min(1, Math.abs(this.speed) / 1.5 + 0.35);
-    if (Math.abs(input.x) > 0.1) this.rel += turn * dt;
-    else this.rel -= this.rel * e(this.settle);
-    this.rel = THREE.MathUtils.clamp(this.rel, -this.maxRel, this.maxRel);
-    // It goes the way it faces: along the trail, and across it.
-    this.s += this.speed * Math.cos(this.rel) * dt;
-    this.off += this.speed * Math.sin(this.rel) * dt;
-    this.s = Math.max(this.far - WagonMode.BACK, Math.min(end, this.s));
-    if (this.s >= end - 0.01 && this.speed > 0) this.speed = 0;
-    this.far = Math.max(this.far, this.s);
-    // At an edge it's turned back along it, never through.
-    if (Math.abs(this.off) >= this.half) {
-      this.off = Math.sign(this.off) * this.half;
-      if (Math.sign(this.rel) === Math.sign(this.off) * Math.sign(this.speed || 1)) this.rel -= this.rel * e(5);
+    // Steering. Where it would go by itself: the middle of the trail a little ahead.
+    const t = R.at(Math.min(R.L, this.s + this.aim), this.v2);
+    const home = Math.atan2(t.x - this.lead.x, t.y - this.lead.z);
+    const toHome = Math.atan2(Math.sin(home - this.leadHeading), Math.cos(home - this.leadHeading));
+    const under = Math.min(1, Math.abs(this.speed) / 1.5 + 0.3);
+    const far = Math.max(
+      THREE.MathUtils.clamp((Math.abs(this.off) - WagonMode.LEASH) / (WagonMode.HOLD - WagonMode.LEASH), 0, 1),
+      THREE.MathUtils.clamp((this.far - this.s - WagonMode.LEASH) / (WagonMode.BACK - WagonMode.LEASH), 0, 1));
+    if (Math.abs(input.x) > 0.1) this.leadHeading += -input.x * this.turnRate * under * (1 - far * 0.85) * dt;
+    // Let go (or out at the end of the leash) and it steers itself back.
+    const pull = Math.abs(input.x) > 0.1 ? far * 3 : this.homing + far * 3;
+    this.leadHeading += toHome * e(pull * under);
+    // On the way it faces.
+    const fx = Math.sin(this.leadHeading), fz = Math.cos(this.leadHeading);
+    const nx = this.lead.x + fx * this.speed * dt, nz = this.lead.z + fz * this.speed * dt;
+    const pr = R.project(nx, nz);
+    const ok = this.ground(nx, nz) > 1.2 && Math.abs(pr.off) <= WagonMode.HOLD && pr.s <= end && pr.s >= this.far - WagonMode.BACK;
+    if (ok) {
+      if (dt > 0) b.vel.set((nx - this.lead.x) / dt, 0, (nz - this.lead.z) / dt);
+      this.lead.set(nx, this.ground(nx, nz), nz);
+      this.s = pr.s;
+      this.off = pr.off;
+    } else {
+      // Up against it: it stops there and swings round toward the trail ahead (S against the leash: the stelk balks).
+      if (this.speed < 0) this.balked = 0;
+      this.speed = 0;
+      this.leadHeading += toHome * e(2.5);
+      b.vel.set(0, 0, 0);
+      R.project(this.lead.x, this.lead.z);
     }
-    const p = R.beside(this.s, this.off, this.v2);
-    const h = R.heading(this.s, 5) + this.rel;
-    const nx = p.x, nz = p.y;
-    if (dt > 0) b.vel.set((nx - b.pos.x) / dt, 0, (nz - b.pos.z) / dt);
-    b.pos.set(nx, this.ground(nx, nz), nz);
-    b.heading += Math.atan2(Math.sin(h - b.heading), Math.cos(h - b.heading)) * e(8);
+    this.far = Math.max(this.far, this.s);
+    b.pos.copy(this.lead);
+    b.heading = this.leadHeading;
     b.grounded = true;
     return null;
   }
