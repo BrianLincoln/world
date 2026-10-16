@@ -205,6 +205,13 @@ export class BridgeQuest {
   // ------------------------------------------------------------ frame
 
   update(dt: number) {
+    this.questStep(dt);
+    // The chains from the shafts to the stelk's yoke (once it's been brought to the wagon).
+    const w = this.d.story.wagon, late = this.stage !== 'wait' && this.stage !== 'cross' && this.stage !== 'shore' && this.stage !== 'ride' && this.stage !== 'mill';
+    w?.harness(late ? this.d.stelk() : null, dt);
+  }
+
+  private questStep(dt: number) {
     this.t += dt;
     this.frames++;
     const c = this.d.crossing();
@@ -733,7 +740,7 @@ export class BridgeQuest {
       m.pos.copy(wm.lead);
       // In the shafts, but turning its head and shoulders into the way it's going.
       const lean = Math.atan2(Math.sin(wm.leadHeading - w.heading), Math.cos(wm.leadHeading - w.heading));
-      m.heading = w.heading + THREE.MathUtils.clamp(lean, -0.3, 0.3);
+      m.heading = w.heading + THREE.MathUtils.clamp(lean, -0.12, 0.12);
       m.grounded = true;
     }
     const seat = w.local(-0.42, WAG.HL - 0.2, WAG.DECK + 0.42);

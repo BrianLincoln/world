@@ -291,6 +291,41 @@ function bridleGeometry() {
   return merge([strap(nose, true, 0.02), strap(crown, false), ring(0.13), ring(-0.13)]);
 }
 
+/**
+ * The yoke, for pulling the wagon (story/wagon.ts): a wooden arch over the shoulders in front of the withers, on a
+ * knitted pad, an iron ring at each end low on the chest where the wagon's chains hook on. Body space.
+ */
+const YOKE_Z = 0.62, YOKE_TH = 2.0;
+function yokeArc(off: number) {
+  const k = Math.sqrt(1 - YOKE_Z * YOKE_Z), pts: THREE.Vector3[] = [];
+  for (let i = 0; i <= 16; i++) {
+    const th = -YOKE_TH + (i / 16) * YOKE_TH * 2;
+    const p = barrel(new THREE.Vector3(k * Math.sin(th), k * Math.cos(th), YOKE_Z), new THREE.Vector3());
+    pts.push(p.addScaledVector(new THREE.Vector3(p.x, p.y, 0).normalize(), off));
+  }
+  return pts;
+}
+/** Where the chains hook on: the rings at the yoke's ends (body space, +x first). */
+export const YOKE_HOOKS = ((): [THREE.Vector3, THREE.Vector3] => {
+  // Out past the flanks, at the ends of pegs through the arch's ends.
+  const a = yokeArc(0.1), e = a[a.length - 1].clone().setX(0.66);
+  return [e, e.clone().setX(-e.x)];
+})();
+function yokeGeometry() {
+  const bar = new THREE.TubeGeometry(new THREE.CatmullRomCurve3(yokeArc(0.09)), 40, 0.05, 7, false);
+  const pad = new THREE.TubeGeometry(new THREE.CatmullRomCurve3(yokeArc(0.035)), 40, 0.045, 7, false);
+  const parts = [colored(bar, '#8a5a3c'), colored(pad, SADDLE)];
+  const ends = yokeArc(0.09);
+  for (const [k, h] of YOKE_HOOKS.entries()) {
+    // A wooden peg out sideways from the arch's end, a knob on it, and the ring for the chain.
+    const from = (k ? ends[0] : ends[ends.length - 1]), len = Math.abs(h.x - from.x) + 0.04;
+    parts.push(colored(new THREE.CylinderGeometry(0.035, 0.04, len, 8).rotateZ(Math.PI / 2).translate((from.x + h.x) / 2, h.y, h.z), '#8a5a3c'));
+    parts.push(colored(new THREE.SphereGeometry(0.05, 10, 8).translate(h.x + Math.sign(h.x) * 0.03, h.y, h.z), '#8a5a3c'));
+    parts.push(colored(new THREE.TorusGeometry(0.04, 0.013, 6, 12).translate(h.x, h.y - 0.03, h.z - 0.03), '#5d5866'));
+  }
+  return merge(parts);
+}
+
 function collarGeometry() {
   return colored(new THREE.TorusGeometry(0.3, 0.035, 6, 32).rotateX(Math.PI / 2), ROPE);
 }
@@ -386,6 +421,7 @@ export class Stelk implements Species {
   readonly saddleB: PartBatch;
   readonly bridleB: PartBatch;
   readonly collarB: PartBatch;
+  readonly yokeB: PartBatch;
   readonly batches: PartBatch[];
 
   constructor() {
@@ -408,7 +444,8 @@ export class Stelk implements Species {
     this.saddleB = new PartBatch(saddleGeometry(), { keep: 0.75, doubleSide: true }, 12);
     this.bridleB = new PartBatch(bridleGeometry(), { keep: 0.7 }, 12);
     this.collarB = new PartBatch(collarGeometry(), { keep: 0.6 }, 12);
-    this.batches = [this.bodyB, this.neckB, this.headB, this.earB, ...this.legB, this.saddleB, this.bridleB, this.collarB];
+    this.yokeB = new PartBatch(yokeGeometry(), { keep: 0.7 }, 4);
+    this.batches = [this.bodyB, this.neckB, this.headB, this.earB, ...this.legB, this.saddleB, this.bridleB, this.collarB, this.yokeB];
   }
 
   // ------------------------------------------------------------ places
@@ -949,6 +986,7 @@ export class Stelk implements Species {
       this.bridleB.push(d.head.matrixWorld, WHITE);
     }
     if (m.state === 'caught' || m.leashed) this.collarB.push(d.collar.matrixWorld, WHITE);
+    if (m.yoked) this.yokeB.push(d.body.matrixWorld, WHITE);
   }
 
   attach(m: Mob, toward: THREE.Vector3, out: THREE.Vector3) {
@@ -964,6 +1002,13 @@ export class Stelk implements Species {
     d.seat.getWorldPosition(seatPos);
     d.seat.getWorldQuaternion(seatQuat);
     return { pos: seatPos, quat: seatQuat, spread: 0.78 };
+  }
+
+  /** Yoked: its body (whose matrix carries the yoke, and what a chain must go round), and where the chains hook on. */
+  harness(m: Mob, hooks: [THREE.Vector3, THREE.Vector3]) {
+    const d = m.data as StelkData;
+    for (let k = 0; k < 2; k++) hooks[k].copy(YOKE_HOOKS[k]).applyMatrix4(d.body.matrixWorld);
+    return d.body;
   }
 
   reset(m: Mob) {

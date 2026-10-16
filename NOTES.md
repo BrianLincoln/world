@@ -6250,3 +6250,5 @@ The owner: do a lot, decide as you go, on your own branch. So on `islands`
   at the bridgehead. `story/bridgeWork.ts` and its 100-wood sketch are gone.
 - `cp=ring3` (and later) marks the quest done, so the moth's scripts find
   the bridge standing. New checkpoints: `yoke`, `haul`.
+
+- 2026-10-15: the wagon's shafts run up the stelk's flanks to just behind its shoulders (`WAG.POLE`, wider apart than its body); a yoke on its shoulders with pegs out past its flanks (`yokeGeometry`, shown while `Mob.yoked`), and a short verlet link chain from each shaft end to a peg (`Chain`, `Wagon.harness`, called from `BridgeQuest.update`). Yoked is sticky (on within 0.6 m of the hitch, off past 3 m): a flicker unpinned the chains and they flew about. Its lean in the shafts is down to 0.12 rad so its rump stays off the shafts. `WAG.SHAFT` is still the towing reach.

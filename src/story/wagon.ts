@@ -14,11 +14,16 @@ import { siteLocal, siteToLocal } from '../world/storySite';
 import { fillPart, makePart, setPartBuilt, setPartFilled, tickPart, type Buildable, type Part, type PartId } from './build';
 import { core, K, kbox, merge } from './geometry';
 import { glintMat, propMesh } from './props';
+import { makeSolidMaterial } from '../gfx/materials';
+import type { Mob } from '../mobs/types';
+import type { Stelk } from '../mobs/stelk';
 
 export type WagonPartId = 'wheels' | 'bed';
 
-/** Its measurements: wheel radius, axles fore and aft, track (half), the deck's top, its half length and width, the shafts' reach. */
-export const WAG = { R: 0.42, AX: 0.95, TR: 0.8, DECK: 0.86, HL: 1.35, HW: 0.68, SHAFT: 3.5 };
+/** Its measurements: wheel radius, axles fore and aft, track (half), the deck's top, its half length and width, the shafts' reach (to the stelk), how long they are (up past its flanks to just behind its shoulders; a short chain does the rest), and how far up their ends come. */
+export const WAG = { R: 0.42, AX: 0.95, TR: 0.8, DECK: 0.86, HL: 1.35, HW: 0.68, SHAFT: 3.5, POLE: 3.45, RISE: 0.42 };
+/** A shaft's end, where its chain hooks on (wagon-local; x is +-). */
+const TIP = new THREE.Vector3(0.68, WAG.R + 0.36 + WAG.RISE, WAG.HL - 0.2 + WAG.POLE);
 /** How many boards make a full load, and how many go in a course of them. */
 export const LOAD = 21;
 const ROW = 3;
@@ -54,6 +59,8 @@ export class Wagon implements Buildable {
   private t = 0;
   private roll = 0;
   private frame: { x: number; z: number; rot: number; y: number };
+  /** The two chains from the shafts' ends to the stelk's yoke. */
+  private chains = [new Chain(), new Chain()];
 
   constructor(at: { x: number; z: number; rot: number; y: number }, private key: string, private puffs: (at: THREE.Vector3, n: number, size: number, spread: number) => void) {
     this.home = { ...at };
@@ -82,12 +89,14 @@ export class Wagon implements Buildable {
     bed.push(kbox(HW * 2, 0.22, 0.05, 0, DECK + 0.62, HL - 0.42, K.wood));
     bed.push(kbox(HW * 2 - 0.1, 0.05, 0.36, 0, DECK + 0.02, HL + 0.18, K.boards, -0.25));
     bSk.push(kbox(HW * 2 + 0.06, 0.48, 0.34, 0, DECK + 0.24, HL - 0.22, K.boards));
-    // Shafts: from under the bed's front out to where the stelk's harness takes them, a little up at the end; a bar across.
+    // Shafts: from under the bed's front, up along the stelk's flanks to just short of its yoke; a ring at each end for its chain. A bar across.
     for (const s of [-1, 1]) {
-      const len = SHAFT, mid = HL - 0.2 + len / 2, rise = 0.08;
-      bed.push(kbox(0.07, 0.07, len, s * 0.56, R + 0.36 + rise / 2, mid, K.trunk, -Math.atan2(rise, len)));
-      bSk.push(kbox(0.07, 0.07, len, s * 0.56, R + 0.36 + rise / 2, mid, K.trunk));
+      const len = WAG.POLE, mid = HL - 0.2 + len / 2, rise = WAG.RISE;
+      bed.push(kbox(0.08, 0.08, Math.hypot(len, rise), s * TIP.x, R + 0.36 + rise / 2, mid, K.trunk, -Math.atan2(rise, len)));
+      bSk.push(kbox(0.08, 0.08, len, s * TIP.x, R + 0.36 + rise / 2, mid, K.trunk));
+      bed.push(core(new THREE.TorusGeometry(0.045, 0.014, 6, 12).rotateY(Math.PI / 2).translate(s * TIP.x, TIP.y - 0.06, TIP.z - 0.03), K.steel));
     }
+    void SHAFT;
     bed.push(kbox(1.2, 0.07, 0.07, 0, R + 0.32, HL + 0.35, K.trunk));
 
     const piece = (geo: THREE.BufferGeometry, centre: THREE.Vector3) => {
@@ -123,6 +132,7 @@ export class Wagon implements Buildable {
     (this.loadMesh.geometry as THREE.InstancedBufferGeometry).index = null;
     pBed.add(this.loadMesh);
     this.loadMesh.position.sub(cBed);
+    for (const c of this.chains) { c.mesh.visible = false; this.root.add(c.mesh); }
     this.place(at.x, at.z, at.rot, () => at.y);
     const M = this.root.matrixWorld.clone();
     const W = (v: THREE.Vector3) => this.root.localToWorld(v.clone());
@@ -184,6 +194,30 @@ export class Wagon implements Buildable {
   /** Where the stelk's harness is: the end of the shafts (its chest goes there), in the world. */
   hitch(out: THREE.Vector3) { return this.root.localToWorld(out.set(0, 0, WAG.HL - 0.2 + WAG.SHAFT - 0.2)); }
 
+  /**
+   * The chains, each frame (after the wagon and the stelk are placed): `m` is the stelk if it's about. Standing in the
+   * shafts it wears the yoke and the chains run to it, slack enough to swing as the wagon rocks; otherwise they hang
+   * off the shafts' ends to the ground.
+   */
+  harness(m: Mob | null, dt: number) {
+    const up = this.parts.bed.state === 'built';
+    // Sticky: hooked on once it's stood in the shafts, off only once it's well away (a flicker would whip the chains loose).
+    const off = m ? m.pos.distanceTo(this.hitch(hv)) : Infinity;
+    const yoked = !!m && up && (m.yoked ? off < 3 : off < 0.6);
+    if (m) m.yoked = yoked;
+    for (const c of this.chains) c.mesh.visible = up;
+    if (!up) return;
+    this.root.updateMatrixWorld(true);
+    hInv.copy(this.root.matrixWorld).invert();
+    const down = hDown.set(0, -1, 0).applyQuaternion(hq.copy(this.root.quaternion).invert());
+    if (yoked) (m!.species as Stelk).harness(m!, hooks);
+    for (let k = 0; k < 2; k++) {
+      const s = k ? -1 : 1, a = hA.set(s * TIP.x, TIP.y - 0.09, TIP.z - 0.03);
+      const b = yoked ? hooks[k].applyMatrix4(hInv) : null;
+      this.chains[k].step(a, b, down, Math.min(dt, 1 / 30));
+    }
+  }
+
   // ------------------------------------------------------------ Buildable
 
   slotPos(p: Part, i: number, out: THREE.Vector3) {
@@ -233,5 +267,105 @@ export class Wagon implements Buildable {
     if (vn < 0) { vel.x -= wx * vn; vel.z -= wz * vn; }
   }
 
-  dispose() { this.root.traverse((o) => { if (o instanceof THREE.Mesh) o.geometry.dispose(); }); }
+  dispose() { for (const c of this.chains) (c.mesh.material as THREE.Material).dispose(); this.root.traverse((o) => { if (o instanceof THREE.Mesh) o.geometry.dispose(); }); }
+}
+
+const hv = new THREE.Vector3(), hA = new THREE.Vector3(), hDown = new THREE.Vector3(), hq = new THREE.Quaternion();
+const hInv = new THREE.Matrix4();
+const hooks: [THREE.Vector3, THREE.Vector3] = [new THREE.Vector3(), new THREE.Vector3()];
+const cv = new THREE.Vector3(), cv2 = new THREE.Vector3(), cX = new THREE.Vector3(), cY = new THREE.Vector3(), cZ = new THREE.Vector3();
+
+/** Chain: a verlet line of points in wagon-local space, drawn as oval iron links, each turned a quarter from the last. */
+const LINKS = 5, CHAIN = 0.5;
+const LINK = new THREE.TorusGeometry(0.042, 0.015, 5, 10).scale(1, 1.5, 1);
+class Chain {
+  readonly mesh: THREE.Mesh;
+  private p = Array.from({ length: LINKS + 1 }, () => new THREE.Vector3());
+  private prev = Array.from({ length: LINKS + 1 }, () => new THREE.Vector3());
+  private pos: THREE.BufferAttribute;
+  private nrm: THREE.BufferAttribute;
+  private primed = false;
+
+  constructor() {
+    const lp = LINK.attributes.position.array, ln = LINK.attributes.normal.array, li = LINK.index!.array, nv = lp.length / 3;
+    const geo = new THREE.BufferGeometry();
+    this.pos = new THREE.BufferAttribute(new Float32Array(nv * LINKS * 3), 3).setUsage(THREE.DynamicDrawUsage);
+    this.nrm = new THREE.BufferAttribute(new Float32Array(nv * LINKS * 3), 3).setUsage(THREE.DynamicDrawUsage);
+    const idx: number[] = [];
+    for (let l = 0; l < LINKS; l++) for (let i = 0; i < li.length; i++) idx.push(li[i] + l * nv);
+    geo.setAttribute('position', this.pos);
+    geo.setAttribute('normal', this.nrm);
+    geo.setIndex(idx);
+    void ln;
+    this.mesh = new THREE.Mesh(geo, makeSolidMaterial('#5d5866', 0, { keep: 0.75 }));
+    this.mesh.frustumCulled = false;
+  }
+
+  /** Pinned at `a`, and at `b` if given (else the end hangs where it falls). */
+  step(a: THREE.Vector3, b: THREE.Vector3 | null, down: THREE.Vector3, dt: number) {
+    const p = this.p, n = LINKS;
+    if (!this.primed) {
+      for (let i = 0; i <= n; i++) { p[i].copy(a).addScaledVector(down, (i / n) * CHAIN * 0.5); this.prev[i].copy(p[i]); }
+      this.primed = true;
+    }
+    const damp = Math.exp(-3 * dt), g = 14 * dt * dt, last = b ? n - 1 : n;
+    for (let i = 1; i <= last; i++) {
+      const v = cv.subVectors(p[i], this.prev[i]).multiplyScalar(damp);
+      this.prev[i].copy(p[i]);
+      p[i].add(v).addScaledVector(down, g);
+    }
+    const seg = Math.max(CHAIN, b ? a.distanceTo(b) * 1.001 : 0) / n;
+    for (let it = 0; it < 10; it++) {
+      p[0].copy(a);
+      if (b) p[n].copy(b);
+      for (let i = 0; i < n; i++) {
+        const d = cv.subVectors(p[i + 1], p[i]), l = d.length();
+        if (l < 1e-6) continue;
+        const k = (l - seg) / l;
+        const wa = i === 0 ? 0 : i + 1 === n && b ? 1 : 0.5, wb = i + 1 === n && b ? 0 : i === 0 ? 1 : 0.5;
+        p[i].addScaledVector(d, k * wa);
+        p[i + 1].addScaledVector(d, -k * wb);
+      }
+      for (let i = 1; i <= last; i++) {
+        if (p[i].y < 0.03) p[i].y = 0.03;
+      }
+    }
+    p[0].copy(a);
+    if (b) p[n].copy(b);
+    // Never off on its own: anything further from either end than the chain allows is put back on the line between them.
+    for (let i = 1; i <= last; i++) {
+      const far = (b ? Math.max(CHAIN, a.distanceTo(b)) : CHAIN) * 1.05;
+      if (p[i].distanceTo(a) > far || (b && p[i].distanceTo(b) > far)) {
+        if (b) p[i].lerpVectors(a, b, i / n); else p[i].copy(a).addScaledVector(down, (i / n) * CHAIN);
+        this.prev[i].copy(p[i]);
+      }
+    }
+    this.build(down);
+  }
+
+  private build(down: THREE.Vector3) {
+    const lp = LINK.attributes.position.array, ln = LINK.attributes.normal.array, nv = lp.length / 3;
+    const pos = this.pos.array as Float32Array, nrm = this.nrm.array as Float32Array;
+    for (let l = 0; l < LINKS; l++) {
+      const c = cv.addVectors(this.p[l], this.p[l + 1]).multiplyScalar(0.5);
+      cY.subVectors(this.p[l + 1], this.p[l]).normalize();
+      cX.crossVectors(cY, down);
+      if (cX.lengthSq() < 1e-6) cX.set(1, 0, 0);
+      cX.normalize();
+      cZ.crossVectors(cX, cY);
+      // Every other link a quarter turn round the chain.
+      if (l & 1) { cv2.copy(cX); cX.copy(cZ); cZ.copy(cv2).negate(); }
+      for (let i = 0; i < nv; i++) {
+        const o = (l * nv + i) * 3, x = lp[i * 3], y = lp[i * 3 + 1], z = lp[i * 3 + 2], nx = ln[i * 3], ny = ln[i * 3 + 1], nz = ln[i * 3 + 2];
+        pos[o] = c.x + cX.x * x + cY.x * y + cZ.x * z;
+        pos[o + 1] = c.y + cX.y * x + cY.y * y + cZ.y * z;
+        pos[o + 2] = c.z + cX.z * x + cY.z * y + cZ.z * z;
+        nrm[o] = cX.x * nx + cY.x * ny + cZ.x * nz;
+        nrm[o + 1] = cX.y * nx + cY.y * ny + cZ.y * nz;
+        nrm[o + 2] = cX.z * nx + cY.z * ny + cZ.z * nz;
+      }
+    }
+    this.pos.needsUpdate = true;
+    this.nrm.needsUpdate = true;
+  }
 }
