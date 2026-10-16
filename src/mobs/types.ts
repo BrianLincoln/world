@@ -47,6 +47,8 @@ export interface Mob {
   settle?: boolean;
   /** Phasing with nobody on it (a glimmer): seconds of it left. Whoever drives it counts it down. */
   ghost?: number;
+  /** A ridden clinger on a wall: the way out of the face (unit, level). Unset on the ground. Whoever rides it sets this. */
+  cling?: THREE.Vector3;
 }
 
 export interface Flock {

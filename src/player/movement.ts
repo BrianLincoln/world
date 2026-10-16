@@ -326,7 +326,7 @@ export class SwimMode implements MovementMode {
 export class FlyMode implements MovementMode {
   readonly name = 'fly';
   speed = 22;
-  fastSpeed = 90;
+  fastSpeed = 9000;
 
   enter(b: Body) {
     b.grounded = false;

@@ -9,6 +9,7 @@
 //   offer:  the checkpoint after the light (`cp=offer4`): the offering, the wurm in stone.
 //   story:  from the dev checkpoint (`?fresh=1&cp=ring4`): the fourth ring takes you down, and with the light lifts you out and shuts.
 //   climb:  the wurm on the far face, from several sides.
+//   roll:   her turned along the far face (rolled on her side, legs on the rock), near to, and through each turn.
 //   home4:  what follows the fourth smile (the fourth `Homecoming`): the crow leaving with a light, the
 //           village, the giant getting up and walking to the fifth ring (bare stones), and a reload.
 //           `home4 sandbox`: outside the story.
@@ -21,7 +22,7 @@ const root = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..')
 const args = process.argv.slice(2);
 const dir = args[0] ?? 'shots/drop';
 const seed = args.find((a) => a.startsWith('seed='))?.slice(5) ?? 'hilda';
-const kinds = (args.find((a) => /^(inside|quest|climb|story|offer|home4)/.test(a)) ?? 'inside').split(',');
+const kinds = (args.find((a) => /^(inside|quest|climb|roll|story|offer|home4)/.test(a)) ?? 'inside').split(',');
 fs.mkdirSync(dir, { recursive: true });
 const server = http.createServer((req, res) => {
   const p = decodeURIComponent(new URL(req.url, 'http://x').pathname);
@@ -370,6 +371,41 @@ if (kinds.includes('climb')) {
   await shot('climb-ladder-up');
   await run(() => { const B = window.__bot, ow = window.__ow; ow.view(ow._orbit?.yaw ?? 0, 0.5, 30); B.tick(47); });
   await shot('climb-ladder-down');
+}
+
+if (kinds.includes('roll')) {
+  await load('dungeon=4&fresh=1');
+  await run(() => {
+    const B = window.__bot, ow = window.__ow;
+    B.d.goTo('end'); B.d.debugYours(); B.tick(20);
+    B.go(B.her().slice(0, 2), { stop: 2.2, max: 6 }); B.press('KeyE'); B.tick(30);
+    B.key('KeyW', true); B.tick(760);
+  });
+  const stop = (on) => run((on) => { const B = window.__bot; B.key('KeyW', !on); if (on) { B.key('KeyS', true); B.tick(3); B.key('KeyS', false); } }, on);
+  const look = async (name, off, pitch, dist = 7) => {
+    await run(([off, pitch, dist]) => { const ow = window.__ow, g = ow.gallop(); window.__bot.tick(40); ow.view(Math.atan2(-g.wallX, -g.wallZ) + off, pitch, dist); window.__bot.tick(1); }, [off, pitch, dist]);
+    await shot(`roll-${name}`);
+  };
+  const state = () => run(() => { const ow = window.__ow, g = ow.gallop(), m = ow._riding?.(); return { wall: g.wall, side: g.wallSide, here: window.__bot.here().map((v) => +v.toFixed(2)) }; });
+  await stop(true);
+  await look('up', 1.25, 0.1);
+  // Left along the face: through the turn, then well along it.
+  await stop(false);
+  for (const [name, n] of [['turn-0', 3], ['turn-1', 5], ['turn-2', 8], ['turn-3', 14]]) { await run(([n, first]) => { const B = window.__bot; if (first) B.press('KeyA'); B.tick(n); }, [n, name === 'turn-0']); await shot(`roll-${name}`); }
+  await run(() => window.__bot.tick(60));
+  await stop(true);
+  console.log(JSON.stringify(await state()));
+  await look('along', 0, 0.1);
+  await look('along-a', 1.25, 0.1);
+  await look('along-b', -1.25, 0.1);
+  await look('along-above', 0.3, 1.2);
+  await look('along-below', 0, -0.5);
+  // And down from there.
+  await stop(false);
+  await run(() => { const B = window.__bot; B.press('KeyA'); B.tick(50); });
+  await stop(true);
+  console.log(JSON.stringify(await state()));
+  await look('down', 1.25, 0.1);
 }
 
 if (kinds.includes('home4')) {

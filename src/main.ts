@@ -628,6 +628,8 @@ let ring3: Ring | null = null;
 let ring4: Ring | null = null;
 let visitWait = 0;
 let visitHud = false;
+/** A cutscene is on the screen (its camera, or a scene that's `busy`): the HUD is hidden, all but the skip prompt. */
+let cineHud = false;
 /** The cut between the world and the dungeon: a flat violet veil, driven by whichever has hold of you. */
 const dungeonVeil = document.createElement('div');
 dungeonVeil.style.cssText = 'position:fixed;inset:0;background:#2b2147;opacity:0;pointer-events:none;z-index:4';
@@ -2056,6 +2058,9 @@ function frame(ts?: number) {
     riding.vel.copy(body.vel);
     riding.heading = body.heading;
     riding.grounded = body.grounded;
+    // (On a wall: which way is out of it, for the body to lie against.)
+    const onWall = rideMode.gallopState;
+    riding.cling = onWall.wall ? (riding.cling ?? new THREE.Vector3()).set(-onWall.wallX, 0, -onWall.wallZ).normalize() : undefined;
     for (const ev of body.events) {
       if (ev.type === 'land' && ev.impact > 3) puffs.emit(body.pos, 6, 0.16, 2.2);
       if (ev.type === 'bump') orbit.bump(Math.min(1.5, ev.impact * 0.1));
@@ -2192,7 +2197,7 @@ function frame(ts?: number) {
   if (pointer && storyHost?.story) {
     // No task to point at, and the giant not yet been: lost a long way off, the way home.
     const g = (journey ? journey.guide(mobs.leading) : storyHost.story.guide(mobs.leading)) ?? (storyHost.story.giantGone ? null : wayHome ??= { at: new THREE.Vector3(gen.story.x, gen.story.y, gen.story.z), near: 150, far: 350, delay: 60 });
-    pointer.update(dt, camera, body.pos, g, !beacons.busy && !beacons.inside && !journey?.busy && !storyBusy && !den());
+    pointer.update(dt, camera, body.pos, g, !beacons.busy && !beacons.inside && !journey?.busy && !storyBusy && !den() && !hadCine && !visitHud);
   }
   // Patting the spirit: from behind, the explorer's back hides it all, so
   // with the mouse idle the camera eases round to the patting side.
@@ -2317,6 +2322,8 @@ function frame(ts?: number) {
   TERRAIN_U.uPlayerLift.value = lift;
   if (mode === 'swim' || mode === 'ride' || lift > 40 || groundY < SEA_LEVEL || !rig.root.visible) TERRAIN_U.uPlayerFeet.value.y = -1e4;
   updateAimHud();
+  // A cutscene's camera has the frame: nothing over it but the way out of it (index.html, body.cine).
+  if (cineHud !== (hadCine || visitHud)) { cineHud = hadCine || visitHud; document.body.classList.toggle('cine', cineHud); }
 
   env.update(dt);
   // Down there the light is the cave's own, whatever the hour is above.

@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { Beast, clamp, collarGeometry, saddleGeometry, type Anim, type BeastData } from './beast';
+import { Beast, collarGeometry, saddleGeometry, type Anim, type BeastData } from './beast';
 import type { PartBatch } from './parts';
 import { colored, ellipsoid, furBall, merge, smooth, tube } from './shapes';
 import type { Mob, MobCtx } from './types';
@@ -43,6 +43,18 @@ function headGeometry() {
 }
 
 const tv = new THREE.Vector3();
+const UP = new THREE.Vector3(0, 1, 0);
+const tu = new THREE.Vector3(), tf = new THREE.Vector3(), tx = new THREE.Vector3(), ty = new THREE.Vector3();
+const tm = new THREE.Matrix4(), tq = new THREE.Quaternion(), tq2 = new THREE.Quaternion(), te = new THREE.Euler();
+/** Facing `f` with its back to `up` (nothing if the two are one line). */
+function facing(f: THREE.Vector3, up: THREE.Vector3, out: THREE.Quaternion) {
+  tx.crossVectors(up, f);
+  if (tx.lengthSq() < 1e-4) return false;
+  tx.normalize();
+  ty.crossVectors(f, tx);
+  out.setFromRotationMatrix(tm.makeBasis(tx, ty, f));
+  return true;
+}
 
 /** A woolly wurm in stone, curled round on itself with its head up (the shrine the fourth ring becomes): position and normal, on y = 0, facing +z. */
 export function wurmStatue(): THREE.BufferGeometry {
@@ -116,6 +128,7 @@ export class Wurm extends Beast {
     for (let k = 1; k < SEGS.length; k++) {
       const o = new THREE.Object3D();
       o.scale.setScalar(SEGS[k]);
+      o.rotation.order = 'YXZ';
       segs.push(o);
       this.draw(d, this.segB[k % 2], o);
     }
@@ -126,24 +139,37 @@ export class Wurm extends Beast {
     d.seat.position.set(0, 1.0, 0);
     d.s.segs = segs;
     d.s.trail = [] as THREE.Vector3[];
+    // What each point of the trail lay on (the way out of it: up, on the ground), and each segment's own, eased.
+    d.s.ups = [] as THREE.Vector3[];
+    d.s.segUp = segs.map(() => UP.clone());
+    d.s.headQ = new THREE.Quaternion();
+    d.s.wallK = 0;
   }
 
   /** Lay the trail out straight behind (spawn, or after it moved while unseen). */
   private straighten(m: Mob, d: BeastData) {
     const trail: THREE.Vector3[] = d.s.trail;
-    trail.length = 0;
+    const ups: THREE.Vector3[] = d.s.ups;
+    trail.length = ups.length = 0;
     const n = Math.ceil((SEGS.length * GAP) / TRAIL_STEP) + 4;
+    for (let i = 0; i < n; i++) ups.push(UP.clone());
+    for (const u of d.s.segUp as THREE.Vector3[]) u.copy(UP);
     for (let i = 0; i < n; i++) trail.push(new THREE.Vector3(m.pos.x - Math.sin(m.heading) * i * TRAIL_STEP, m.pos.y, m.pos.z - Math.cos(m.heading) * i * TRAIL_STEP));
   }
 
-  /** The point `s` metres back along the trail. */
-  private along(trail: THREE.Vector3[], s: number, out: THREE.Vector3) {
+  /** The point `s` metres back along the trail (and, into `up`, what it lay on there). */
+  private along(trail: THREE.Vector3[], s: number, out: THREE.Vector3, ups?: THREE.Vector3[], up?: THREE.Vector3) {
     let acc = 0;
     for (let i = 0; i + 1 < trail.length; i++) {
       const l = trail[i].distanceTo(trail[i + 1]);
-      if (acc + l >= s) return out.lerpVectors(trail[i], trail[i + 1], (s - acc) / Math.max(l, 1e-6));
+      if (acc + l >= s) {
+        const k = (s - acc) / Math.max(l, 1e-6);
+        if (ups && up) up.lerpVectors(ups[i], ups[i + 1], k);
+        return out.lerpVectors(trail[i], trail[i + 1], k);
+      }
       acc += l;
     }
+    if (ups && up) up.copy(ups[trail.length - 1]);
     return out.copy(trail[trail.length - 1]);
   }
 
@@ -156,12 +182,17 @@ export class Wurm extends Beast {
     // trail[0] is the head, live; behind it, points laid down every
     // TRAIL_STEP of the way it has come (measured from the last one laid, so
     // the path is kept however little it moves each frame).
+    const ups: THREE.Vector3[] = d.s.ups;
+    const cling = m.ridden ? m.cling : undefined;
     trail[0].set(m.pos.x, feet, m.pos.z);
+    ups[0].copy(cling ?? UP);
     if (trail.length < 2 || trail[0].distanceTo(trail[1]) >= TRAIL_STEP) {
       trail.unshift(trail[0].clone());
+      ups.unshift(ups[0].clone());
       const n = Math.ceil((SEGS.length * GAP) / TRAIL_STEP) + 4;
-      if (trail.length > n) trail.length = n;
+      if (trail.length > n) trail.length = ups.length = n;
     }
+    const e = (r: number) => 1 - Math.exp(-r * a.dt);
     // The inchworm wave: humps roll back down the body as it goes.
     const wave = (k: number) => Math.max(0, Math.sin(a.stride * Math.PI * 2 - k * 0.9)) * 0.22 * a.moving;
     // The head: pitched along its own path (all the way up a wall, or nose
@@ -175,20 +206,38 @@ export class Wurm extends Beast {
     const pitch = d.pitch.step(lean - a.joy * 0.3 + (a.caught ? Math.sin(m.stateT * 4) * 0.2 : 0), 60, 14, a.dt);
     d.body.position.y = SEGS[0] * 1.1 + wave(0) + a.joy * 0.3;
     d.body.rotation.set(pitch + a.graze * 0.2 + Math.sin(t * 0.8) * 0.04, a.lookYaw * 0.7, Math.sin(t * 1.1) * 0.06 + a.alert * Math.sin(t * 0.6) * 0.12);
-    // The rest follow the trail, each looking toward the one in front.
+    // On a wall the head lies against it, belly to the face, whichever way it's going: up it, down it or along
+    // it (a right angle on a wall is a turn about the way out of the wall, so along it she is rolled on her side).
+    const headQ: THREE.Quaternion = d.s.headQ;
+    d.s.wallK += ((cling ? 1 : 0) - d.s.wallK) * e(10);
+    const rootQ = tq2.setFromAxisAngle(UP, m.heading);
+    if (cling) {
+      // (Her heading is along the face, or else into it going up and out of it going down.)
+      const hx = Math.sin(m.heading), hz = Math.cos(m.heading), into = hx * cling.x + hz * cling.z;
+      if (Math.abs(into) < 0.7) tf.set(hx - cling.x * into, 0, hz - cling.z * into).normalize();
+      else tf.set(0, -Math.sign(into), 0);
+      if (facing(tf, cling, tq)) headQ.slerp(tq, e(10));
+    } else if (d.s.wallK < 0.02) headQ.copy(rootQ).multiply(tq.setFromEuler(te.set(pitch, 0, 0)));
+    if (d.s.wallK > 0.02) {
+      // (The humps are off the face, not up it.)
+      const out = tu.copy(cling ?? UP).applyQuaternion(rootQ.invert());
+      d.body.position.set(0, SEGS[0] * 1.1 + a.joy * 0.3, 0).addScaledVector(out, wave(0));
+      const wob = tq.setFromEuler(te.set(a.graze * 0.2 + Math.sin(t * 0.8) * 0.04, a.lookYaw * 0.7, Math.sin(t * 1.1) * 0.06));
+      d.body.quaternion.slerp(rootQ.multiply(headQ).multiply(wob), d.s.wallK);
+    }
+    // The rest follow the trail, each looking toward the one in front, its back to the open air: up on the
+    // ground, out from the face on a wall (so along one it's rolled over, its legs on the rock).
     const segs: THREE.Object3D[] = d.s.segs;
+    const segUp: THREE.Vector3[] = d.s.segUp;
     const prev = new THREE.Vector3(m.pos.x, feet + d.body.position.y, m.pos.z);
     for (let k = 1; k < SEGS.length; k++) {
-      const o = segs[k - 1];
-      this.along(trail, k * GAP, o.position);
-      o.position.y += SEGS[k] * 0.9 + wave(k);
+      const o = segs[k - 1], up = segUp[k - 1];
+      this.along(trail, k * GAP, o.position, ups, tu);
+      up.lerp(tu, e(14)).normalize();
+      o.position.y += SEGS[k] * 0.9;
+      o.position.addScaledVector(up, wave(k));
       tv.subVectors(prev, o.position);
-      // Yaw and pitch toward the one in front (never a roll: it stays upright).
-      if (tv.lengthSq() > 1e-6) {
-        tv.normalize();
-        // (Straight up or down a wall there's no way it's turned to read off the path: it's the head's, so its back is to the open air.)
-        o.rotation.set(-Math.asin(clamp(tv.y, -1, 1)), Math.hypot(tv.x, tv.z) > 0.05 ? Math.atan2(tv.x, tv.z) : m.heading, 0, 'YXZ');
-      }
+      if (tv.lengthSq() > 1e-6 && facing(tv.normalize(), up, tq)) o.quaternion.copy(tq);
       prev.copy(o.position);
       o.updateMatrixWorld(true);
     }

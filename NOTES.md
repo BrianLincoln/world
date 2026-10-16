@@ -6063,6 +6063,31 @@ sealed the lock's upright strap runs across the sign.
   of it. The saw and the mallet lie on the ground when nobody has them
   (leant up, the saw hung in the air).
 
+## 2026-10-12: the wurm rolls over on a wall
+
+- The right-angle turns on a wall (2026-10-08, `GallopState.wallSide`) were steering only: her segments were built
+  never to roll, so along a face she stood upright on nothing, her legs in the air. Now whoever rides a clinger tells
+  it what it's on (`Mob.cling`: the way out of the face, set in main from the gallop state; unset on the ground), the
+  wurm's trail keeps that for each point of it (`d.s.ups`), and every segment turns its back to it (`facing`, each
+  segment's own eased in `segUp`), so the roll runs down her body as each segment comes round the corner. The head
+  is the same against the face (`headQ`, blended in by `wallK`; on the ground it's the pitch spring as before). The
+  humps of her crawl are off the face, not up it. The rider goes with the saddle's segment, so along a wall you
+  stick straight out from it.
+- On the ground nothing changes: with up as the way out it's the old yaw and pitch.
+- `scripts/drop.mjs <dir> roll`: her up, through a turn, along and down the far face, from the side. `docs/NEXT-dungeon4.md`
+  had this under "Still to build" all along; it's moved to "Built since".
+- Not looked at: the overworld (a cabin's wall, a cliff). It's the same code, but only the Drop's face was shot.
+
+## No HUD over a cutscene (2026-10-13)
+- Owner: after dungeon 1, with the camera on the giant, the mount's "R lead" tip was still on the screen. Nothing
+  but the way out of a cutscene is to show over one.
+- One switch: `body.cine` (main, `cineHud`), on whenever a cutscene's camera has the frame (`hadCine`: any
+  `cinematic()`, towers, the bike gift and dungeons included) or a scene is `busy` (`visitHud`). The rule is in
+  `index.html`: the reticle, the prompt, the story's tallies and badge, the spark jar; the touch pad is only made
+  unseen (opacity), so a finger already down still counts. The way-home arrowhead is off by the same test.
+- `#skip` is left out of it on purpose. A new HUD element must be added to that rule.
+- Checked on dungeon 1's offering only (`?fresh=1&cp=offer`): the tip's text is still there underneath, and hidden.
+
 ## The camera never sits behind the cabin (2026-10-14)
 - Owner: getting on the gift bike in the yard, the camera often had the cabin in the way. On 'hilda' it ended up
   inside the cabin (the cutaway hid the walls, but the door was left standing between it and you); on 'fjord' it

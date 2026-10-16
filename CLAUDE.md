@@ -333,7 +333,7 @@ npm run shots    # build + headless GPU screenshots -> shots/   (look at them!)
   the dungeon shader; `Dust`; the wurm in the den, who goes out along the ledge
   and straight up the cavern's far face through `climbTop`, and is held
   back from the dark at every edge while ridden; her thought of it is
-  `climbHintCanvas`, and the way up is shown by a ladder of lanterns up that face whose light runs up it, `climbLanterns`; on a wall a snake steerer turns in right angles, `GallopState.wallSide`; the wind's sound is `Sfx.wind`). Saved as
+  `climbHintCanvas`, and the way up is shown by a ladder of lanterns up that face whose light runs up it, `climbLanterns`; on a wall a snake steerer turns in right angles, `GallopState.wallSide`, and she lies rolled against the face, `Mob.cling`: check with `scripts/drop.mjs <dir> roll`; the wind's sound is `Sfx.wind`). Saved as
   `embla.dungeon4.<seed>`, its ending as `offer4` and `home4`. Dev: `?dungeon=4[,x,z]`,
   `?fresh=1&cp=ring4` / `cp=offer4`, `__ow.thirdDone()`, `__ow.chasm()`
   (`.debug`, `.goTo(name)`, `.debugDown(n)`, `.debugYours()`),

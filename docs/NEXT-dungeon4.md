@@ -132,16 +132,19 @@ Dev: the progress selector's "7.1 ring (dungeon 4)" and "7.2 offering
 
 ## Still to build
 
-- **Left and right on a wall** (owner, 2026-10-07: wants it). On a wall
-  she goes up or down only today. Wanted: a tap turns her a right angle
-  on the wall too. It needs her body to roll (her segments stay upright,
-  so sideways she'd stand out from the wall on nothing), and the Drop
-  needs to keep her off the ends of its faces. It is the overworld's wurm
-  too.
-
 - What follows the offering (a fourth homecoming, and where the giant goes).
   (Its offering does have the tower now, as every dungeon's does: DESIGN.md
   "Dungeons", step 3.)
+
+## Built since
+
+- **Left and right on a wall** (owner, 2026-10-07: wants it; built
+  2026-10-08 and 2026-10-12, not played by the owner). A tap turns her a
+  right angle on the wall as on the ground: from going up, right is along
+  the face, right again is down. Along it she lies rolled on her side,
+  legs on the rock, and you with her. The Drop keeps her over the ledge
+  while she's on the far face. It is the overworld's wurm too. Check with
+  `scripts/drop.mjs <dir> climb,roll`.
 
 ## Also changed
 

@@ -22,6 +22,9 @@
         -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility; transition: opacity 0.4s ease;
       }
       #veil .tip.on { opacity: 1; }
+      /* A cutscene: no HUD over it but the skip prompt. (The touch pad is only unseen: a finger already down still counts.) */
+      body.cine #aim, body.cine #prompt, body.cine #story-inv, body.cine #story-act, body.cine #story-how, body.cine #spark-jar { visibility: hidden !important; }
+      body.cine #touch { opacity: 0 !important; }
       @keyframes storyBreathe { 0%, 100% { transform: scale(0.92); opacity: 0.8; } 50% { transform: scale(1.06); opacity: 1; } }
     </style>
   </head>

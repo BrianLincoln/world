@@ -121,6 +121,7 @@ export class Sparks {
     for (let i = 0; i < DRAWN; i++) { const m = sparkBead(); this.pool.push(m); this.group.add(m); }
     // The jar, and how many are in it (by a sealed tower: of how many it wants). It fills with light as you find them.
     this.el = document.createElement('div');
+    this.el.id = 'spark-jar';
     this.el.style.cssText = 'position:fixed;left:12px;bottom:112px;display:none;align-items:center;gap:3px;padding:4px 18px 4px 5px;border-radius:34px;background:rgba(250,244,232,0.92);border:2px solid #5a3f33;font:700 23px system-ui,sans-serif;color:#5a3f33;z-index:20;pointer-events:none';
     this.elJar = document.createElement('img');
     this.elJar.alt = '';
