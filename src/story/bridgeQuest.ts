@@ -665,9 +665,14 @@ export class BridgeQuest {
       m.heading += Math.atan2(Math.sin(w.heading - m.heading), Math.cos(w.heading - m.heading)) * (1 - Math.exp(-3 * dt));
     }
     if (this.t > 2.4) {
-      if (m) { this.d.puff(w.hitch(v1).setY(m.pos.y + 1), 8, 0.2, 1.6); m.vel.set(0, 0, 0); m.heading = w.heading; }
-      this.d.sfx.thunk();
-      this.startHaul(true);
+      if (this.beat === 'hitch') {
+        if (m) { this.d.puff(w.hitch(v1).setY(m.pos.y + 1), 8, 0.2, 1.6); m.vel.set(0, 0, 0); m.heading = w.heading; }
+        this.d.sfx.thunk();
+        this.beat = 'board';
+      }
+      // Up onto the bench under a veil, so the cut to the driving camera isn't a jump.
+      this.veil = Math.min(1, this.veil + dt / VEIL.fade);
+      if (this.veil >= 1) { this.startHaul(true); this.beat = 'cutWait'; this.t = 0; this.frames = 0; }
     }
   }
 
