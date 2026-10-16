@@ -785,6 +785,69 @@ it is "The cold country" above; the rest is a pool, not worked out, in
 - There is no combat (see Pillars), so nothing has health or takes damage.
   A charge flings creatures aside and spooks their herd; that's all.
 
+## The shape of the world (owner, 2026-10-12: a direction, nothing built)
+
+Talked through because the game felt disjointed: an endless sandbox with a
+linear story laid over it, and no reason to explore.
+
+- **One world.** Not a different one per player. (Players already all get
+  the default seed.) The generator stays as the tool that made it; from
+  here on things may be placed by hand, and needn't be proved on every seed.
+- **Not endless.** To be bounded (an island, sea all round, is the
+  proposal). It moves the land, so batch it with another change that wipes
+  saves.
+- **Zones.** You work through the progress of one area, and that unlocks
+  the way into the next. The first: you befriend the giant, and it smashes
+  through a wall (or the like) into the second zone.
+- **Proposed, the owner open to it (2026-10-13), not decided: zones are
+  islands.** The land today is not one (`docs/worldmap.png`: lakes in
+  land, off every edge; the trail a line 6.4 km due south). Crossings
+  floated: a bridge you mend, the giant breaking or wading through, an
+  aeroplane the village builds. **What turns you back at sea is a sea
+  spirit, not stamina:** coastal water is free; past a line you can see
+  (the deep, darker) it shows itself, then an arm of water lifts you,
+  mount and all, and sets you on the shore of the island you left
+  (nearest point; never the nearest shore of all, or it's a ferry). No
+  meter: "nothing drains" still holds. To be tried on today's lakes first.
+- **The shape chosen from three mocks (owner, 2026-10-13): an archipelago,**
+  `docs/mock/islands-c.png` (its shapes: `islands-c.json`). A home island
+  with the cabin and rings 1 and 2; a strait; a south island with rings 3
+  to 5; and three more, west, north and east, about 3 km across each, that
+  the story doesn't use yet. Today's land kept inside each shape and sunk
+  outside it, so the cabin, rings and trail may be able to stay where they
+  are (not proved). A picture so far: the land hasn't moved.
+  *(2026-10-13, later: built on the branch `islands`, with the sea spirit
+  and a causeway over the strait as a stand-in for the first crossing; the
+  cabin and rings did stay put. Not on master, not played by the owner:
+  `docs/NEXT-islands.md`.)*
+- **The first crossing (owner, 2026-10-13): a wooden bridge that isn't
+  there at first.** When the first island's last dungeon is done you see
+  the giant wade the strait and come up out of it on the far side, like
+  Godzilla. Then your spirit is at that spot and guides you to build the
+  bridge, of a hundred wood or so; by then the village should have some
+  way of gaining resources by itself. **It is a sketch you feed, like the
+  stable's fence, from anywhere in reach, and see-through until it's
+  complete, so nobody sneaks over early. And the village gets a lumber
+  mill, which adds lumber as you play: the first of "more and more ways to
+  expand the village"** (owner, the same day). *(On the branch: the
+  bridge, its building for 100 wood, and a mill making a board a minute.
+  The sight of the giant crossing and the guide at the spot aren't made.)*
+- **The bridge as a quest (owner, 2026-10-14/15), replacing the sketch at
+  the shore:** the giant crosses; your spirit is at the shore like a quest
+  giver and shows it wants a bridge; you both bike into the village (a
+  short shot, a veil cut); you build a lumber mill and the villagers help
+  gather wood; you build a wagon and its stack of wood fills; you yoke the
+  stelk to it and drive it to the strait yourself (on the trail only: it
+  can't be driven off or back); the villagers build the bridge in a scene;
+  everyone celebrates, then walks home, and your spirit points you across.
+  `docs/NEXT-bridge.md`. Not built.
+- Open: what walls a zone off, fliers included; whether everything built
+  so far (the giant's trail and its dungeons) is zone 1; what "progress of
+  an area" is besides its dungeons; what the zones after the first are
+  about. And still the missing core: what you do outside a dungeon.
+  Creatures that do something to the world (water, seeds, fire, wind; a
+  flier that drops things) were floated the same day and not decided.
+
 ## Player Sequence
 
 The objective sequence is built as data, like phase 1.
@@ -910,7 +973,12 @@ into yet; the dungeon itself is a later slice.
   trees on its shoulders, snatch the spirits up and keep them: they wheel
   round its head, each carrying one as a warm light. A jar was tried and
   dropped. Built, first pass.)
-- How many dungeons, and so how many spirits and village houses?
+- How many dungeons, and so how many spirits and village houses? (Owner,
+  2026-10-12: not sure yet.)
+- **How it ends** (owner, 2026-10-12, said again): the giant becomes
+  ridable, and you enter its head as you do a tower's. This is "The cold
+  country"'s "you ride it from inside its head". Not built, and not to be
+  built until asked.
 
 ### Conflicts to settle
 Where the new direction disagrees with what's built or written. Each has a

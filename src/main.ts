@@ -4,7 +4,7 @@ import './style.css';
 import { seedFromString } from './core/rng';
 import { Environment } from './gfx/environment';
 import { GroundShadow, groundShadowSettings } from './gfx/groundShadow';
-import { initMaterials, TERRAIN_U, U, DUNGEON_U } from './gfx/materials';
+import { initMaterials, setSea, TERRAIN_U, U, DUNGEON_U } from './gfx/materials';
 import { PostPipeline, postSettings } from './gfx/post';
 import { Warmth } from './story/warmth';
 import { Snow } from './story/snow';
@@ -14,7 +14,7 @@ import { Sky } from './gfx/sky';
 import { CharacterRig, type Mood } from './player/character';
 import { Input } from './player/input';
 import { TouchControls, isTouchDevice } from './ui/touch';
-import { BikeMode, BODY_RADIUS, CarriedMode, CHARGE_RUN, PHASE_IN, FlyMode, GlideMode, MovementController, RideMode, SwimMode, WalkMode, type MoveContext, type WorldQuery } from './player/movement';
+import { BikeMode, WagonMode, BODY_RADIUS, CarriedMode, CHARGE_RUN, PHASE_IN, FlyMode, GlideMode, MovementController, RideMode, SwimMode, WalkMode, type MoveContext, type WorldQuery } from './player/movement';
 import { Crow, crowStyle } from './mobs/crow';
 import { Mobs } from './mobs/manager';
 import type { Mob, MobCtx } from './mobs/types';
@@ -45,6 +45,10 @@ import { HOME, type DigSite } from './story/village';
 import { Homecoming } from './giant/homecoming';
 import { Offering, OFFER_SHORT } from './giant/offering';
 import { Hands } from './world/hands';
+import { DEEP, DEEP_OUT, inStrait, seaUniforms } from './world/islands';
+import { Bridges } from './world/bridge';
+import { BridgeQuest } from './story/bridgeQuest';
+import { SeaSpirit } from './story/seaSpirit';
 import { Ring, type RingDeps } from './giant/ring';
 import { restOf, Visit } from './giant/visit';
 import { TowerDebug } from './ui/towerDebug';
@@ -77,7 +81,7 @@ const camera = new THREE.PerspectiveCamera(36, 1, 0.5, 18000);
  * then thrown away on the next load, before anything reads one, since they
  * hold places (felled trees, lit towers, the dungeon sites) that are gone.
  */
-const WORLD_VERSION = '6';
+const WORLD_VERSION = '7';
 try {
   // The game was Fjellheim until 2026-10-06: saves made under that name come along.
   for (const k of Object.keys(localStorage)) {
@@ -104,7 +108,8 @@ function primeDungeon(g: WorldGen) {
   // v9: a third site, where the giant walks on to after the second dungeon.
   // v10: a fourth, after the third.
   // v12: a fifth, after the fourth.)
-  const key = `embla.dungeon.v12.${g.seed}`;
+  // v13: the one world is islands, its rings pinned (world/islands.ts).
+  const key = `embla.dungeon.v13.${g.seed}`;
   try {
     const raw = localStorage.getItem(key);
     if (raw) g.presetDungeons(JSON.parse(raw));
@@ -119,7 +124,7 @@ function primeDungeon(g: WorldGen) {
  * `findStorySite` changes what it finds.
  */
 function primeStory(g: WorldGen) {
-  const key = `embla.site.v1.${g.seed}`;
+  const key = `embla.site.v2.${g.seed}`;
   try {
     const raw = localStorage.getItem(key);
     if (raw) g.presetStory(JSON.parse(raw));
@@ -129,6 +134,9 @@ function primeStory(g: WorldGen) {
 }
 /** Dev: how long the search for the dungeon sites took on this load (0: they were cached). */
 let siteSearchMs = 0;
+// The one world's sea: the water draws its deep darker (world/islands.ts).
+const seaLook = () => setSea(gen.sea ? seaUniforms() : null, DEEP, DEEP_OUT);
+seaLook();
 const terrain = new Terrain(gen.seed);
 terrain.dungeons = primeDungeon(gen);
 terrain.story = gen.story;
@@ -170,17 +178,39 @@ let offering3: Offering | null = null;
 // And what follows that: the third spirit's light flown home, and the giant up again and on to the fourth ring (bare stones: nothing is under it yet).
 let homecoming3: Homecoming | null = null;
 let homecoming4: Homecoming | null = null;
+/** The bridge over the strait, as a quest (story/bridgeQuest.ts): from the giant wading across to crossing it. */
+let quest: BridgeQuest | null = null;
+/** The village's own stelk, that pulls the wagon (made when it's first wanted, by the mill; kept). */
+function villageStelk(): Mob | null {
+  const id = 'village:stelk';
+  const had = [...mobs.all()].find((m) => m.id === id);
+  if (had) return had;
+  const m0 = storyHost?.story?.mill;
+  if (!m0) return null;
+  const at = m0.local(-6, 4);
+  at.y = gen.height(at.x, at.z);
+  const m = mobs.adopt('stelk', id, at, null, mobCtx);
+  if (m) m.ridden = true;
+  return m;
+}
 // The fourth dungeon, inside: the Drop, under the fourth ring (built the first time that ring takes you down). Nothing follows its light yet.
 let chasm: DropCave | null = null;
 // What becomes of its light: the offering told quickly again, with a wurm in stone for the shrine. Nothing follows it yet.
 let offering4: Offering | null = null;
 /** Whichever dungeon you're down in (while you are, it is the world), or null. */
 const den = () => (dungeon?.inside ? dungeon : cave?.inside ? cave : hall?.inside ? hall : chasm?.inside ? chasm : null);
+// The sea spirit: out over the deep it shows itself, then lifts you back to the shore you left (story/seaSpirit.ts).
+// (`?sea=0`: it lets you be.)
+let bridges: Bridges | null = null, bridgeDev: number | null = null;
+const sea = new SeaSpirit({ get gen() { return gen; }, height: (x, z) => trail.height(x, z), safe: (x, z, y) => { const d = bridges?.deckAt(x, z, 1.5) ?? -Infinity; return y > d - 1 && y < d + 4; }, get sfx() { return storyHost?.sfx; }, spray: (at, n, size) => puffs.emit(at, n, size, 2.5) });
+scene.add(sea.group);
+const seaOn = params.get('sea') !== '0';
 // Stone hands standing about the world, on islands and summits (world/hands.ts). They do nothing yet.
 let hands: Hands | null = null;
 const world: WorldQuery = {
-  groundHeight: (x, z) => den()?.floorAt(x, z) ?? trail.height(x, z),
-  floorHeight: (x, z, feetY, r) => den()?.floorAt(x, z, feetY) ?? Math.max(trail.height(x, z), colliders.surface(x, z, feetY, r), storyHost?.story?.surface(x, z, feetY, r, 0.5) ?? -Infinity, beacons?.surface(x, z, feetY) ?? -Infinity, giant?.surface(x, z, feetY, 0.6) ?? -Infinity),
+  // (A bridge's deck is ground to everything that moves: world/bridge.ts.)
+  groundHeight: (x, z) => den()?.floorAt(x, z) ?? Math.max(trail.height(x, z), bridges?.deckAt(x, z) ?? -Infinity),
+  floorHeight: (x, z, feetY, r) => den()?.floorAt(x, z, feetY) ?? Math.max(trail.height(x, z), bridges?.deckAt(x, z) ?? -Infinity, colliders.surface(x, z, feetY, r), storyHost?.story?.surface(x, z, feetY, r, 0.5) ?? -Infinity, beacons?.surface(x, z, feetY) ?? -Infinity, giant?.surface(x, z, feetY, 0.6) ?? -Infinity),
   collide: (pos, vel, r, rampMax, noTrees) => {
     const d = den();
     if (d) { d.collide(pos, vel, r); return; }
@@ -209,7 +239,9 @@ const world: WorldQuery = {
 const rideMode = new RideMode();
 const bikeMode = new BikeMode();
 const walkMode = new WalkMode();
-const player = new MovementController([walkMode, new SwimMode(), new FlyMode(), new GlideMode(), rideMode, bikeMode, new CarriedMode()], 'walk');
+/** Driving the wagon down the giant's trail (the bridge quest): on a rail. */
+const wagonMode = new WagonMode();
+const player = new MovementController([walkMode, new SwimMode(), new FlyMode(), new GlideMode(), rideMode, bikeMode, new CarriedMode(), wagonMode], 'walk');
 const rig = new CharacterRig();
 scene.add(rig.root);
 if (params.get('eyes') === 'round') rig.eyeType = 'round';
@@ -409,7 +441,7 @@ storyHost.overlay.add(towerDebug.group);
 towerDebug.setGen(gen);
 if (params.get('towers') === '1') towerDebug.settings.links = towerDebug.settings.map = true;
 // Beacon towers: drawn at any distance, their spirits lift you up and down.
-if (params.has('fresh')) try { localStorage.removeItem(`embla.towers.${seedText}`); localStorage.removeItem(`embla.towers.${seedText}.out`); localStorage.removeItem(`embla.sparks.${seedText}`); } catch { /* ignore */ }
+if (params.has('fresh')) try { localStorage.removeItem(`embla.towers.${seedText}`); localStorage.removeItem(`embla.towers.${seedText}.out`); localStorage.removeItem(`embla.bridge.${seedText}`); localStorage.removeItem(`embla.mill.${seedText}`); localStorage.removeItem(`embla.quest.${seedText}`); localStorage.removeItem(`embla.quest.${seedText}.haul`); localStorage.removeItem(`embla.wagon.${seedText}`); localStorage.removeItem(`embla.sparks.${seedText}`); } catch { /* ignore */ }
 let hadCine = false;
 /**
  * The way out of a cutscene (ui/skip.ts: hold Space). A veil comes up, the
@@ -423,6 +455,7 @@ let skipStage: 'none' | 'in' | 'hold' | 'out' = 'none', skipK = 0, skipT = 0, sk
 function skippable(): (() => void) | null {
   if (den()) return null;
   if (visit?.busy) return () => visit!.skip();
+  if (quest?.skippable) return () => quest!.skip();
   for (const [o, h] of [[offering, homecoming], [offering2, homecoming2], [offering3, homecoming3], [offering4, homecoming4]] as const) {
     if (o?.canSkip) return () => { o.skip(player.current.name); h?.begin(); h?.skip(); };
     if (h?.busy) return () => h.skip();
@@ -557,14 +590,21 @@ scene.add(giantDust.group, trail.group);
 function summonGiant(x: number, z: number, heading: number) {
   if (!giant) {
     giant = new Giant({
-      ground: (gx, gz) => Math.max(gen.height(gx, gz), SEA_LEVEL - 6),
+      // (A lake's floor is no deeper than its shins; the strait it wades on its own bed, in to the waist.)
+      ground: (gx, gz) => { const h = gen.height(gx, gz); return gen.sea && h < SEA_LEVEL - 6 && inStrait(gx, gz) > 0 ? h : Math.max(h, SEA_LEVEL - 6); },
       onStep: (at, _foot, yaw) => {
         // It leaves a print for good, and whatever stood there is flat.
         trail.stamp(at, yaw);
         visit?.onStep(at);
-        // A ring of dust as big as a cabin, and the ground jumps under you.
-        giantDust.emit(at, 14, 4.6, 16, undefined, { life: 1.6, rise: 1.2, drag: 1.6, up: 3 });
-        giantDust.emit(at, 8, 2.2, 7, undefined, { life: 1.1, rise: 2, drag: 1.4, up: 6 });
+        // A ring of dust as big as a cabin, and the ground jumps under you. (Under water: spray, where its leg goes in.)
+        if (at.y < SEA_LEVEL - 1) {
+          v3.set(at.x, SEA_LEVEL + 1, at.z);
+          giantDust.emit(v3, 16, 3.6, 12, undefined, { life: 1.5, rise: 2.4, drag: 1.4, up: 9 });
+          giantDust.emit(v3, 8, 2.4, 5, undefined, { life: 1.1, rise: 3.5, drag: 1.2, up: 14 });
+        } else {
+          giantDust.emit(at, 14, 4.6, 16, undefined, { life: 1.6, rise: 1.2, drag: 1.6, up: 3 });
+          giantDust.emit(at, 8, 2.2, 7, undefined, { life: 1.1, rise: 2, drag: 1.4, up: 6 });
+        }
         const d = at.distanceTo(player.body.pos);
         if (d < 900) orbit.bump(1.8 * (1 - d / 900) ** 2);
       },
@@ -1160,6 +1200,10 @@ function makeVisit() {
   hands?.dispose();
   hands = new Hands(gen);
   scene.add(hands.group);
+  bridges?.dispose();
+  bridges = new Bridges(gen);
+  bridges.built = 0;
+  scene.add(bridges.group);
   visit?.dispose();
   ring?.dispose();
   ring2?.dispose();
@@ -1332,6 +1376,29 @@ function makeVisit() {
     loading: () => terrain.busy,
   });
   scene.add(homecoming4.group);
+  // The bridge: after the second spirit's homecoming the giant wades the strait, and the guide waits at the shore.
+  const second0 = homecoming2;
+  quest?.group.removeFromParent();
+  quest = host.active && story ? new BridgeQuest({
+    gen, story, body: player.body, sfx: host.sfx, bikes, saveKey: seedText,
+    ground: (x, z) => trail.height(x, z),
+    giant: () => giant,
+    crossing: () => ({ falls: second0.route, ready: second0.state === 'done' && second0.left && !second0.settled, settled: second0.settled }),
+    trail: () => [...(visit?.route?.falls ?? []), ...first.route, ...second0.route],
+    stamp: (at, yaw) => { trail.stamp(at, yaw); },
+    puff: (p, n, size, spread) => puffs.emit(p, n, size, spread),
+    place: (x, z, h) => { placePlayer(x, z); player.body.heading = h; orbit.yaw = h + Math.PI; orbit.pitch = 0.2; orbit.snap(); },
+    cycling: () => cycling,
+    getOff: () => { if (riding) dismount(); },
+    mountBike: (k) => mountBike(k),
+    loading: () => terrain.busy,
+    tree: (x, z, max) => colliders.nearestTree(x, z, max)?.d ?? Infinity,
+    stelk: () => villageStelk(),
+    wagonMode,
+    bridges: () => bridges,
+    drive: (on) => { if (on) { if (riding) dismount(); if (cycling) dismountBike(); player.set('wagon', ctx); orbit.targetDistance = Math.max(orbit.targetDistance, 11); } else player.set('walk', ctx); },
+  }) : null;
+  if (quest) scene.add(quest.group);
   // The second dungeon's offering: the first's, told quickly (the owner found the first at risk of wearing
   // thin), the shrine a glimmer in stone. The giant is the one lying by the second ring, until it gets up from there.
   offering2 = new Offering({
@@ -1481,6 +1548,8 @@ const ctx: MoveContext = { input: input.state(), camYaw: 0, camPitch: 0, dt: 0, 
 if (params.get('journey') && STAGES.includes(params.get('journey') as Stage)) journey?.jump(params.get('journey') as Stage);
 // Otherwise, mid-journey: back at the stage's checkpoint (a tower, the start of a ride).
 else if (!params.has('x')) journey?.resume();
+// At the strait with the guide waiting: back on the trail just short of it.
+if (!params.has('x') && !params.has('cp')) (quest as BridgeQuest | null)?.resume();
 // ?stable=<step>: straight to a phase 3 step.
 if (params.get('stable')) stableJump(params.get('stable')!);
 // A save from between taking the light and giving it: you're by the shrine with it, on the rockhopper, as you were.
@@ -1507,9 +1576,13 @@ function checkpoint(id: string) {
   if (c.giantGone) { story.giantGone = true; visit?.restore(); }
   // The second dungeon's: the first done and the giant walked on, as a save from there has it.
   const second = id === 'ring2' || id === 'offer2', third = id === 'ring3' || id === 'offer3', fourth = id === 'ring4' || id === 'offer4';
+  // (From the third ring on, the bridge over the strait stands: its quest is long done.)
+  if (third || fourth) try { localStorage.setItem(`embla.quest.${seedText}`, 'done'); } catch { /* ignore */ }
   if (second) firstDone();
   if (third) secondDone();
   if (fourth) thirdDone();
+  // The bridge quest's beats (story/bridgeQuest.ts): the second dungeon done, the giant across the strait.
+  if (id === 'shore' || id === 'mill' || id === 'yoke' || id === 'haul') { secondDone(); quest?.debug(id); storyHost?.story?.save(); return true; }
   if (c.kind === 'ring') goToRing(fourth ? 3 : third ? 2 : second ? 1 : 0);
   // The dungeon done: up you come with its light, on the rockhopper.
   if (id === 'offer') winDungeon();
@@ -1687,6 +1760,7 @@ if (params.get('mode') === 'fly') {
 function setSeed(s: string) {
   seedText = s;
   gen = new WorldGen(seedFromString(s));
+  seaLook();
   wayHome = null;
   terrain.dungeons = primeDungeon(gen);
   terrain.story = gen.story;
@@ -1903,9 +1977,9 @@ function frame(ts?: number) {
     resize();
   }
 
-  const storyBusy = !!storyHost?.story?.busy || !!visit?.busy || !!offering?.busy || !!homecoming?.busy || !!offering2?.busy || !!homecoming2?.busy || !!offering3?.busy || !!homecoming3?.busy || !!homecoming4?.busy || !!offering4?.busy;
+  const storyBusy = !!quest?.busy || !!storyHost?.story?.busy || !!visit?.busy || !!offering?.busy || !!homecoming?.busy || !!offering2?.busy || !!homecoming2?.busy || !!offering3?.busy || !!homecoming3?.busy || !!homecoming4?.busy || !!offering4?.busy;
   /** In a ring's arms (either way), and down in a dungeon. */
-  const held = !!ring?.busy || !!ring2?.busy || !!ring3?.busy || !!ring4?.busy || !!dungeon?.busy || !!cave?.busy || !!hall?.busy || !!chasm?.busy, below = !!den();
+  const held = !!ring?.busy || !!ring2?.busy || !!ring3?.busy || !!ring4?.busy || !!dungeon?.busy || !!cave?.busy || !!hall?.busy || !!chasm?.busy || sea.busy, below = !!den();
   if (devFly.on && input.pressed('KeyF') && !riding && !cycling && !beacons.busy && !journey?.busy && !storyBusy && !held && !below) player.set(player.current.name === 'fly' ? 'walk' : 'fly', ctx);
   // Only take the press (pressed() consumes it) when a tower is on offer.
   const beaconUsed = !!beacons.action(player.current.name) && (input.pressed('KeyE') || input.pressed('Mouse0')) && beacons.act(player.current.name);
@@ -1913,7 +1987,7 @@ function frame(ts?: number) {
   const inner = dungeon?.inside ? dungeon : hall?.inside ? hall : null;
   const dungeonUsed = !!inner && !!inner.action(player.current.name) && (input.pressed('KeyE') || input.pressed('Mouse0')) && inner.act(player.current.name);
   if (!beaconUsed && !dungeonUsed) storyHost?.story?.handleAction(input);
-  if (input.pressed('KeyE') && !beaconUsed && !dungeonUsed && !journey?.busy && !storyBusy && !held) {
+  if (input.pressed('KeyE') && !beaconUsed && !dungeonUsed && !journey?.busy && !storyBusy && !held && player.current.name !== 'wagon') {
     // Something else in reach? Climb straight across; otherwise E hops off.
     const next = nextMount();
     if (next && (riding || cycling)) switchTo(next);
@@ -1940,11 +2014,21 @@ function frame(ts?: number) {
   // Watching a tower's spirit (or being carried in and out): hands off.
   if (beacons.busy || journey?.busy || storyBusy || held) ctx.input = { ...ctx.input, x: 0, y: 0, run: false, jump: false, jumpPressed: false, up: false, down: false };
   ctx.camYaw = inputYaw ?? orbit.yaw;
+  // A cutscene that rides your bike for you (the bridge quest's ride home): its heading as the camera's, and how hard to pedal.
+  if (quest?.drive) { ctx.input = { ...ctx.input, x: 0, y: quest.drive.y, run: false, walk: false, jump: false, jumpPressed: false }; ctx.camYaw = quest.drive.yaw + Math.PI; }
   ctx.camPitch = orbit.pitch;
   ctx.dt = dt;
   stelkWork(dt);
   if (player.current.name !== 'fly') colliders.prefetch(player.body.pos.x, player.body.pos.z);
   player.update(ctx);
+  // (After you've moved: while it has you, it says where you are, and what you ride goes with you.)
+  // The bridge isn't there at first: the bridge quest builds it (story/bridgeQuest.ts), and it bears nobody until
+  // it stands. With no story running it simply stands. (`?bridge=1` / `0`, or `__ow.bridge(k)`: by hand.)
+  {
+    const st = storyHost?.active ? storyHost.story : null;
+    if (bridges && bridgeDev === null) bridges.built = params.get('bridge') === '1' || (params.get('bridge') !== '0' && (!st || !quest || quest.built >= 1)) ? 1 : quest ? quest.built : 0;
+  }
+  sea.update(dt, player.body, seaOn && !below && !beacons.busy && !journey?.busy && !storyBusy && (!held || sea.busy));
   input.endFrame();
   if (touch) followOnTouch(dt);
 
@@ -2002,7 +2086,7 @@ function frame(ts?: number) {
   }
   if (chasm?.inside) chasm.update(dt, player.current.name, body.grounded);
   const mossK = Math.max(ring4?.veil ?? 0, chasm?.veil ?? 0, homecoming4?.veil ?? 0);
-  const tealK = Math.max(ring2?.veil ?? 0, cave?.veil ?? 0, homecoming2?.veil ?? 0), roseK = Math.max(ring3?.veil ?? 0, hall?.veil ?? 0, homecoming3?.veil ?? 0);
+  const tealK = Math.max(ring2?.veil ?? 0, cave?.veil ?? 0, homecoming2?.veil ?? 0, quest?.veil ?? 0), roseK = Math.max(ring3?.veil ?? 0, hall?.veil ?? 0, homecoming3?.veil ?? 0);
   const veilK = Math.max(ring?.veil ?? 0, dungeon?.veil ?? 0, homecoming?.veil ?? 0, tealK, roseK, mossK, skipK);
   const veilHex = mossK > 0 ? DROP_LOOK.cut : roseK > 0 ? MOTH_LOOK.cut : tealK > 0 ? cave?.look.cut ?? '#17343c' : '#2b2147';
   if (veilK > 0 && veilHex !== dungeonVeilHex) dungeonVeil.style.background = dungeonVeilHex = veilHex;
@@ -2116,7 +2200,9 @@ function frame(ts?: number) {
   // A dungeon's light, once it's yours, is in your mittens: below, and up at the shrine until it's given.
   const lightOf = dungeon?.inside ? dungeon : cave?.inside ? cave : null;
   rig.carry = lightOf ? lightOf.carrying : den() ? 0 : offering?.carrying || offering2?.carrying || offering3?.carrying || offering4?.carrying || 0;
-  rig.update(body, mode, dt, cycling ? bikes.seat : riding ? riding.species.seat(riding) : undefined);
+  // On the wagon's bench, the reins in your hand.
+  if (mode === 'wagon' && quest?.driving) rig.ropeAim = quest.reins(v3b);
+  rig.update(body, mode, dt, cycling ? bikes.seat : riding ? riding.species.seat(riding) : mode === 'wagon' && quest?.driving ? quest.seat(wagonSeat) : undefined);
   if (lightOf?.carrying) lightOf.carryAt(rig.hands(hand));
   rig.hand(hand);
   mobs.updateRopes(mobCtx, hand);
@@ -2165,6 +2251,8 @@ function frame(ts?: number) {
   if (!den() && offering) homecoming?.update(dt, offering.state === 'given' && offering.clock < 0 && !veil);
   // The same from the second's: the second spirit home, and the giant on to the third ring.
   if (!den() && offering2 && homecoming?.settled) homecoming2?.update(dt, offering2.state === 'given' && offering2.clock < 0 && !veil);
+  // The giant wading the strait, the guide at the shore, the bikes home (and the rest of the bridge).
+  if (!den() && quest) { quest.update(dt); if (journey) journey.held = quest.holds; }
   if (!den() && offering3 && homecoming2?.settled) homecoming3?.update(dt, offering3.state === 'given' && offering3.clock < 0 && !veil);
   // And from the fourth's: the fourth spirit home, and the giant on to the fifth ring.
   if (!den() && offering4 && homecoming3?.settled) homecoming4?.update(dt, offering4.state === 'given' && offering4.clock < 0 && !veil);
@@ -2190,13 +2278,13 @@ function frame(ts?: number) {
     if (moodHeld) rig.mood = was;
   } else if (!moodHeld) rig.mood = null;
   // No buttons or tallies over the cutscene.
-  if (visitHud !== (!!visit?.busy || !!offering?.busy || !!homecoming?.busy || !!offering2?.busy || !!homecoming2?.busy || !!offering3?.busy || !!homecoming3?.busy || !!homecoming4?.busy || !!offering4?.busy)) { visitHud = !!visit?.busy || !!offering?.busy || !!homecoming?.busy || !!offering2?.busy || !!homecoming2?.busy || !!offering3?.busy || !!homecoming3?.busy || !!homecoming4?.busy || !!offering4?.busy; for (const id of ['story-inv', 'story-act']) { const el = document.getElementById(id); if (el) el.style.visibility = visitHud ? 'hidden' : ''; } }
+  if (visitHud !== (!!quest?.busy || !!visit?.busy || !!offering?.busy || !!homecoming?.busy || !!offering2?.busy || !!homecoming2?.busy || !!offering3?.busy || !!homecoming3?.busy || !!homecoming4?.busy || !!offering4?.busy)) { visitHud = !!quest?.busy || !!visit?.busy || !!offering?.busy || !!homecoming?.busy || !!offering2?.busy || !!homecoming2?.busy || !!offering3?.busy || !!homecoming3?.busy || !!homecoming4?.busy || !!offering4?.busy; for (const id of ['story-inv', 'story-act']) { const el = document.getElementById(id); if (el) el.style.visibility = visitHud ? 'hidden' : ''; } }
   // Handed back to the tower's eyes, looking after it.
   if (visitWas && visit && !visit.busy && beacons.inside && giant) beacons.lookToward(giant.centre.x, giant.centre.z, giant.centre.y - 10);
   // Far from the task: a small arrowhead shows the way.
   if (pointer && storyHost?.story) {
     // No task to point at, and the giant not yet been: lost a long way off, the way home.
-    const g = (journey ? journey.guide(mobs.leading) : storyHost.story.guide(mobs.leading)) ?? (storyHost.story.giantGone ? null : wayHome ??= { at: new THREE.Vector3(gen.story.x, gen.story.y, gen.story.z), near: 150, far: 350, delay: 60 });
+    const g = quest?.guide() ?? (journey ? journey.guide(mobs.leading) : storyHost.story.guide(mobs.leading)) ?? (storyHost.story.giantGone ? null : wayHome ??= { at: new THREE.Vector3(gen.story.x, gen.story.y, gen.story.z), near: 150, far: 350, delay: 60 });
     pointer.update(dt, camera, body.pos, g, !beacons.busy && !beacons.inside && !journey?.busy && !storyBusy && !den() && !hadCine && !visitHud);
   }
   // Patting the spirit: from behind, the explorer's back hides it all, so
@@ -2214,7 +2302,7 @@ function frame(ts?: number) {
   let seatY = mode === 'ride' && riding ? riding.species.seat(riding).pos.y - body.pos.y : 0;
   if (mode === 'ride') seatY = rideSeatY = rideSeatY < 0 ? seatY : rideSeatY + (seatY - rideSeatY) * (1 - Math.exp(-1.5 * dt));
   else rideSeatY = -1;
-  focus.y += mode === 'swim' ? 1.1 : mode === 'glide' ? 2.0 : mode === 'ride' && riding ? seatY + 1.1 : mode === 'bike' ? 1.55 : 1.4;
+  focus.y += mode === 'wagon' ? 2.1 : mode === 'swim' ? 1.1 : mode === 'glide' ? 2.0 : mode === 'ride' && riding ? seatY + 1.1 : mode === 'bike' ? 1.55 : 1.4;
   focus.y += focusShift;
   if (focusOverride) focus.copy(focusOverride);
   // In the ring's arms the camera stays up where you stood.
@@ -2262,7 +2350,7 @@ function frame(ts?: number) {
   // A tower's spirit being freed: the camera watches it, not you, easing
   // in from where it was and back to you after (never a cut).
   // Or the hearth spirit pulling your bike out of its heart.
-  const cine = beacons.cinematic() ?? den()?.cinematic() ?? visit?.cinematic() ?? offering?.cinematic() ?? homecoming?.cinematic() ?? offering2?.cinematic() ?? homecoming2?.cinematic() ?? offering3?.cinematic() ?? homecoming3?.cinematic() ?? offering4?.cinematic() ?? homecoming4?.cinematic() ?? journey?.cinematic() ?? storyHost?.story?.cinematic() ?? null;
+  const cine = beacons.cinematic() ?? den()?.cinematic() ?? quest?.cinematic() ?? visit?.cinematic() ?? offering?.cinematic() ?? homecoming?.cinematic() ?? offering2?.cinematic() ?? homecoming2?.cinematic() ?? offering3?.cinematic() ?? homecoming3?.cinematic() ?? offering4?.cinematic() ?? homecoming4?.cinematic() ?? journey?.cinematic() ?? storyHost?.story?.cinematic() ?? null;
   if (cine) {
     if (!hadCine) {
       // From a tower's head the turn starts from the head's own view (last frame's camera), and takes its time.
@@ -2276,13 +2364,14 @@ function frame(ts?: number) {
     camLastPos.copy(camera.position); camLastQ.copy(camera.quaternion);
   } else if (hadCine) {
     // (From the homecoming's far-off camera it's a cut: easing 200 m back to you goes through whatever's between.)
-    const cut = skipCut || homecoming?.afterYaw != null || homecoming2?.afterYaw != null || homecoming3?.afterYaw != null || homecoming4?.afterYaw != null;
-    orbit.yaw = homecoming?.afterYaw ?? homecoming2?.afterYaw ?? homecoming3?.afterYaw ?? homecoming4?.afterYaw ?? offering?.afterYaw ?? offering2?.afterYaw ?? offering3?.afterYaw ?? offering4?.afterYaw ?? body.heading + Math.PI;
+    const cut = skipCut || quest?.afterYaw != null || homecoming?.afterYaw != null || homecoming2?.afterYaw != null || homecoming3?.afterYaw != null || homecoming4?.afterYaw != null;
+    orbit.yaw = quest?.afterYaw ?? homecoming?.afterYaw ?? homecoming2?.afterYaw ?? homecoming3?.afterYaw ?? homecoming4?.afterYaw ?? offering?.afterYaw ?? offering2?.afterYaw ?? offering3?.afterYaw ?? offering4?.afterYaw ?? body.heading + Math.PI;
     if (offering3) offering3.afterYaw = null;
     if (offering4) offering4.afterYaw = null;
     if (offering) offering.afterYaw = null;
     if (offering2) offering2.afterYaw = null;
     if (homecoming) homecoming.afterYaw = null;
+    if (quest) quest.afterYaw = null;
     if (homecoming2) homecoming2.afterYaw = null;
     if (homecoming3) homecoming3.afterYaw = null;
     if (homecoming4) homecoming4.afterYaw = null;
@@ -2519,6 +2608,7 @@ let trailT = 0;
 let trailEmit = 0;
 const v3 = new THREE.Vector3();
 const v3b = new THREE.Vector3();
+const wagonSeat = { pos: new THREE.Vector3(), quat: new THREE.Quaternion(), spread: 0.14 };
 
 /**
  * Touch: with no finger on the camera, it swings round behind the way you're
@@ -2580,7 +2670,7 @@ function updateAimHud() {
   });
   const html = tips.join(' · ');
   if (promptEl.innerHTML !== html) promptEl.innerHTML = html;
-  promptEl.style.opacity = html && !storyHost?.story?.silent ? '1' : '0';
+  promptEl.style.opacity = html && !storyHost?.story?.silent && !quest?.busy ? '1' : '0';
 }
 
 let veil = document.getElementById('veil');
@@ -2742,6 +2832,16 @@ window.__ow = {
   siteSearchEach: () => gen.searchMs,
   /** The stone hands about the world: `hands().list` so far, `hands().survey(x, z, cells)` looks further at once. */
   hands: () => hands,
+  /** How much of the bridge stands (0 to 1, from the home shore out); `bridge(null)` gives it back to the story. */
+  bridge: (k: number | null) => { bridgeDev = k; if (bridges && k !== null) bridges.built = k; return bridges?.built; },
+  /** The bridge quest (`.stage`, `.part`, `.clock`, `.debug(stage)`, `.waiting`). */
+  quest: () => quest,
+  wagonMode: () => wagonMode,
+  bridges: () => bridges,
+  THREE,
+  mill: () => storyHost?.story?.mill ?? null,
+  /** The sea spirit: `.phase`, `.dread`, `.busy`, `.deep(x, z)`. */
+  sea: () => sea,
   /** Dev: as if you'd just taken the light: the dungeon marked done, and up you come on the rockhopper. (`winDungeon(2)`: the second's, on the glimmer.) */
   winDungeon,
   /** The second dungeon, the Veil Cave (null until you've been down): `.round`, `.play`, `.she`, `.layout.at`, `.goTo(name)`, `.debugRound(n)`, `.debugYours()`. `enterCave()` is its ring taking you; `enterCave(x, z)` stands you at a point of its plan; `leaveCave()` brings you up. */

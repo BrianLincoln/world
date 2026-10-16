@@ -1,0 +1,2 @@
+{ "title": "A. One long island, round the trail as it is", "slope": 0.22, "deep": 150,
+  "islands": [ { "name": "", "pts": [[0, 300], [100, 3000], [0, 5600], [-250, 6800]], "r": 1500 } ] }

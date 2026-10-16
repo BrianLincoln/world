@@ -285,6 +285,8 @@ export class Spirit {
   /** A start: one sharp hop where it stands. */
   flinch() { this.flinchT = 0.38; }
 
+  /** Its thought shows wherever you are (a cutscene's camera is close to it, and you aren't). */
+  think = false;
   /** Debug: pin the heading (close-up shots). */
   hold: number | null = null;
   /** Debug: pin the warmth. */
@@ -994,7 +996,7 @@ export class Spirit {
     // little slack before it lets go so the edge doesn't flicker.
     // (Rallying you along, it's seen from further back: you're following it.)
     if (!w.rally) this.rallyT = 0;
-    this.bubbleNear = toPlayer < (w.rally ? 20 : this.bubbleNear ? 9.5 : 8);
+    this.bubbleNear = this.think || toPlayer < (w.rally ? 20 : this.bubbleNear ? 9.5 : 8);
     // A tally that's reached 0 has nothing left to ask for (the last of it
     // is flying in; the heart comes next).
     const want = w.count === 0 ? null : w.icon;

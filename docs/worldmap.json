@@ -1,0 +1,15 @@
+{
+  "about": "What the world map (scripts/worldmap.mjs -> docs/worldmap.png) can't read from the game: names, and things decided or planned but not built. Everything built is read from the world itself and needs nothing here. Coordinates are world metres (x, z).",
+  "seed": "hilda",
+  "metresPerPixel": 8,
+  "margin": 700,
+  "ringNames": ["The cave", "Veil Cave", "Moon Hall", "The Drop", "bare stones"],
+  "features": [],
+  "kinds": {
+    "place": "a name on the map: { kind, name, x, z }",
+    "planned": "a thing not built yet, drawn hollow: { kind, name, x, z, r? }",
+    "zone": "an area, outlined and named: { kind, name, pts: [[x, z], ...] } or { kind, name, x, z, r }",
+    "crossing": "a way from one zone to the next: { kind, name, pts: [[x, z], [x, z]] }",
+    "line": "any other line: { kind, name, pts: [[x, z], ...] }"
+  }
+}

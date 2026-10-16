@@ -55,3 +55,27 @@ export function buildLadder(): THREE.BufferGeometry {
   for (let i = 0; i < 6; i++) parts.push(wood(new THREE.BoxGeometry(W, 0.028, 0.028).translate(0, 0.1 + i * 0.16, 0)));
   return merge(parts);
 }
+
+/** A hatchet (the mill's fellers'): its origin where it's held, the handle along -y, the head at its end, its edge toward -z (into the trunk, when the arm's out in front). */
+export function buildHatchet(): THREE.BufferGeometry {
+  const handle = new THREE.CylinderGeometry(0.02, 0.024, 0.38, 8).translate(0, -0.13, 0);
+  const s = new THREE.Shape();
+  s.moveTo(-0.03, 0.03);
+  s.lineTo(0.03, 0.03);
+  s.lineTo(0.03, -0.03);
+  s.quadraticCurveTo(-0.06, -0.05, -0.12, -0.075);
+  s.lineTo(-0.12, 0.075);
+  s.quadraticCurveTo(-0.06, 0.05, -0.03, 0.03);
+  const head = new THREE.ExtrudeGeometry(s, { depth: 0.03, bevelEnabled: false, curveSegments: 4 }).translate(0, 0, -0.015);
+  // (The shape's x is out from the handle to the edge, its y along the handle.)
+  head.applyMatrix4(new THREE.Matrix4().makeBasis(new THREE.Vector3(0, 0, -1), new THREE.Vector3(0, 1, 0), new THREE.Vector3(1, 0, 0)));
+  head.translate(0, -0.3, 0);
+  return merge([wood(handle), colored(head, BIOME.steel, 0, false)]);
+}
+
+/** A log one unit long along x, one across: scaled to the log (a Thing in the village, story/village.ts). */
+export function buildLog(): THREE.BufferGeometry {
+  const bark = new THREE.CylinderGeometry(0.5, 0.5, 1, 10, 1, true).rotateZ(Math.PI / 2);
+  const ends = [-1, 1].map((sd) => new THREE.CircleGeometry(0.5, 10).rotateY((sd * Math.PI) / 2).translate(sd * 0.5, 0, 0));
+  return merge([colored(bark, BIOME.trunk, 0, false), ...ends.map((g) => colored(g, BIOME.cutWood, 0, false))]);
+}

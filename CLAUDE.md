@@ -59,6 +59,34 @@ count.** Keep this file lean. Depth lives in:
   decision.
 - `docs/WORKFLOW.md`: how to verify with screenshots and perf, plus the
   gotchas that have already bitten.
+- `docs/worldmap.png`: the map of the one world (owner, 2026-10-13: it
+  grows as the story does). `node scripts/worldmap.mjs` draws it from the
+  world itself, so a new ring or tower is on it the next time it runs:
+  **run it again when you add or move something in the world.** Names, and
+  things decided but not built (zones, crossings), go in
+  `docs/worldmap.json` by hand. The direction it serves is DESIGN.md "The
+  shape of the world": one world, bounded, in zones.
+  **On the branch `islands` (not master, not played by the owner) the one
+  world is five islands in a sea**: `docs/NEXT-islands.md`.
+  `src/world/islands.ts` (the shapes, the strait cut between home and
+  south, the crossing over it; the rings pinned
+  where they stood; the deep: `isDeep`, drawn darker by `WATER_FRAG` from
+  `setSea`). Only the seed everyone plays has them (`WorldGen.sea`).
+  Towers: each island its own network, no link over the sea.
+  `src/world/bridge.ts`: the wooden bridge over the strait (its deck is
+  ground to the world's query, `deckAt`; `built` 0 to 1, a bay at a time).
+  **Not there at first**: the bridge quest builds it (`?bridge=1` / `0`,
+  `__ow.bridge(k)` by hand).
+  **The bridge is a quest** (`docs/NEXT-bridge.md`; built, not played by the
+  owner): `src/story/bridgeQuest.ts` (the crossing shot, the guide at the
+  shore, bikes home, the yoking, the haul, the building, the party),
+  `story/phase4.ts` + `mill.ts` + `wagon.ts` (built by sketch and slots; the
+  village works the mill: `MillWorks` in `village.ts`), `WagonMode` (the
+  haul, on `story/rail.ts`). Check with `scripts/bridge.mjs <dir>
+  cross,shore,mill,wagon,haul,build`; `?fresh=1&cp=shore` starts it.
+  `src/story/seaSpirit.ts`: over the deep it warns, then an arm of water
+  carries you and your mount back to the shore you left (`?sea=0` off;
+  `__ow.sea()`). Check with `scripts/sea.mjs <dir>` (the spirit three ways, the bridge on foot and riding).
 
 ## Stack
 Three.js (hand-written GLSL3 `ShaderMaterial`s, no built-in lighting) +

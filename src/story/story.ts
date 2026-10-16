@@ -13,6 +13,10 @@ import { RuinCabin } from './cabin';
 import type { Buildable, Part, PartId } from './build';
 import { Stable } from './stable';
 import { PHASE3 } from './phase3';
+import { PHASE4 } from './phase4';
+import { MILL, Mill } from './mill';
+import { LOAD, Wagon } from './wagon';
+import { visitRoute } from '../giant/visit';
 import { CAB } from './geometry';
 import { Hud } from './hud';
 import { glowCanvas, iconCanvas, tex, type IconName } from './icons';
@@ -22,7 +26,7 @@ import { AxeProp, ChopTree, easeGlint, Flyer, LassoProp, PickProp, SmashRock, St
 import type { Colliders, PropHit } from '../world/colliders';
 import { BIG_ROCK, Harvest, rubbleOf, type RegrowCtx, type Taken } from '../world/harvest';
 import { PAT, Spirit } from './spirit';
-import { Village } from './village';
+import { Village, type MillWorks } from './village';
 
 // The story director. It runs the phase tables (phase1.ts, phase3.ts) over
 // the story set: the broken cabin, the axe, the grove, the brook stones, the
@@ -156,11 +160,20 @@ export class Story {
   readonly overlayGroup = new THREE.Group();
   readonly hud: Hud;
   /** Phase tables in order (phase 2 is the journey's own director). */
-  readonly phases: PhaseDef[] = [PHASE1, PHASE3];
+  readonly phases: PhaseDef[] = [PHASE1, PHASE3, PHASE4];
   phaseIndex = 0;
   get phase(): PhaseDef { return this.phases[this.phaseIndex]; }
   /** The stable and its pasture (phase 3), when the site has room for one. */
   readonly stable: Stable | null = null;
+  /** The lumber mill (phase 4, the bridge), on the village's free plot nearest the cabin. */
+  readonly mill: Mill | null = null;
+  /** The wagon, built in front of the mill (phase 4), and loaded there. */
+  readonly wagon: Wagon | null = null;
+  /** The wagon's being loaded from the mill: its stack isn't yours to take. */
+  millKept = false;
+  /** Wood of yours on its way into the wagon. */
+  private loads: { bb: Billboard; from: THREE.Vector3; t: number }[] = [];
+  private loadT = 0;
   readonly lasso: LassoProp | null = null;
   hasLasso = false;
   /** How many creatures live at the stable (set by the herd, see story/herd.ts). */
@@ -259,6 +272,27 @@ export class Story {
       this.lasso = new LassoProp(post, siteLocal(site.pasture, 0, 1).x - site.pasture.x, siteLocal(site.pasture, 0, 1).z - site.pasture.z);
       this.group.add(this.lasso.group);
     }
+    if (site.village && site.pasture) {
+      // (The free plot nearest the cabin, clear of the giant's prints: by the lane where it leaves the yard.)
+      const falls = visitRoute(gen)?.falls ?? [];
+      const clear = (p: { x: number; z: number }) => falls.reduce((m, f) => Math.min(m, Math.hypot(f.x - p.x, f.z - p.z)), Infinity);
+      const free = site.village.plots.filter((p) => !p.house && clear(p) > 9);
+      const plot = free.sort((a, b) => Math.hypot(a.x - site.x, a.z - site.z) - Math.hypot(b.x - site.x, b.z - site.z))[0];
+      if (plot) {
+        const m = (this.mill = new Mill(plot, `embla.mill.${d.saveKey}`, d.puffs, d.sfx));
+        this.group.add(m.root);
+        this.overlayGroup.add(m.overlay);
+        // The wagon out in front of it, facing the way out of the village (the giant's trail north of the yard).
+        const lane = site.village.lane, near = (x: number, z: number) => Math.min(Math.hypot(x - site.x, z - site.z), ...lane.map((q) => Math.hypot(x - q.x, z - q.z)));
+        let out = falls.length - 1;
+        for (let i = falls.length - 1; i >= 0; i--) if (near(falls[i].x, falls[i].z) < 26) { out = Math.min(falls.length - 1, i + 1); break; }
+        const at = m.local(1.0, MILL.D / 2 + 6.5), to = falls[out] ?? { x: site.x, z: site.z };
+        const w = (this.wagon = new Wagon({ x: at.x, z: at.z, rot: Math.atan2(to.x - at.x, to.z - at.z), y: ground(at.x, at.z) }, `embla.wagon.${d.saveKey}`, d.puffs));
+        w.place(at.x, at.z, w.home.rot, ground);
+        this.group.add(w.root);
+        this.overlayGroup.add(w.overlay);
+      }
+    }
     this.giftBall.visible = false;
     this.giftBall.frustumCulled = false;
     this.group.add(this.giftBall);
@@ -339,6 +373,23 @@ export class Story {
       this.anchors.set('lasso', this.lasso!.pos.clone());
       this.anchors.set('woods', this.findWoods(gen));
     }
+    const mill = this.mill;
+    if (mill) {
+      this.anchors.set('millBase', mill.base.clone());
+      this.anchors.set('millSite', mill.local(0, 0, 1.6));
+      this.anchors.set('millFront', mill.front.clone());
+      this.anchors.set('millRoof', mill.parts.mroof.centre.clone());
+      this.anchors.set('millWoods', this.findWoods(gen, mill.local(0, 0)));
+      // Out in front, to one side: where it stands and watches them at it.
+      this.anchors.set('millView', mill.local(2.6, 4.6));
+    }
+    const wagon = this.wagon;
+    if (wagon) {
+      this.anchors.set('wagonBase', wagon.local(-2.3, -0.4));
+      this.anchors.set('wagonSite', wagon.local(0, 0.2, 1.2));
+      this.anchors.set('wagonFront', wagon.local(0, 0));
+      this.anchors.set('wagonView', wagon.local(-2.4, 1.6));
+    }
     for (const [k, v] of this.anchors) if (v.y === 0 && k !== 'far') v.y = ground(v.x, v.z);
 
     // Interactables.
@@ -388,7 +439,7 @@ export class Story {
 
   /** Whichever building a part belongs to. */
   private owner(id: PartId): Buildable {
-    return id in this.cabin.parts ? this.cabin : this.stable!;
+    return id in this.cabin.parts ? this.cabin : this.mill && id in this.mill.parts ? this.mill : this.wagon && id in this.wagon.parts ? this.wagon : this.stable!;
   }
 
   part(id: PartId): Part { return this.owner(id).parts[id]!; }
@@ -397,8 +448,8 @@ export class Story {
    * Open ground at the edge of the woods nearest the pasture, where the
    * spirit looks while you fetch logs for the stable.
    */
-  private findWoods(gen: WorldGen): THREE.Vector3 {
-    const c = this.stable!.local(0, 0);
+  private findWoods(gen: WorldGen, from?: THREE.Vector3): THREE.Vector3 {
+    const c = from ?? this.stable!.local(0, 0);
     let best = this.anchor('grove').clone(), bd = Infinity;
     for (let r = 30; r <= 110; r += 10) {
       for (let k = 0; k < 24; k++) {
@@ -533,6 +584,8 @@ export class Story {
   collide(pos: THREE.Vector3, vel: THREE.Vector3, r: number, mob = false) {
     this.cabin.push(pos, vel, r);
     this.stable?.push(pos, vel, r, mob);
+    this.mill?.push(pos, vel, r);
+    this.wagon?.push(pos, vel, r);
     this.village?.push(pos, vel, r);
     const l = siteToLocal(this.site, pos.x, pos.z);
     if (Math.abs(l.x) > 130 || Math.abs(l.z) > 130) return;
@@ -672,7 +725,7 @@ export class Story {
    * `from`, stops being solid at once, and throws out its logs, which hop
    * into the pack. Returns where the trunk stood, or null if nothing was there.
    */
-  knockTree(from: THREE.Vector3, dir: THREE.Vector3, reach: number, half: number): THREE.Vector3 | null {
+  knockTree(from: THREE.Vector3, dir: THREE.Vector3, reach: number, half: number, spill = true, loud = 1): THREE.Vector3 | null {
     const d = this.d;
     const found = this.treeAhead(from, dir, reach, half);
     if (!found) return null;
@@ -707,12 +760,12 @@ export class Story {
     }
     const before = tree.hits;
     tree.hit(from, 3);
-    d.sfx.chop();
-    d.sfx.fall();
+    if (loud > 0.02) { d.sfx.level = loud; d.sfx.chop(); d.sfx.fall(); d.sfx.level = 1; }
     const at = tree.pos.clone().lerp(from, 0.3).setY(tree.pos.y + 1.2);
     d.puffs(at, 6, 0.14, 2.6);
     this.chipPuffs.emit(at, 8, 0.07, 3.4, undefined, { life: 0.6, rise: -9, drag: 1.3, up: 3.2 });
-    // The logs a full chop would have given (less any already chopped out).
+    // The logs a full chop would have given (less any already chopped out). (Not a villager's: theirs go to the mill.)
+    if (!spill) return tree.pos;
     for (let k = before < 1 ? 0 : 1; k < 2; k++) this.spill('log', at, k + 1);
     this.progressMade();
     return tree.pos;
@@ -846,22 +899,27 @@ export class Story {
       settled: st.kind === 'rest',
     };
     // Building the stable, it runs the job from its spot (phase3.ts).
-    if (this.phase.id === 'stable' && st.kind === 'gather') sp.want.fetch = this.source() ?? sp.want.face ?? undefined;
-    if (this.phase.id === 'stable' && st.kind === 'build') sp.want.present = true;
+    const later = this.phase.id !== 'hearth';
+    if (later && st.kind === 'gather') sp.want.fetch = this.source() ?? sp.want.face ?? undefined;
+    if (later && st.kind === 'build') sp.want.present = true;
     this.sourceT = 3;
     // A creature on your lead: it waits beside the gate and waves you both in.
     if (st.kind === 'herd' && this.stable) sp.want.usher = this.stable.gate;
     this.looseT = 0;
     if (st.kind === 'build') for (const p of st.parts) this.owner(p).showSketch(p);
     // The stable's sketch is up from the first ask, so the spirit stands in it.
-    if (this.phase.id === 'stable' && st.kind === 'gather') for (const p of st.for) this.owner(p).showSketch(p);
+    if (later && st.kind === 'gather') for (const p of st.for) this.owner(p).showSketch(p);
     if (this.phase.id === 'stable') this.stable?.showStakes();
     if (restoring) {
       sp.teleport(this.anchor(st.anchor));
       sp.warmth = sp.warmthTarget = st.warmth;
     }
     if (st.kind === 'rest') this.pot = { out: 0, t: 0, go: 0, stay: restoring ? 20 : 45 };
-    if (st.kind === 'rest' && !restoring && this.phase.id === 'stable') {
+    if (st.kind === 'rest' && this.phase.id === 'bridge' && st.id === 'loading') {
+      // The wagon's being loaded: it stands by it (its thought, the wood still wanted: see `update`).
+      sp.want = { at: this.anchor(st.anchor).clone(), face: this.anchor(st.face ?? st.anchor), pose: 'stand', icon: null, lead: false, settled: true };
+      this.pot.stay = 1e9;
+    } else if (st.kind === 'rest' && !restoring && this.phase.id === 'stable') {
       // The first creature's home and it's said so (praise): now it just
       // stands at the fence a while, watching the newcomer, then potters.
       sp.want = { at: this.anchor('fenceView').clone(), face: this.anchor('pasture'), pose: 'stand', icon: null, lead: false, settled: true };
@@ -881,6 +939,120 @@ export class Story {
 
   /** Phase 3 can begin: the house is lit and the first two towers are too (the journey says when). */
   get stableReady() { return !!this.stable && this.phaseIndex === 0 && this.done; }
+
+  /** The mill as the village works it (story/village.ts). */
+  private works: MillWorks | null = null;
+  /** Where sawn boards are wanted, if not on the mill's own stack (the wagon being loaded: story/bridgeQuest.ts). */
+  boardsTo: (() => ReturnType<MillWorks['boardsTo']>) | null = null;
+  /** Trees a villager is on its way to fell (by villager). */
+  private marked = new Map<number, { x: number; z: number; r: number }>();
+
+  private makeWorks(): MillWorks {
+    const m = this.mill!, d = this.d, site = this.site;
+    const stackTop = () => m.local(MILL.W / 2 + 1.2, 0, 0.3 + Math.ceil(m.stock / 5) * 0.075);
+    /** How loud something is, from where you are. */
+    const loud = (at: THREE.Vector3) => 0.7 * (1 - THREE.MathUtils.smoothstep(at.distanceTo(d.body.pos), 8, 60));
+    return {
+      horse: m.horse, pileAt: m.pileAt, stackAt: m.stackAt,
+      spare: () => (this.loading ? m.stock : 0),
+      takeSpare: (n) => (this.loading ? m.takeBoards(n) : 0),
+      logs: () => m.logs, takeLog: () => m.takeLog(), addLog: () => m.addLog(),
+      boardsTo: () => this.boardsTo?.() ?? this.toWagon() ?? { at: m.stackAt, face: stackTop(), add: (n) => m.addBoards(n) },
+      tree: (k, from) => {
+        this.marked.delete(k);
+        const c = m.local(0, 0), taken = [...this.marked.values()];
+        let best: { x: number; z: number; r: number } | null = null, bd = Infinity;
+        // (Further out as the near ones are felled: they grow back in a while.)
+        for (const reach of [75, 130, 190]) {
+          for (const row of d.colliders.treesNear(c.x, c.z, reach)) {
+            const x = row[0], z = row[2], dm = Math.hypot(x - c.x, z - c.z);
+            // (Out of the yard and the lane, not far above or below the mill, and nobody else's.)
+            if (dm < 14 || Math.hypot(x - site.x, z - site.z) < 28 || Math.abs(row[1] - c.y) > 12) continue;
+            if (taken.some((t) => Math.hypot(t.x - x, t.z - z) < 4)) continue;
+            const score = dm + Math.hypot(x - from.x, z - from.z) * 0.3;
+            if (score < bd) { bd = score; best = { x, z, r: 0.32 * row[3] }; }
+          }
+          if (best) break;
+        }
+        if (best) this.marked.set(k, best);
+        return best;
+      },
+      fell: (t, from) => {
+        const dir = new THREE.Vector3(t.x - from.x, 0, t.z - from.z), l = dir.length();
+        dir.divideScalar(l || 1);
+        this.knockTree(from, dir, l + 1.5, 0.8, false, loud(new THREE.Vector3(t.x, from.y, t.z)));
+        for (const [k, v] of this.marked) if (v === t) this.marked.delete(k);
+      },
+      urgent: () => this.millKept,
+      sound: (n, at) => {
+        const k = loud(at) * (n === 'saw' ? 0.5 : 1);
+        if (k < 0.03) return;
+        d.sfx.level = k;
+        if (n === 'chop') d.sfx.chop(); else if (n === 'fall') d.sfx.fall(); else d.sfx.step();
+        d.sfx.level = 1;
+      },
+    };
+  }
+
+  /** The wagon's being loaded (built, not full, and the step says so). */
+  get loading() { return !!this.wagon && this.phase.id === 'bridge' && this.step.id === 'loading' && this.wagon.built && !this.wagon.full; }
+
+  /** Where the mill's boards go while the wagon's being loaded: to its side, up into its bed. */
+  private toWagon(): ReturnType<MillWorks['boardsTo']> | null {
+    const w = this.wagon;
+    if (!w || !this.loading) return null;
+    return { at: w.local(1.45, -0.3).setY(this.floorAt(w.local(1.45, -0.3).x, w.local(1.45, -0.3).z)), face: w.local(0, -0.3, 1.1 + Math.floor(w.load / 3) * 0.085), add: (n) => { w.add(n); this.dirty = true; } };
+  }
+
+  /**
+   * The wagon being loaded: the mill's stack is kept for it, the guide's thought is the wood still wanted, and wood
+   * of yours goes in as you come up to it (one at a time, flying from your pack).
+   */
+  private loadWagon(dt: number) {
+    const w = this.wagon;
+    if (!w) return;
+    w.update(dt, this.d.camera.position);
+    this.millKept = this.loading;
+    if (this.loading && !this.lent) {
+      const sp = this.spirit, want = LOAD - w.load - this.loads.length;
+      sp.want.icon = want > 0 ? 'log' : null;
+      this.loadT -= dt;
+      if (want > 0 && this.inv.logs > 0 && w.reach(this.d.body.pos) && this.loadT <= 0) {
+        this.loadT = 0.18;
+        this.inv.logs--;
+        const bb = new Billboard(tex(iconCanvas('log')), 0.55, 30);
+        this.overlayGroup.add(bb.mesh);
+        this.loads.push({ bb, from: this.d.body.pos.clone().setY(this.d.body.pos.y + 1.3 + this.packLift), t: 0 });
+        this.dirty = true;
+      }
+    }
+    for (const tk of this.loads) {
+      tk.t += dt;
+      const k = Math.min(1, tk.t / 0.5), e = k * k * (3 - 2 * k);
+      tk.bb.pos.copy(tk.from).lerp(w.local(0, -0.2, 1.3), e);
+      tk.bb.pos.y += Math.sin(k * Math.PI) * 1.2;
+      tk.bb.scale = 1 - 0.3 * k;
+      if (k >= 1) { this.overlayGroup.remove(tk.bb.mesh); w.add(1); this.d.sfx.slot(w.load); this.dust(w.local(0, 0, 1.1)); }
+    }
+    this.loads = this.loads.filter((t) => t.t < 0.5);
+  }
+
+  /** The bridge is built: the guide is home again, by its fire (phase 4's last step). */
+  finishBridge() {
+    if (this.phaseIndex !== 2 || this.step.id === 'bridged') return;
+    this.goToStep('bridged');
+    this.spirit.teleport(this.anchor('hearthSeat'));
+  }
+
+  /** Phase 4 can begin: home from the strait (story/bridgeQuest.ts says when). */
+  startBridge() {
+    if (!this.mill || this.phaseIndex >= 2) return;
+    this.phaseIndex = 2;
+    this.stepIndex = 0;
+    this.done = true;
+    this.enterStep();
+    this.dirty = true;
+  }
 
   /** Start phase 3: a hello, then it walks you out to the pasture. */
   startStable() {
@@ -912,6 +1084,7 @@ export class Story {
    *  still to build in (null for steps that aren't about a resource). */
   private stillWanted(): number | null {
     const st = this.step;
+    if (this.loading && !this.lent) return Math.max(0, LOAD - this.wagon!.load - this.loads.length);
     if (st.kind === 'gather') return Math.max(0, this.remainingFor(st.for) - this.inv[st.resource] - this.pending(st.resource));
     if (st.kind === 'build') return Math.max(0, this.remainingFor(st.parts));
     return null;
@@ -921,6 +1094,7 @@ export class Story {
    *  that aren't about a resource). */
   private taskTotal(): number | null {
     const st = this.step;
+    if (this.loading && !this.lent) return Math.max(0, LOAD - this.wagon!.load - this.loads.length) || null;
     if (st.kind === 'gather') return st.for.reduce((a, p) => a + this.owner(p).remaining(p), 0);
     if (st.kind === 'build') return st.parts.reduce((a, p) => a + this.part(p).need, 0);
     return null;
@@ -1200,6 +1374,10 @@ export class Story {
     this.cabin.update(dt, d.camera.position, body.pos);
     this.village?.update(dt, body.pos);
     this.stable?.update(dt, d.camera.position, [body.pos, ...this.gateFor, ...(this.spirit.travelling ? [this.spirit.pos] : [])]);
+    if (this.mill && this.mill.update(dt, d.camera.position, body.pos, this.millKept, (n) => { this.inv.logs += n; }) > 0) { this.hud.bump('logs'); this.dirty = true; }
+    // Once the mill stands, the village works it.
+    if (this.village && this.mill) this.village.millWorks(this.mill.standing ? (this.works ??= this.makeWorks()) : null);
+    this.loadWagon(dt);
     this.lasso?.update(dt);
     this.updateGift(dt);
     this.updateFloaters(dt);
@@ -1728,7 +1906,7 @@ export class Story {
     if (this.hasPick) this.pick.take();
     for (const k of data.felled) this.trees[k]?.setFelled();
     for (const k of data.smashed ?? []) this.rocks[k]?.setBroken();
-    const known = (p: PartId) => p in this.cabin.parts || (!!this.stable && p in this.stable.parts);
+    const known = (p: PartId) => p in this.cabin.parts || (!!this.stable && p in this.stable.parts) || (!!this.mill && p in this.mill.parts) || (!!this.wagon && p in this.wagon.parts);
     for (const p of data.built) if (known(p)) this.owner(p).setBuilt(p);
     // Only parts already started come back as sketches; the current step shows its own (enterStep).
     for (const p of Object.keys(data.filled) as PartId[]) {
@@ -1744,7 +1922,7 @@ export class Story {
   }
 
   private allParts(): Part[] {
-    return [...Object.values(this.cabin.parts), ...(this.stable ? Object.values(this.stable.parts) : [])];
+    return [...Object.values(this.cabin.parts), ...(this.stable ? Object.values(this.stable.parts) : []), ...(this.mill ? Object.values(this.mill.parts) : []), ...(this.wagon ? Object.values(this.wagon.parts) : [])];
   }
 
   /** Forget this seed's progress (debug / tests). */

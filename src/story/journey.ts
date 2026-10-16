@@ -209,6 +209,8 @@ export class Journey {
   /** Seconds into the gift shot (the camera on the spirit and the bike); < 0 = not running. */
   private shot = -1;
   stage: Stage = 'wait';
+  /** Something else has the guide for now (the bridge quest): the journey's done stage leaves it be. */
+  held = false;
   private t = 0;
   private leader: Leader | null = null;
   private sBike: Bike | null = null;
@@ -457,6 +459,8 @@ export class Journey {
         break;
       }
       case 'done': {
+        // (The guide is the bridge's now: story/bridgeQuest.ts.)
+        if (this.held) break;
         if (this.sendOff(dt)) break;
         // Back to its fire once you're well away (or home already).
         if (story.lent) {

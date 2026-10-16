@@ -16,7 +16,9 @@ export type Anchor =
   | 'hearthSpot' | 'hearthSeat' | 'hearth' | 'door' | 'doorstep' | 'stumpSpot' | 'axe' | 'seat' | 'grove'
   | 'yard' | 'cabin' | 'roof' | 'bank' | 'stones' | 'chimneySpot' | 'chimney' | 'far' | 'lookout' | 'pickSpot' | 'pick' | 'rocks'
   // Phase 3: the stable and its pasture.
-  | 'plotSpot' | 'stableSite' | 'stableFront' | 'stableBase' | 'roofTop' | 'gate' | 'gateIn' | 'gateOut' | 'lasso' | 'woods' | 'fenceSide' | 'fenceView' | 'pasture';
+  | 'plotSpot' | 'stableSite' | 'stableFront' | 'stableBase' | 'roofTop' | 'gate' | 'gateIn' | 'gateOut' | 'lasso' | 'woods' | 'fenceSide' | 'fenceView' | 'pasture'
+  // Phase 4: the lumber mill and the wagon (the bridge).
+  | 'millBase' | 'millSite' | 'millFront' | 'millRoof' | 'millWoods' | 'millView' | 'wagonBase' | 'wagonSite' | 'wagonFront' | 'wagonView';
 
 /** Interactable groups a step can switch on (they glint while it's active). */
 export type TargetTag = 'axe' | 'pick' | 'tree' | 'rock' | 'hearth' | 'lasso';

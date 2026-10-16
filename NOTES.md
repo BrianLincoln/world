@@ -6120,3 +6120,192 @@ clear of trees near the lens, until it's ashore. The village's beats wait by
 as the village's comes in; before that (about 30 s: the island and the rise)
 there's only the sea and the stomps. The visit is ~94 s now, against ~63.
 Other seeds: 'troll' also wakes from water; the rest fall back unchanged.
+## The map of the world (2026-10-13)
+
+The owner wants one world (not one per player), bounded, in zones, each
+unlocking the next (DESIGN.md "The shape of the world": a direction,
+nothing built). To talk about it we needed to see the land we have.
+
+- `scripts/worldmap.mjs` draws `docs/worldmap.png`: the land (height bands,
+  hill shade, woods, bog, the cold above 200 m, a line every 50 m), a square
+  every kilometre numbered in world kilometres, and everything built, read
+  from the world: the cabin and lane, towers and their links, the guided
+  rides, the rings, the ways to them, every footfall of the giant, the
+  stone hands, the cabins and stone circles.
+- **It grows.** The picture is fitted round what's in the world at a fixed
+  8 m to a pixel, so a sixth ring further on makes a bigger map. A new kind
+  of thing is one line in `SOURCES` (collect it) and one in `DRAW`.
+- What the game can't know is `docs/worldmap.json`, kept by hand: the
+  rings' names, and features of kinds `place`, `planned`, `zone`,
+  `crossing`, `line`, for things decided before they're built.
+- What it showed (seed "hilda", a box 12.4 by 13.4 km): the land is not an
+  island, it is lakes in land and runs off every edge. The trail goes almost
+  due south from the cabin: the rings are 1.4, 2.7, 4.1, 5.3 and 6.4 km from
+  it, 1.2 to 1.35 km apart. Towers reach 5.6 km, so ring 5 is already past
+  the last of them. In the box: 63 towers, 65 hands, 376 cabins, 30 stone
+  circles, nearly all of them doing nothing.
+
+## Islands, mocked on the map (2026-10-13)
+
+The owner is open to zones being islands, with a sea spirit (not stamina)
+turning you back from the deep: DESIGN.md "The shape of the world".
+
+- `scripts/worldmap.mjs out.png mock=<file.json>` draws a mock of a shape
+  for the land and touches nothing in the game: each island is a line of
+  points and a radius; inside it the land is today's, outside it sinks
+  `slope` metres a metre, so high ground reaches further out and the coast
+  follows the hills. Water more than `deep` m from any shore is drawn dark.
+- Three were drawn (`docs/mock/islands-a|b|c`): one long island, two along
+  the trail, an archipelago. **The owner chose C, the archipelago.**
+- Seen in them: a strait fits between rings 2 and 3 (B's came out too
+  narrow, C's is about 400 m); under the cabin, rings and trail the land
+  is unchanged, so they might not have to move. Not proved: the site
+  searches read land further off (routes, towers, POIs).
+- Not done: the land itself (`worldgen.ts`), which wipes every save; the
+  sea spirit (a prototype was proposed as its own session and not started).
+
+## The islands, for real, on a branch (2026-10-13)
+
+The owner: do a lot, decide as you go, on your own branch. So on `islands`
+(a worktree, so the other session's checkout wasn't touched):
+
+- `world/islands.ts`: `sink()` at the end of `baseHeight` for the one seed
+  (`WorldGen.sea`). Inside a shape nothing changes (the coast's wander stops
+  200 m in), which is why the start site and the rings stayed where they
+  were; the rings are pinned all the same (`RINGS`, `pinnedSites`), since
+  the tower network did change and the old search read it.
+- The strait is its own cut (`STRAITS`), because the two shapes' spill left
+  only a couple of hundred metres of shallow water between them.
+- The deep is by depth (25 m) and place (outside a shape, or in a strait),
+  because the water's vertex shader already has the depth: the fragment
+  shader repeats `outside` / `inStrait` from uniforms, so TS and GLSL agree
+  on where the dark water is. By distance from shore would have wanted a
+  baked field.
+- The spirit moves the body after `player.update` and the frame loop keeps
+  its hands off (`held`), so whatever is ridden goes where the body goes:
+  no dismount, no mode of its own.
+- A crossing is dry level ground to `route()` (`onCrossing`), so the way to
+  ring 3 and the giant's walk go over the strait. For now it is also a real
+  bank of ground (`bank`), so anything can cross: a stand-in.
+- Towers: candidates only on islands, seen only from their own island, and
+  each island without a tower starts from its best top.
+- Left: the first crossing as a thing in the story; frame rate; a play
+  through. `docs/NEXT-islands.md`.
+- (Later the same day.) The causeway went: the owner pictured a wooden
+  bridge. `world/bridge.ts` builds one along each crossing where the ground
+  is below its deck. Its deck is in the world's `groundHeight` and
+  `floorHeight`, not a collider: walking, riding and the bicycle all ask
+  `groundHeight` for "is this water", so anything less would have had
+  mounts swimming on it and the bike tipping you off. The price: swim under
+  it and you're on it. The crossing's bank stayed as a shoal 6 m down, so
+  the giant (its feet fall 14.5 m off its line) wades astride the bridge.
+- (Later again.) The owner: the bridge isn't there at first; the giant
+  wades across after the first island's last dungeon, and then your spirit
+  has you build it. So the shoal went (the strait is the deep all the way,
+  45 m, about the giant's legs), `Bridges.built` draws and bears only so
+  much of it (draw ranges, a bay at a time), and main stands it whole once
+  `homecoming2.settled`. The building is the next piece of work.
+- (And again.) The building and the mill. `story/bridgeWork.ts` is its own
+  small thing and not a `Part` of the director's: build.ts gives every
+  piece of material a slot, and a hundred slots is a wall of them, so ten
+  slots stand for ten wood each. It reads and takes `story.inv.logs`
+  directly. `story/mill.ts` adds to the same count. Both are made in the
+  frame loop once the story is up, and thrown away in `makeVisit`.
+  Gotcha met in the test: `?t=` switches the story off.
+
+
+## The bridge as a quest, slice A (2026-10-15; `docs/NEXT-bridge.md`)
+
+- One director for the quest's own beats, `story/bridgeQuest.ts`, beside
+  the journey's: it lends the guide (`story.lent`, and `Journey.held` so
+  the journey's done stage doesn't send it home to its fire) while it has
+  it. Its stage is saved as `embla.quest.<seed>`; a cutscene is saved as
+  the stage it ends in, so a reload never plays half of one.
+- The crossing: four shots after the second homecoming hands you back, the
+  giant jumped along its route between them (`Giant.jumpTo`, the skipped
+  prints stamped by the quest). The giant used to walk on a floor 6 m under
+  any water (`SEA_LEVEL - 6` in main); in the strait it now walks the real
+  seabed (`inStrait`, 45 m), which puts the water at its waist, and its
+  footfalls there throw spray at the surface instead of dust.
+- The guide "just appears" at the water's edge under the veil (owner's
+  words in the brief). Its thought is a new pictogram, `bridge`. In a
+  cutscene `Spirit.think` shows its thought with you far off, and
+  `Spirit.hold` keeps it looking out across the water.
+- The ride home is your own bike steered by the quest: `quest.drive` is fed
+  to the bike as input (a heading as the camera's yaw, and how hard to
+  pedal), so the bike's own physics, rig and dust all just work. The
+  guide's little bike is posed at your right hand from your body, not from
+  the rail: posed from the rail, it drifted metres off you when you
+  weren't on the line. The camera is a moving two-shot off the rail
+  (`dolly`): ahead of you riding up from the shore, behind you riding into
+  the village. Left/right gotcha: `(cos h, -sin h)` is the rider's LEFT
+  (dismountBike's "kickstand side"), whatever older comments call it.
+- `story/rail.ts`: the giant's trail as a line with arc length (the middle
+  of each two footfalls, smoothed, any stretch that comes back on itself
+  cut out, stopped at the water). The ride uses it now; the wagon will.
+- `?fresh=1&cp=shore` starts at the strait with the guide waiting (the
+  second dungeon done); `cp=mill` at home after the ride. `cp=offer2` plays
+  the crossing after the offering. `cp=ring3` is still the third ring
+  (the moth's scripts use it), with the quest not done.
+
+## The bridge quest, slice B: the mill (2026-10-15)
+
+- The mill is a `Buildable` of the director's, as the stable is: phase 4
+  (`story/phase4.ts`), parts `mfoot` (6 stones), `mframe` (7 logs), `mroof`
+  (5 logs). It stands on the village's free plot nearest the cabin and clear
+  of the prints (`visitRoute` is pure, so the Story picks it itself). The old
+  `LumberMill` (a board a minute, built by nobody) is gone; its save key
+  `embla.mill.<seed>` now keeps the pile and the stack.
+- The villagers' work is real but made inside `Village` (`MillWorks`, jobs
+  `fell` and `saw`), reusing its things-on-heads, tools and pauses: a feller
+  takes a hatchet to a real world tree (the director's `knockTree` with no
+  logs to your pack, so it falls, leaves a stump and regrows), carries the
+  log in on its head to the pile; the sawyer takes it to the sawhorse, saws
+  three boards off it and carries them to the stack (or, loading, to the
+  wagon). About three boards every 50 s with two villagers.
+- Getting them to the mill took three fixes: idle villagers are drawn to it
+  every few seconds (house chores and the digging are dropped for it, out of
+  your sight), they walk straight there at a brisker pace (the lane route
+  was a long way round), and a villager held up on its way for 30 s is put
+  where it was going. The mill's stack is yours to walk up and take, except
+  while the wagon is being loaded.
+- While the wagon's loaded the mill works through the night (`urgent`).
+
+## The bridge quest, slices C to E: the wagon, the haul, the building (2026-10-15)
+
+- The wagon (`story/wagon.ts`) is a second `Buildable` of phase 4 (wheels 5
+  logs, bed 7), out in front of the mill facing the way out of the village.
+  The mill and the wagon together cost 6 stones and 24 logs, about what the
+  stable did (the brief's "about what the stable does" read as the pair).
+- Loading: the director's `loading` step keeps the mill's stack for the
+  wagon (`millKept`), points the sawyer's boards at it, and has an idle
+  sawyer carry what's on the mill's stack out to it (or go and fell a tree
+  itself rather than stand about). Wood of yours goes in as you walk up,
+  one at a time. A load is 21 boards: about three to four minutes with two
+  villagers and nobody helping (it was 15, which filled in two).
+- Driving is `WagonMode` in `player/movement.ts`: on a rail (the trail from
+  the wagon to the water's edge, `trailRail`), W walk / Shift trot, S reins
+  in and backs at most 4 m behind the furthest it's been (`balked`, a
+  "nope" and a puff), A/D across the trail, ±4.5 m. Nothing else moves it.
+  E does nothing on the bench. The stelk is the village's own (made once,
+  `village:stelk`), held `ridden` so nothing thinks for it and nobody can
+  mount it; it's posed at the shafts' end, and walks there for the yoking.
+  The guide sits beside you on the bench (`Spirit.riding`); the first two
+  villagers home walk either side. The rig sits on the bench with the
+  ride pose and a rein (`ropeAim`) to the stelk.
+- The veil comes 125 m out (about 50 s); you're set down 150 m short of
+  the water. About 110 s of driving in all. The haul's place is saved every
+  second (`embla.quest.<seed>.haul`); a reload puts you back on the bench.
+- The building is a scene of four shots with the bridge's `built` driven by
+  the quest (the bridgehead with the crew carrying boards from the wagon
+  and knocking them in; across the water from out on it; along the deck as
+  it reaches the far shore), the wagon's load going into it. Then hands
+  back: everyone round you cheering for about 20 s, then off up the trail;
+  once they're 110 m off they're home (attend at their door, dismissed),
+  the stelk too. The guide points you across, and once you're 60 m away
+  it's home by its fire (phase 4's last step, `bridged`). The wagon stays
+  at the bridgehead. `story/bridgeWork.ts` and its 100-wood sketch are gone.
+- `cp=ring3` (and later) marks the quest done, so the moth's scripts find
+  the bridge standing. New checkpoints: `yoke`, `haul`.
+
+- 2026-10-15: the wagon's shafts run up the stelk's flanks to just behind its shoulders (`WAG.POLE`, wider apart than its body); a yoke on its shoulders with pegs out past its flanks (`yokeGeometry`, shown while `Mob.yoked`), and a short verlet link chain from each shaft end to a peg (`Chain`, `Wagon.harness`, called from `BridgeQuest.update`). Yoked is sticky (on within 0.6 m of the hitch, off past 3 m): a flicker unpinned the chains and they flew about. Its lean in the shafts is down to 0.12 rad so its rump stays off the shafts. `WAG.SHAFT` is still the towing reach.

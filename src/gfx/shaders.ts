@@ -578,11 +578,35 @@ uniform vec3 cDeep;
 uniform vec3 cShallow;
 uniform vec3 cFoam;
 uniform vec3 cReflect;
+uniform float uSea;
+uniform vec4 uIsle[8];
+uniform float uIsleR[8];
+uniform vec4 uStrait[2];
+uniform float uStraitR[2];
+uniform vec2 uDeep;
+// (The same sums as world/islands.ts: wander, outside, inStrait.)
+float seaWander(vec2 p) {
+  return 55.0 * sin(p.x / 310.0 + 1.3 * sin(p.y / 270.0)) + 40.0 * sin(p.y / 190.0 + 1.7 * sin(p.x / 230.0)) + 18.0 * sin((p.x + p.y) / 71.0);
+}
+float seaLine(vec2 p, vec4 l) {
+  vec2 a = l.xy, ab = l.zw - l.xy;
+  return length(p - a - ab * clamp(dot(p - a, ab) / max(dot(ab, ab), 1.0), 0.0, 1.0));
+}
+bool seaDeep(vec2 p, float depth) {
+  if (depth < uDeep.x) return false;
+  for (int i = 0; i < 2; i++) if (uStraitR[i] + 0.5 * seaWander(p.yx) - seaLine(p, uStrait[i]) > 0.0) return true;
+  float best = 1e9;
+  for (int i = 0; i < 8; i++) best = min(best, seaLine(p, uIsle[i]) - uIsleR[i]);
+  return (best < -200.0 ? best : best + seaWander(p)) > uDeep.y;
+}
 void main() {
   float d = vDepth;
   if (d < -0.05) discard;
   vec4 nz = texture(uNoise, vWorld.xz / 60.0 + vec2(uTime * 0.004, uTime * 0.002));
   vec3 c = cDeep;
+  // The deep: a darker band of sea, its edge a little ragged. What the sea spirit keeps.
+  bool abyss = uSea > 0.5 && seaDeep(vWorld.xz, d - nz.b * 5.0);
+  if (abyss) c = cDeep * vec3(0.66, 0.74, 0.86);
   if (d < 1.6 + nz.r * 1.6) c = cShallow;
   float foamW = 0.28 + 0.14 * sin(uTime * 1.3 + nz.g * 9.0);
   if (d < foamW) c = cFoam;

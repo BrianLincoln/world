@@ -9,7 +9,9 @@ import { Billboard, Sketch } from './overlay';
 
 export type CabinPartId = 'roof' | 'door' | 'chimney';
 export type StablePartId = 'footing' | 'frame' | 'sroof' | 'fence';
-export type PartId = CabinPartId | StablePartId;
+/** The lumber mill's (story/mill.ts) and the wagon's (story/wagon.ts): phase 4, the bridge. */
+export type WorksPartId = 'mfoot' | 'mframe' | 'mroof' | 'wheels' | 'bed';
+export type PartId = CabinPartId | StablePartId | WorksPartId;
 export type PartState = 'broken' | 'sketch' | 'built';
 
 export interface Part {

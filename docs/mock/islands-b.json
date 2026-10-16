@@ -1,0 +1,35 @@
+{
+ "title": "B. Two islands along the trail, a strait between rings 2 and 3",
+ "slope": 0.3,
+ "deep": 150,
+ "islands": [
+  {
+   "name": "one",
+   "pts": [
+    [
+     100,
+     300
+    ],
+    [
+     200,
+     2000
+    ]
+   ],
+   "r": 1300
+  },
+  {
+   "name": "two",
+   "pts": [
+    [
+     100,
+     5000
+    ],
+    [
+     -250,
+     6800
+    ]
+   ],
+   "r": 1000
+  }
+ ]
+}

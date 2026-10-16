@@ -2,6 +2,7 @@ import { Simplex } from '../core/noise';
 import { clamp, hash01, hashInt, lerp, mulberry32, smoothstep } from '../core/rng';
 import { brookQuery, findStorySite, PASTURE_D, PASTURE_W, pasturePlane, PLOT_EASE, PLOT_R, RUIN_D, RUIN_W, siteToLocal, type StorySite } from './storySite';
 import { buildTowerNet, HOME_VIEW, ringTower, type Tower, type TowerNet } from './towers';
+import { CROSSINGS, ISLANDS, islandAt, onCrossing, ONE_WORLD, RINGS, sink } from './islands';
 
 // The world is a pure function of (seed, x, z). Nothing here touches three.js
 // so it runs identically inside chunk workers and on the main thread.
@@ -83,8 +84,12 @@ export class WorldGen {
   private towerCells: Map<number, number[]> | null = null;
   private bq = { d: 0, bed: 0, t: 0, i: 0 };
 
+  /** The one world: islands in a sea (world/islands.ts). Any other seed is the old endless land. */
+  readonly sea: boolean;
+
   constructor(seed: number) {
     this.seed = seed >>> 0;
+    this.sea = this.seed === ONE_WORLD;
     const r = mulberry32(this.seed);
     const s = () => Math.floor(r() * 4294967295);
     this.nWarp = new Simplex(s());
@@ -105,6 +110,10 @@ export class WorldGen {
     this.nHollowMask = new Simplex(s());
   }
 
+  /** The one world's islands and the crossings between them (none on any other seed). */
+  get islands() { return this.sea ? ISLANDS : []; }
+  get crossings() { return this.sea ? CROSSINGS : []; }
+
   /** The guaranteed start area (see storySite.ts). Lazily built from the base height field. */
   get story(): StorySite {
     return (this._story ??= findStorySite(this.seed, { base: (x, z) => this.baseHeight(x, z), forest: (x, z, h) => this.forestBase(x, z, h) }));
@@ -122,7 +131,7 @@ export class WorldGen {
   /** The beacon tower network (see towers.ts). Lazily built from the base height field. */
   get towers(): TowerNet {
     if (!this._towers) {
-      this._towers = buildTowerNet(this.seed, { base: (x, z) => this.baseHeight(x, z), forest: (x, z, h) => this.forestBase(x, z, h) }, this.story);
+      this._towers = buildTowerNet(this.seed, { base: (x, z) => this.baseHeight(x, z), forest: (x, z, h) => this.forestBase(x, z, h), island: this.sea ? islandAt : undefined }, this.story);
       this.towerCells = new Map();
       for (const t of this._towers.towers) {
         const key = Math.floor(t.x / POI_CELL) * 73856093 + Math.floor(t.z / POI_CELL) * 19349663;
@@ -188,6 +197,7 @@ export class WorldGen {
       // Routing reads the POIs, which ask for the sites: only those found so far are there.
       this.dungeonBusy = true;
       this.know([]);
+      if (this.sea) { this.pinnedSites(); return this._dungeons!; }
       const t0 = Date.now();
       const first = this.firstSite();
       // (Cells looked at meanwhile were made without the ring: `know` throws them away.)
@@ -222,7 +232,7 @@ export class WorldGen {
    */
   get ringTowers(): Tower[] {
     if (!this._ringTowers) {
-      const net = this.towers, f = { base: (x: number, z: number) => this.baseHeight(x, z), forest: (x: number, z: number, h: number) => this.forestBase(x, z, h) };
+      const net = this.towers, f = { base: (x: number, z: number) => this.baseHeight(x, z), forest: (x: number, z: number, h: number) => this.forestBase(x, z, h), island: this.sea ? islandAt : undefined };
       this._ringTowers = this.dungeons.map((d, i) => {
         const q = d.way[Math.max(0, d.way.length - 2)] ?? [d.x + 1, d.z];
         const turn = (Math.PI * 2) / 9, back = Math.atan2(d.z - q[1], d.x - q[0]);
@@ -233,6 +243,37 @@ export class WorldGen {
     return this._ringTowers;
   }
   private _ringTowers: Tower[] | null = null;
+
+  /**
+   * The one world's rings stand where `RINGS` says (world/islands.ts), and
+   * only the ways to them are found: the first from the yard, each after from
+   * where the giant lay by the one before, over a crossing where the sea is
+   * in the way. Gentle if a gentle way can be had.
+   */
+  private pinnedSites() {
+    const st = this.story, yard = st.village?.lane[0] ?? { x: st.x, z: st.z }, net = this.towers;
+    const list: DungeonSite[] = [], t0 = Date.now();
+    this.searchMs = [];
+    let from: [number, number] = [yard.x, yard.z];
+    for (const [x, z] of RINGS) {
+      const t = Date.now();
+      const c: DungeonSite = { x, z, y: this.baseHeight(x, z), r: RING_R, tower: -1, way: [] };
+      const l = Math.hypot(x - from[0], z - from[1]) || 1, end: [number, number] = [x - ((x - from[0]) / l) * 48, z - ((z - from[1]) / l) * 48];
+      // Never by the home tower (you watch the first walk from it), a ring already standing, or a tower's feet.
+      const off = [net.home.x, net.home.z, HOME_CLEAR];
+      for (const o of list) off.push(o.x, o.z, o.r + 30);
+      for (const tw of net.towers) if (!tw.home && Math.hypot(tw.x - x, tw.z - z) < 2400) off.push(tw.x, tw.z, 75);
+      for (const steep of [0.34, 0.5, Infinity]) { c.way = this.route(from[0], from[1], end[0], end[1], steep, off); if (c.way.length > 2) break; }
+      if (c.way.length <= 2) { const n = Math.max(1, Math.ceil(l / 40)); c.way = []; for (let i = 0; i <= n; i++) c.way.push([from[0] + (end[0] - from[0]) * (i / n), from[1] + (end[1] - from[1]) * (i / n)]); }
+      list.push(c);
+      this.know([...list]);
+      from = c.way[c.way.length - 1];
+      this.searchMs.push(Date.now() - t);
+    }
+    void t0;
+    this.dungeonBusy = false;
+    this.presetDungeons(list);
+  }
 
   /** Can a ring stand at (x, z)? Level (`lax`: how much less so will do), dry, not high, with dry ground about it and no tower near. */
   private ringFits(x: number, z: number, lax: number): DungeonSite | null {
@@ -499,7 +540,9 @@ export class WorldGen {
     for (const b of st.boulders) avoid.push(b.x, b.z, 3.5);
     avoid.push(st.stump.x, st.stump.z, 2.5);
     for (const p of st.village?.plots ?? []) avoid.push(p.x, p.z, PLOT_R + 1);
-    const wet = (x: number, z: number) => this.tameHeight(x, z) < 2.2 || this.brookDist(x, z) < 5.5;
+    // (A crossing is dry level ground to a way, whatever is under it.)
+    const over = this.sea ? (x: number, z: number) => onCrossing(x, z) : () => false;
+    const wet = (x: number, z: number) => !over(x, z) && (this.tameHeight(x, z) < 2.2 || this.brookDist(x, z) < 5.5);
     const blockedAt = (x: number, z: number) => {
       if (wet(x, z) || inPasture(x, z)) return true;
       for (let k = 0; k < avoid.length; k += 3) if (Math.hypot(x - avoid[k], z - avoid[k + 1]) < avoid[k + 2]) return true;
@@ -512,7 +555,8 @@ export class WorldGen {
       const x = x0 + i * C, z = z0 + j * C;
       let c: number;
       // Keep a bike's width of dry ground either side too.
-      if (blockedAt(x, z) || wet(x + 4, z) || wet(x - 4, z) || wet(x, z + 4) || wet(x, z - 4)) c = Infinity;
+      if (over(x, z)) c = 1;
+      else if (blockedAt(x, z) || wet(x + 4, z) || wet(x - 4, z) || wet(x, z + 4) || wet(x, z - 4)) c = Infinity;
       else {
         const h = this.tameHeight(x, z);
         const sl = Math.max(Math.abs(this.tameHeight(x + 4, z) - this.tameHeight(x - 4, z)), Math.abs(this.tameHeight(x, z + 4) - this.tameHeight(x, z - 4))) / 8;
@@ -685,7 +729,7 @@ export class WorldGen {
       const floor = -8 - 22 * hl + sill * 14;
       h = lerp(h, Math.min(h, floor), k);
     }
-    return h;
+    return this.sea ? sink(h, x, z) : h;
   }
 
   private peakInCell(cx: number, cz: number): Peak | null {
