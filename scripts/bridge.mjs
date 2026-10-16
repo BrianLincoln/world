@@ -12,6 +12,10 @@
 //           its stack is yours; a reload.
 //   wagon:  from the mill standing: build the wagon by the keys (`wagon-*`), then its load with nobody helping
 //           (`load-*`: how long it takes) and with wood of yours; a reload.
+//   haul:   from `cp=yoke`: up to the bench (the stelk is yoked), then the drive by the keys: on, across, back (it
+//           balks), the veil over the long middle, stopped at the water's edge; a reload part way.
+//   build:  from near the end of the haul: the building scene (`build-*`), the party, everyone home, and over
+//           the bridge by the keys (`cross-bridge-*`); a reload.
 // Prints ok/FAIL per step; exits 1 on a failure. Serves $DIST (default dist/).
 import { chromium } from 'playwright';
 import http from 'node:http';
@@ -248,30 +252,153 @@ if (kinds.includes('wagon')) {
   await go(90);
   const wst = () => run(() => { const s = window.__ow.story(), w = s.wagon; return { step: s.step.id, built: w.built, load: w.load, full: w.full, kept: s.millKept, stock: s.mill.stock, inv: s.inv.logs, icon: s.spirit.want.icon, count: s.spirit.want.count }; });
   let s = await wst();
-  const w0 = await run(() => { const w = window.__ow.story().wagon, c = w.local(0, 0, 1); return { x: c.x, y: c.y, z: c.z, rot: w.heading }; });
-  await look(w0, w0.rot + 2.2, 0.3, 9);
+  const w0 = await run(() => { const s = window.__ow.story(), w = s.wagon, m = s.mill.local(0, 0), c = w.local(0, 0, 1); return { x: c.x, y: c.y, z: c.z, rot: Math.atan2(c.x - m.x, c.z - m.z) - 0.5 }; });
+  await look(w0, w0.rot, 0.3, 9);
   await shot('wagon-built');
   check('the wagon is built by the keys, and the guide wants it loaded', s.built && s.step === 'loading' && s.icon === 'log' && s.count > 0, `${frames} frames; ${[...seen].join(' ')}; ${JSON.stringify(s)}`);
-  // Nobody helping: how long until it's full (game time), with a look now and then.
-  await run(() => window.__ow.teleport(window.__ow.story().anchor('millView').x + 8, window.__ow.story().anchor('millView').z + 8));
+  // Wood of yours: ten logs walked up to it.
+  await run(() => { const s = window.__ow.story(); s.inv.logs = 10; const a = s.wagon.local(-2, 0); window.__ow.teleport(a.x, a.z); });
+  await go(120);
+  s = await wst();
+  check('wood you bring goes in', s.load >= 9 && s.inv === 0, JSON.stringify(s));
+  // Nobody helping, from empty (and nothing on the mill's stack): how long until it's full (game time).
+  await run(() => { const ow = window.__ow, s = ow.story(); s.wagon.setLoad(0); s.mill.takeBoards(99); const a = s.anchor('millView'); ow.teleport(a.x + 8, a.z + 8); });
   let t = 0;
   for (; t < 600 && !(await wst()).full; t += 10) {
+    await run(() => window.__ow.setHour(11));
     await go(600);
-    if (t % 60 === 0) { await look(w0, w0.rot + 2.2 + t * 0.003, 0.3, 11); await shot(`load-${String(t).padStart(3, '0')}`); }
+    if (t % 60 === 0) { await look(w0, w0.rot + t * 0.002, 0.3, 11); await shot(`load-${String(t).padStart(3, '0')}`); console.log('  load', t, JSON.stringify(await run(() => { const ow = window.__ow, v = ow.village(); return { load: ow.story().wagon.load, logs: ow.story().mill.logs, hands: v.millHands, life: v.spirits.slice(0, 2).map((sp, k) => [Math.round(sp.pos.x), Math.round(sp.pos.z), Math.round(sp.want.at.x), Math.round(sp.want.at.z)]) }; }))); }
   }
   s = await wst();
   check('the villagers fill it in about four minutes with nobody helping', s.full && t >= 150 && t <= 330, `${t} s; ${JSON.stringify(s)}`);
-  await look(w0, w0.rot + 2.2, 0.3, 9);
+  await look(w0, w0.rot, 0.3, 9);
   await shot('wagon-full');
-  // And with your wood: a fresh load, and ten logs walked up to it.
-  await run(() => { const s = window.__ow.story(); s.wagon.setLoad(0); s.inv.logs = 10; const a = s.wagon.local(-2, 0); window.__ow.teleport(a.x, a.z); });
   await go(120);
-  s = await wst();
-  check('wood you bring goes in', s.load >= 10 && s.inv === 0, JSON.stringify(s));
   await page.goto(`${base()}`); await ready();
   await go(60);
   const r = await wst();
-  check('a reload keeps the wagon and its load', r.built && r.load >= 10, JSON.stringify(r));
+  check('a reload keeps the wagon full, and the stelk is to be yoked', r.built && r.full && r.icon === 'antlers', JSON.stringify(r));
+}
+
+if (kinds.includes('haul')) {
+  // From `cp=yoke`: up to the bench by the keys, the stelk yoked; then the drive down the trail by W, A/D and S.
+  await page.goto(`${base()}&fresh=1&cp=yoke`); await ready();
+  await run(() => window.__ow.setHour(10));
+  await go(60);
+  const qs = () => run(() => { const ow = window.__ow, q = ow.quest(), wm = ow.wagonMode(), b = ow._body.pos; return { stage: q.stage, part: q.part, veil: +q.veil.toFixed(2), mode: ow.mode(), s: +wm.s.toFixed(1), off: +wm.off.toFixed(2), speed: +wm.speed.toFixed(2), L: +(wm.rail?.L ?? 0).toFixed(0), at: [Math.round(b.x), Math.round(b.z)] }; });
+  await shot('haul-01-yoke');
+  await run(() => { const ow = window.__ow, sp = ow.story().spirit, b = ow._body; const h = Math.atan2(sp.pos.x - b.pos.x, sp.pos.z - b.pos.z); ow.lockInput(h + Math.PI); });
+  await page.keyboard.down('KeyW');
+  for (let i = 0; i < 60 && (await qs()).stage === 'yoke' && (await qs()).part === ''; i++) await go(10);
+  await page.keyboard.up('KeyW');
+  await run(() => window.__ow.lockInput(null));
+  for (let i = 0; i < 8; i++) { await go(20); await shot(`haul-02-hitch-${i}`); }
+  let s = await qs();
+  check('up to the bench: the stelk is yoked and you drive', s.stage === 'haul' && s.mode === 'wagon', JSON.stringify(s));
+  // W: on at a walk. The camera behind as you'd have it.
+  await run(() => { const ow = window.__ow; ow.view(ow._body.heading + Math.PI + 0.4, 0.22, 12); });
+  await page.keyboard.down('KeyW');
+  let t0 = 0;
+  for (let i = 0; i < 6; i++) { await go(120); t0 += 2; await shot(`haul-03-on-${i}`); }
+  s = await qs();
+  check('W drives it on along the trail', s.s > 15 && s.speed > 2, JSON.stringify(s));
+  // A: across to the left, no further than the trail's edge.
+  await page.keyboard.down('KeyA'); await go(600); await page.keyboard.up('KeyA'); t0 += 10;
+  s = await qs();
+  await shot('haul-04-left');
+  check('A steers it across, and no further than the edge', s.off > 3 && s.off <= 4.51, JSON.stringify(s));
+  await page.keyboard.down('KeyD'); await go(240); await page.keyboard.up('KeyD'); t0 += 4;
+  // S: reins in, and backs only a few metres; the stelk balks.
+  await page.keyboard.up('KeyW');
+  const far = (await qs()).s;
+  await page.keyboard.down('KeyS'); await go(900); await page.keyboard.up('KeyS');
+  s = await qs();
+  check('S stops it, backs a little, and no further', s.s >= far - 4.05 && s.s < far - 1, `${far} -> ${JSON.stringify(s)}`);
+  await page.keyboard.down('KeyW');
+  // On until the veil, under it, and on to the strait.
+  let seen = new Set(), n = 0, t = 0;
+  for (let i = 0; i < 400; i++) {
+    await go(60); t += 1;
+    s = await qs();
+    seen.add(s.part || 'drive');
+    if (i % 8 === 0) await shot(`haul-05-${String(++n).padStart(2, '0')}-${s.part || 'drive'}`);
+    if (s.stage !== 'haul') break;
+  }
+  await page.keyboard.up('KeyW');
+  await go(60);
+  await shot('haul-06-arrived');
+  check('the veil skips the long middle, and it stops at the water\'s edge', s.stage === 'build' && seen.has('cutWait'), `${t + t0} s of driving; ${[...seen].join(' ')}; ${JSON.stringify(s)}`);
+  // A reload part way: back on the bench where you were.
+  await page.goto(`${base()}&fresh=1&cp=haul`); await ready();
+  await page.keyboard.down('KeyW'); await go(900); await page.keyboard.up('KeyW');
+  const before = await qs();
+  await go(90);
+  await page.goto(`${base()}`); await ready();
+  await go(60);
+  s = await qs();
+  check('a reload mid-haul puts you back on the bench where you were', s.stage === 'haul' && s.mode === 'wagon' && Math.abs(s.s - before.s) < 4, `${JSON.stringify(before)} -> ${JSON.stringify(s)}`);
+}
+
+if (kinds.includes('build')) {
+  // From `cp=haul`, the last few metres to the water's edge; then the building (hands off: a frame a second), the
+  // party, everyone off home, and you over the bridge by the keys to the far side.
+  await page.goto(`${base()}&fresh=1&cp=haul`); await ready();
+  await run(() => { const ow = window.__ow, wm = ow.wagonMode(); ow.setHour(15); ow.quest().debugHaul(wm.rail.L - 30); });
+  await go(30);
+  const bs = () => run(() => { const ow = window.__ow, q = ow.quest(), b = ow._body.pos, v = ow.village(), sp = ow.story().spirit; return { stage: q.stage, part: q.part, built: +q.built.toFixed(3), deck: ow.bridge(null), mode: ow.mode(), at: [Math.round(b.x), Math.round(b.z)], guide: [Math.round(sp.pos.x), Math.round(sp.pos.z)], step: ow.story().step.id, load: ow.story().wagon.load }; });
+  await page.keyboard.down('KeyW');
+  for (let i = 0; i < 40 && (await bs()).stage === 'haul'; i++) await go(30);
+  await page.keyboard.up('KeyW');
+  let s = await bs(), n = 0, seen = new Set(), was = '';
+  check('at the water\'s edge, the building begins', s.stage === 'build', JSON.stringify(s));
+  // W held throughout must do nothing while it's hands off.
+  await page.keyboard.down('KeyW');
+  const p0 = s.at;
+  for (let i = 0; i < 80; i++) {
+    await go(60);
+    s = await bs();
+    seen.add(s.part);
+    if (s.part !== was) { console.log('part', s.part, JSON.stringify(s)); was = s.part; }
+    if (s.stage !== 'build' || s.part === 'party') break;
+    await shot(`build-${String(++n).padStart(2, '0')}-${s.part}`);
+  }
+  await page.keyboard.up('KeyW');
+  check('the bridge goes up bay by bay over the water in a scene, hands off', ['down', 'head', 'across', 'last'].every((p) => seen.has(p)) && s.built >= 0.999 && Math.hypot(s.at[0] - p0[0], s.at[1] - p0[1]) < 3, `${n} s; ${JSON.stringify(s)}`);
+  // The party: round you, hands back.
+  for (let i = 0; i < 4; i++) { await go(120); await shot(`party-${i}`); }
+  for (let i = 0; i < 20 && (await bs()).stage === 'build'; i++) await go(120);
+  s = await bs();
+  await shot('after-1');
+  check('then they cheer, and set off home; the guide points you across', s.stage === 'done' && s.deck === 1, JSON.stringify(s));
+  await go(600);
+  await shot('after-2');
+  // Over it by the keys: W, steered along the bridge.
+  // (First to the bridgehead, then straight along the deck.)
+  await page.keyboard.down('KeyW');
+  for (let i = 0; i < 300; i++) {
+    const d = await run(() => { const ow = window.__ow, b = ow._body.pos, h = ow.bridges().along(0.004, new ow.THREE.Vector3()); const dx = h.x - b.x, dz = h.z - b.z; ow.lockInput(Math.atan2(-dx, -dz)); ow.advance(6); return Math.hypot(dx, dz); });
+    if (d < 1.2) break;
+  }
+  await run(() => { const ow = window.__ow, br = ow.bridges(), h = br.heading; ow.lockInput(h + Math.PI); ow.view(h + Math.PI, 0.3, 14); });
+  let low = Infinity, calm = true, end = null, k = 0;
+  for (let i = 0; i < 1500; i++) {
+    const r = await run(() => { const ow = window.__ow; ow.advance(6); const p = ow._body.pos; return { phase: ow.sea().phase, y: +p.y.toFixed(1), z: Math.round(p.z), x: Math.round(p.x), ground: ow.gen().height(p.x, p.z) }; });
+    if (r.ground < 0) low = Math.min(low, r.y);
+    if (r.phase !== 'calm') calm = false;
+    if (i % 200 === 100) await shot(`cross-bridge-${++k}`);
+    if (r.z > 4070 || !calm) { end = r; break; }
+  }
+  await page.keyboard.up('KeyW');
+  await run(() => window.__ow.lockInput(null));
+  await go(30);
+  await shot('cross-bridge-far');
+  s = await bs();
+  check('you walk over the finished bridge to the far shore, the sea spirit leaving you be', !!end && calm && end.z > 4060 && low > 2.5, JSON.stringify({ end, low }));
+  check('the guide is home by its fire again, and the wagon left at the bridgehead', s.step === 'bridged' && Math.hypot(s.guide[0] + 37, s.guide[1] - 346) < 20, JSON.stringify(s));
+  await page.goto(`${base()}`); await ready();
+  await go(60);
+  const r = await bs();
+  check('a reload: the bridge stands, all of it done', r.stage === 'done' && r.deck === 1, JSON.stringify(r));
 }
 
 if (kinds.includes('skip')) {

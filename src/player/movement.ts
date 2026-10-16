@@ -1249,6 +1249,87 @@ export class BikeMode implements MovementMode {
   }
 }
 
+/** A line along the ground with arc length on it (story/rail.ts): what the wagon is driven along. */
+export interface RailLike {
+  readonly L: number;
+  at(s: number, out?: THREE.Vector2): THREE.Vector2;
+  heading(s: number, span?: number): number;
+  beside(s: number, side: number, out?: THREE.Vector2): THREE.Vector2;
+}
+
+/**
+ * Driving the wagon (the bridge quest, story/bridgeQuest.ts): on a rail, the
+ * giant's trail. W goes on at a walk (Shift: a trot), S reins in, and held
+ * on a standstill backs it up a little; A and D steer it across the trail,
+ * no further than its edges. It never turns round, and it won't go back more
+ * than `BACK` metres from the furthest it has been (the stelk balks:
+ * `balked` is set for whoever shows it). Nothing else moves it, so it can't
+ * be driven off the trail or get stuck.
+ */
+export class WagonMode implements MovementMode {
+  readonly name = 'wagon';
+  rail: RailLike | null = null;
+  /** How far along, the furthest it's been, how far to the left of the middle, and its speed (m/s; - backing). */
+  s = 0;
+  far = 0;
+  off = 0;
+  speed = 0;
+  /** Seconds since the stelk last balked at going back. */
+  balked = 99;
+  /** Where it may go to: the end of the rail, or less (a stop the quest sets). */
+  stop = Infinity;
+  walk = 2.6;
+  trot = 4.6;
+  back = 0.9;
+  /** Half the width it may steer across, and how fast (m/s). */
+  half = 4.5;
+  sideRate = 1.6;
+  static readonly BACK = 4;
+  private ground: (x: number, z: number) => number = () => 0;
+  private v2 = new THREE.Vector2();
+
+  /** Put it on `rail` at `s`, `off` to the side. */
+  set(rail: RailLike, s: number, off: number, ground: (x: number, z: number) => number) {
+    this.rail = rail;
+    this.s = s;
+    this.far = Math.max(s, this.far);
+    this.off = off;
+    this.speed = 0;
+    this.ground = ground;
+  }
+
+  enter(b: Body) { b.vel.set(0, 0, 0); b.grounded = true; }
+
+  update(b: Body, ctx: MoveContext): string | null {
+    const R = this.rail;
+    if (!R) return null;
+    const { dt, input } = ctx;
+    const e = (r: number) => 1 - Math.exp(-r * dt);
+    const end = Math.min(R.L, this.stop);
+    let want = input.y > 0.2 ? (input.run ? this.trot : this.walk) * Math.min(1, input.y) : 0;
+    // Reining in to a stop, and only then backing, a few steps at most.
+    if (input.y < -0.2) want = this.speed > 0.25 ? 0 : -this.back;
+    if (want < 0 && this.s <= this.far - WagonMode.BACK + 0.05) { want = 0; if (input.y < -0.2) this.balked = 0; }
+    this.balked += dt;
+    this.speed += (want - this.speed) * e(want === 0 ? 2.6 : want > this.speed ? 0.9 : 2);
+    this.s += this.speed * dt;
+    this.s = Math.max(this.far - WagonMode.BACK, Math.min(end, this.s));
+    if (this.s >= end - 0.01 && this.speed > 0) this.speed = 0;
+    this.far = Math.max(this.far, this.s);
+    // Across the trail (it eases toward the middle when you let go, as a beast would).
+    const side = -input.x * this.sideRate * Math.min(1, Math.abs(this.speed) / 1.2 + 0.25);
+    this.off = THREE.MathUtils.clamp(this.off + side * dt, -this.half, this.half);
+    const p = R.beside(this.s, this.off, this.v2);
+    const h = R.heading(this.s, 5) + THREE.MathUtils.clamp(side * 0.18, -0.25, 0.25);
+    const nx = p.x, nz = p.y;
+    if (dt > 0) b.vel.set((nx - b.pos.x) / dt, 0, (nz - b.pos.z) / dt);
+    b.pos.set(nx, this.ground(nx, nz), nz);
+    b.heading += Math.atan2(Math.sin(h - b.heading), Math.cos(h - b.heading)) * e(4);
+    b.grounded = true;
+    return null;
+  }
+}
+
 export class MovementController {
   private modes = new Map<string, MovementMode>();
   current: MovementMode;

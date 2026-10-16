@@ -1,7 +1,13 @@
 import * as THREE from 'three';
 import type { Giant } from '../giant/giant';
 import type { Footfall } from '../giant/visit';
-import type { Body } from '../player/movement';
+import type { Body, WagonMode } from '../player/movement';
+import type { Mob } from '../mobs/types';
+import { LOAD, WAG } from './wagon';
+import type { Bridges } from '../world/bridge';
+import { colored, PartBatch } from '../mobs/parts';
+import { buildMallet } from './chores';
+import { BIOME } from '../gfx/palette';
 import { SEAT, WHEEL_R } from '../vehicles/bicycle';
 import type { Bike, Bikes } from '../vehicles/bikes';
 import type { WorldGen } from '../world/worldgen';
@@ -31,8 +37,8 @@ import type { Guide, Story } from './story';
 // `shore` (you're put on the trail just short of the guide), the ride as
 // `mill` (you start by the cabin as always).
 
-export type QuestStage = 'wait' | 'cross' | 'shore' | 'ride' | 'mill';
-const STAGES: QuestStage[] = ['wait', 'cross', 'shore', 'ride', 'mill'];
+export type QuestStage = 'wait' | 'cross' | 'shore' | 'ride' | 'mill' | 'yoke' | 'haul' | 'build' | 'done';
+const STAGES: QuestStage[] = ['wait', 'cross', 'shore', 'ride', 'mill', 'yoke', 'haul', 'build', 'done'];
 
 export interface QuestDeps {
   gen: WorldGen;
@@ -64,6 +70,12 @@ export interface QuestDeps {
   loading(): boolean;
   /** How far the nearest standing tree's trunk is from (x, z) (Infinity if none within `max`). */
   tree(x: number, z: number, max: number): number;
+  /** The village's stelk (made once, kept), the wagon's driving, and putting you in it (or back on your feet). */
+  stelk(): Mob | null;
+  wagonMode: WagonMode;
+  drive(on: boolean): void;
+  /** The bridge over the strait (how much of it stands is ours to say), or null without one. */
+  bridges(): Bridges | null;
 }
 
 /** The veil: how long it takes to come up or go, the least it holds, and the longest it waits for the land (s). */
@@ -72,7 +84,22 @@ const VEIL = { fade: 0.55, hold: 0.45, most: 20 };
 const LITTLE = 0.55, BESIDE = 1.7, AHEAD = 0.4, MEET = 5;
 /** The ride home: how far up the trail you ride off (s), where in from the village you're set down after the veil (m along the rail), and where you stop (m). */
 const RIDE = { off: 4.6, from: 58, stop: 11 };
+/**
+ * The haul: how far along you are out of the village when the veil comes (m), how far short of the water's
+ * edge it sets you down (m), where the wagon stops (short of the edge, m), and how far the villagers walk to
+ * either side of it (m).
+ */
+const HAUL = { cut: 125, tail: 150, end: 9, side: 2.7 };
+/**
+ * The building, in seconds: off the wagon (`down`), the first bays at the bridgehead (`head`), the rest across the
+ * water seen from out on it (`across`), the last of it reaching the far shore (`last`); then everyone cheering
+ * (`party`) before they set off home, and how far you go off before the guide is simply home again (m).
+ */
+const BUILD = { down: 1.6, head: 7, across: 10, last: 5.5, party: 22, away: 60 };
+/** How much of the bridge stands at the end of the bridgehead shot and the shot across. */
+const BUILT = { head: 0.035, across: 0.9 };
 
+const m4 = new THREE.Matrix4(), q1 = new THREE.Quaternion(), QY = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), Math.PI / 2), PLANK = new THREE.Vector3(1.4, 0.08, 0.3), WHITE = new THREE.Color('#ffffff');
 const v1 = new THREE.Vector3(), v2 = new THREE.Vector3(), v3 = new THREE.Vector3(), w1 = new THREE.Vector2(), w2 = new THREE.Vector2();
 const ss = THREE.MathUtils.smoothstep;
 
@@ -101,17 +128,39 @@ export class BridgeQuest {
   private gBike: Bike | null = null;
   /** The guide's heading on its bike. */
   private gh = 0;
+  /** The haul: how far along the trail, how far across it, and whether the veil has skipped the long middle (saved). */
+  private haul = { s: 0, off: 0, cut: false };
+  private hRail: Rail | null = null;
+  private saveT = 0;
+  /** The two villagers who walk beside the wagon. */
+  private marchers: number[] = [];
+  /** Who builds the bridge and cheers it (everyone home), and the tools and boards they're seen with. */
+  private crew: number[] = [];
+  readonly group = new THREE.Group();
+  private malletB = new PartBatch(buildMallet(), { keep: 0.5 }, 12);
+  private plankB = new PartBatch(colored(new THREE.BoxGeometry(1, 1, 1), BIOME.cutWood, 0, false), { keep: 0.5 }, 12);
+  private mallets: THREE.Object3D[] = [];
+  /** How much of the bridge stands (0..1), as the quest has it. */
+  built = 0;
+  /** The party's over and they've set off home; and whether they're home (out of your sight). */
+  private homeward = false;
   private turnK = 0;
 
   constructor(private d: QuestDeps) {
     this.load();
+    this.group.add(this.malletB.mesh, this.plankB.mesh);
+    for (let i = 0; i < 8; i++) this.mallets.push(new THREE.Object3D());
+    if (this.stage === 'build') this.stage = 'done';
+    if (this.stage === 'done') this.built = 1;
   }
 
   private get spirit() { return this.d.story.spirit; }
   /** A cutscene has the camera and your hands. */
-  get busy() { return this.stage === 'cross' || this.stage === 'ride'; }
+  get busy() { return this.stage === 'cross' || this.stage === 'ride' || (this.stage === 'build' && this.beat !== 'party') || (this.stage === 'yoke' && this.beat === 'hitch') || (this.stage === 'haul' && (this.beat === 'cut' || this.beat === 'cutWait')); }
+  /** A cutscene you can hold Space through. */
+  get skippable() { return this.stage === 'cross' || this.stage === 'ride' || (this.stage === 'build' && this.beat !== 'party'); }
   /** The guide is the quest's (the story and the journey leave it be). */
-  get holds() { return this.stage === 'cross' || this.stage === 'shore' || this.stage === 'ride'; }
+  get holds() { return this.stage !== 'wait' && this.stage !== 'mill' && (this.stage !== 'done' || this.homeT >= 0); }
   /** Waiting under the veil for the land to load (dev: a stepped script must give the workers real time here). */
   get waiting() { return this.beat === 'veiled' || this.beat === 'cut'; }
   get clock() { return this.t; }
@@ -125,7 +174,9 @@ export class BridgeQuest {
     this.stage = STAGES.includes(s as QuestStage) ? (s as QuestStage) : 'wait';
     if (this.stage === 'cross') this.stage = 'shore';
     if (this.stage === 'ride') this.stage = 'mill';
+    try { const h = JSON.parse(localStorage.getItem(this.key() + '.haul') ?? 'null'); if (h) this.haul = { s: +h.s || 0, off: +h.off || 0, cut: !!h.cut }; } catch { /* none */ }
   }
+  private saveHaul() { try { localStorage.setItem(this.key() + '.haul', JSON.stringify(this.haul)); } catch { /* ignore */ } }
 
   private enter(s: QuestStage, saveAs: QuestStage = s) {
     this.stage = s;
@@ -164,7 +215,17 @@ export class BridgeQuest {
       case 'shore': this.atShore(dt); break;
       case 'ride': this.playRide(dt); break;
       // (Home: the mill and the wagon are the director's phase 4, story/phase4.ts.)
-      case 'mill': if (this.d.story.phaseIndex < 2) this.d.story.startBridge(); break;
+      case 'mill': {
+        const st = this.d.story;
+        if (st.phaseIndex < 2) st.startBridge();
+        // Loaded: the stelk's yoked to it next.
+        if (st.wagon?.full && st.step.id === 'loading') this.startYoke();
+        break;
+      }
+      case 'yoke': this.atYoke(dt); break;
+      case 'haul': this.playHaul(dt); break;
+      case 'build': this.playBuild(dt); break;
+      case 'done': this.after(dt); break;
       default: break;
     }
     if (this.gBike && this.stage !== 'ride') this.parkGuideBike(dt);
@@ -333,6 +394,7 @@ export class BridgeQuest {
 
   /** A reload in this stage: you're on the trail just short of the guide, looking at it. */
   resume() {
+    if (this.stage === 'haul') { this.startHaul(false); return; }
     if (this.stage !== 'shore') return;
     if (!this.cx) this.stageCrossing();
     const cx = this.cx!;
@@ -551,18 +613,400 @@ export class BridgeQuest {
     k.skel.pose(k);
   }
 
+  // ------------------------------------------------------------ the haul
+
+  /** The trail from where the wagon stands to the water's edge. */
+  private haulRail(): Rail {
+    if (this.hRail) return this.hRail;
+    const st = this.d.story, w = st.wagon!, gen = this.d.gen;
+    const lane = st.site.village?.lane ?? [];
+    const near = (x: number, z: number) => Math.min(Math.hypot(x - st.site.x, z - st.site.z), ...lane.map((q) => Math.hypot(x - q.x, z - q.z)));
+    const falls = this.d.trail();
+    let from = 0;
+    for (let i = 0; i < Math.min(falls.length, 60); i++) if (near(falls[i].x, falls[i].z) < 26) from = i + 1;
+    this.hRail = trailRail({ x: w.home.x, z: w.home.z }, falls.slice(from), (x, z) => gen.height(x, z) < 1.2);
+    return this.hRail;
+  }
+
+  /** Loaded: the stelk is brought round, and the guide waits by the bench for you to climb up. */
+  private startYoke() {
+    this.enter('yoke');
+    const m = this.d.stelk(), st = this.d.story, w = st.wagon!;
+    if (m) {
+      // It stands off to the side of the wagon, waiting.
+      const p = w.local(-3.2, WAG.HL + 1.2);
+      m.pos.set(p.x, this.d.ground(p.x, p.z), p.z);
+      m.heading = w.heading;
+      m.vel.set(0, 0, 0);
+    }
+  }
+
+  private atYoke(dt: number) {
+    const st = this.d.story, w = st.wagon!, sp = this.spirit, b = this.d.body, m = this.d.stelk();
+    st.lent = true;
+    const bench = w.local(-1.4, WAG.HL - 0.3);
+    bench.y = this.d.ground(bench.x, bench.z);
+    if (this.beat === '') {
+      if (sp.want.icon !== 'antlers') sp.want = { at: bench.clone(), face: m ? m.pos.clone().setY(m.pos.y + 1.4) : w.local(0, WAG.HL + 2), pose: 'point', icon: 'antlers', lead: false };
+      if (m) { m.ridden = true; m.vel.set(0, 0, 0); }
+      // Up to the bench (or the stelk): it's yoked, and you're up on the bench.
+      const by = Math.hypot(b.pos.x - bench.x, b.pos.z - bench.z) < 3.2 || (m && Math.hypot(b.pos.x - m.pos.x, b.pos.z - m.pos.z) < 2.6);
+      if (by && b.grounded) { this.beat = 'hitch'; this.t = 0; this.d.getOff(); sp.celebrate(); this.d.story.chirp(true); }
+      return;
+    }
+    // The stelk walks round into the shafts.
+    b.vel.x = b.vel.z = 0;
+    if (m) {
+      const to = w.hitch(v1), k = Math.min(1, this.t / 2.2), from = v2.copy(w.local(-3.2, WAG.HL + 1.2));
+      const p = v3.copy(from).lerp(to, ss(k, 0, 1));
+      p.x += Math.sin(k * Math.PI) * -1.2 * Math.cos(w.heading); p.z += Math.sin(k * Math.PI) * 1.2 * Math.sin(w.heading);
+      m.vel.set((p.x - m.pos.x) / Math.max(dt, 1e-3), 0, (p.z - m.pos.z) / Math.max(dt, 1e-3));
+      m.pos.set(p.x, this.d.ground(p.x, p.z), p.z);
+      m.heading += Math.atan2(Math.sin(w.heading - m.heading), Math.cos(w.heading - m.heading)) * (1 - Math.exp(-3 * dt));
+    }
+    if (this.t > 2.4) {
+      if (m) { this.d.puff(w.hitch(v1).setY(m.pos.y + 1), 8, 0.2, 1.6); m.vel.set(0, 0, 0); m.heading = w.heading; }
+      this.d.sfx.thunk();
+      this.startHaul(true);
+    }
+  }
+
+  /** On the bench, the stelk in the shafts: off down the trail (or, a reload, on from where you were). */
+  private startHaul(fresh: boolean) {
+    const R = this.haulRail(), st = this.d.story, sp = this.spirit;
+    if (fresh) { this.haul = { s: 0, off: 0, cut: false }; this.saveHaul(); this.enter('haul'); }
+    else { this.stage = 'haul'; this.t = 0; }
+    this.beat = '';
+    const wm = this.d.wagonMode;
+    wm.far = this.haul.s;
+    wm.set(R, this.haul.s, this.haul.off, this.d.ground);
+    wm.stop = R.L - HAUL.end;
+    const p = R.beside(this.haul.s, this.haul.off, w1);
+    this.d.body.pos.set(p.x, this.d.ground(p.x, p.y), p.y);
+    this.d.body.heading = R.heading(this.haul.s, 5);
+    this.d.drive(true);
+    this.afterYaw = this.d.body.heading + Math.PI;
+    // The guide beside you on the bench.
+    sp.cancelActs();
+    sp.think = false;
+    sp.want = { at: sp.pos.clone(), face: null, pose: 'stand', icon: null, lead: false, settled: true };
+    st.lent = true;
+    // Two of the village walk alongside.
+    const v = st.village;
+    this.marchers = v ? v.spirits.map((_s, k) => k).filter((k) => v.here(k)).slice(0, 2) : [];
+    for (const [n, k] of this.marchers.entries()) { const q = R.beside(this.haul.s + 1, (n ? -1 : 1) * HAUL.side, w2); v!.attend(k, v3.set(q.x, 0, q.y), v1.set(q.x, 0, q.y)); }
+    this.place(0);
+  }
+
+  /** The wagon, the stelk, the guide on the bench and the two walking, from where the drive has you. */
+  private place(dt: number) {
+    const b = this.d.body, st = this.d.story, w = st.wagon!, m = this.d.stelk(), sp = this.spirit, wm = this.d.wagonMode;
+    w.place(b.pos.x, b.pos.z, b.heading, this.d.ground);
+    if (m) {
+      m.ridden = true;
+      const h = w.hitch(v1);
+      m.vel.copy(b.vel);
+      m.pos.set(h.x, this.d.ground(h.x, h.z), h.z);
+      m.heading = b.heading;
+      m.grounded = true;
+    }
+    const seat = w.local(-0.42, WAG.HL - 0.2, WAG.DECK + 0.42);
+    sp.riding = { seat, heading: b.heading, look: m ? m.pos.clone().setY(m.pos.y + 1.6) : null };
+    const v = st.village, R = this.haulRail();
+    if (!v) return;
+    for (const [n, k] of this.marchers.entries()) {
+      const s = v.spirits[k], q = R.beside(wm.s + 0.6, wm.off + (n ? -1 : 1) * HAUL.side, w2);
+      s.want.at.set(q.x, this.d.ground(q.x, q.y), q.y);
+      s.want.face = null;
+      s.want.settled = false;
+      s.haste = Math.max(1.6, Math.abs(wm.speed) * 1.25 + 0.6);
+      if (dt === 0 || Math.hypot(s.pos.x - q.x, s.pos.z - q.y) > 9) s.teleport(s.want.at);
+    }
+  }
+
+  private playHaul(dt: number) {
+    const wm = this.d.wagonMode, R = this.haulRail(), st = this.d.story;
+    st.lent = true;
+    this.place(dt);
+    // Backing too far: the stelk won't have it.
+    if (wm.balked < dt * 1.5 && (this.t - this.balkT > 1.2)) { this.balkT = this.t; this.d.sfx.nope(); const m = this.d.stelk(); if (m) this.d.puff(v1.copy(m.pos).setY(m.pos.y + 0.2), 4, 0.15, 1); }
+    this.haul.s = wm.s;
+    this.haul.off = wm.off;
+    if ((this.saveT -= dt) <= 0) { this.saveT = 1; this.saveHaul(); }
+    if (this.beat === '' && !this.haul.cut && wm.s > HAUL.cut) { this.beat = 'cut'; this.t = 0; this.frames = 0; }
+    if (this.beat === 'cut') {
+      // The long middle under a veil: down the trail to near the strait.
+      if (this.veil < 1) { this.veil = Math.min(1, this.veil + dt / VEIL.fade); if (this.veil >= 1) { this.t = 0; this.frames = 0; this.haul = { s: R.L - HAUL.tail, off: wm.off, cut: true }; this.saveHaul(); this.startHaul(false); this.beat = 'cutWait'; } return; }
+    }
+    if (this.beat === 'cutWait') {
+      this.veil = 1;
+      if ((this.t > VEIL.hold && this.frames > 8 && !this.d.loading()) || this.t > VEIL.most) this.beat = 'lift';
+      return;
+    }
+    if (this.beat === 'lift') { this.veil = Math.max(0, this.veil - dt / VEIL.fade); if (this.veil <= 0) this.beat = ''; }
+    // At the water's edge: stopped. (The building is slice E.)
+    if (wm.s >= wm.stop - 0.05 && Math.abs(wm.speed) < 0.05) this.arrive();
+  }
+  private balkT = -9;
+
+  /** The wagon at the strait. */
+  private arrive() {
+    // From here a reload finds the bridge standing.
+    this.enter('build', 'done');
+    this.beat = 'down';
+    this.d.wagonMode.speed = 0;
+  }
+
+  // ------------------------------------------------------------ the building
+
+  private bridgeAt(k: number, out = new THREE.Vector3()) { const b = this.d.bridges(); return b ? b.along(k, out) : out.copy(this.d.body.pos); }
+
+  /** Off the bench, and everyone home sets to: the crew is the two who walked, the guide's helpers, all of the village that's here. */
+  private startBuild() {
+    const st = this.d.story, sp = this.spirit, v = st.village, b = this.d.body, br = this.d.bridges();
+    this.d.drive(false);
+    const w = st.wagon!;
+    this.parkWagon();
+    const off = w.local(-2.2, -0.6);
+    this.d.place(off.x, off.z, br ? br.heading : b.heading);
+    sp.riding = null;
+    sp.teleport(w.local(-1.4, WAG.HL + 0.6).setY(this.d.ground(w.local(-1.4, WAG.HL + 0.6).x, w.local(-1.4, WAG.HL + 0.6).z)));
+    sp.want = { at: sp.pos.clone(), face: this.bridgeAt(0.05), pose: 'stand', icon: null, lead: false, settled: true };
+    sp.celebrate();
+    this.crew = v ? v.spirits.map((_q, k) => k).filter((k) => v.here(k)) : [];
+    for (const k of this.crew) if (!this.marchers.includes(k)) v!.attend(k, w.local(1.8, -1 - k * 0.6), this.bridgeAt(0));
+    this.d.sfx.chirp(true);
+  }
+
+  private playBuild(dt: number) {
+    const st = this.d.story, sp = this.spirit, v = st.village, br = this.d.bridges(), w = st.wagon!, t = this.t;
+    st.lent = true;
+    if (!br) { this.finish(); return; }
+    const dir = v1.set(Math.sin(br.heading), 0, Math.cos(br.heading)), n = v2.set(dir.z, 0, -dir.x);
+    if (this.beat === 'down') {
+      if (t < dt * 1.5) this.startBuild();
+      this.shotHead();
+      if (t > BUILD.down) { this.beat = 'head'; this.t = 0; }
+    } else if (this.beat === 'head') {
+      this.built = BUILT.head * ss(t, 0.5, BUILD.head - 0.5);
+      this.shotHead();
+      if (t > BUILD.head) { this.beat = 'across'; this.t = 0; }
+    } else if (this.beat === 'across') {
+      this.built = THREE.MathUtils.lerp(BUILT.head, BUILT.across, ss(t, 0, BUILD.across));
+      // Out on the water off to one side, the bridge running across the frame as it grows.
+      const mid = this.bridgeAt(0.45, v3);
+      this.pos.copy(mid).addScaledVector(n, 120).addScaledVector(dir, -25).setY(7);
+      // (Turning a little with the end as it goes out over the water.)
+      this.at.copy(this.bridgeAt(0.4)).lerp(this.bridgeAt(this.built), 0.35).setY(3.5);
+      this.fov = 30;
+      if (t > BUILD.across) { this.beat = 'last'; this.t = 0; }
+    } else if (this.beat === 'last') {
+      this.built = THREE.MathUtils.lerp(BUILT.across, 1, ss(t, 0, BUILD.last - 2));
+      // Along the deck from the near end, the far shore at the end of it.
+      this.pos.copy(this.bridgeAt(0)).addScaledVector(dir, -6).addScaledVector(n, 1.2).setY(3.4 + 2.2);
+      this.at.copy(this.bridgeAt(1)).setY(6);
+      this.fov = 30;
+      if (this.built >= 1 && this.t - dt < BUILD.last - 2) { this.d.sfx.fanfare(); for (const k of this.crew) v?.spirits[k].celebrate(); sp.celebrate(); }
+      if (t > BUILD.last) { this.beat = 'party'; this.t = 0; this.startParty(); }
+    } else if (this.beat === 'party') this.party(dt);
+    this.built = Math.min(1, this.built);
+    br.built = this.built;
+    // The load goes into it as it goes up.
+    w.setLoad(Math.round(LOAD * (1 - this.built)));
+    this.crewWork(dt, dir, n);
+  }
+
+  /** The bridgehead: the crew at the wagon's tail and out on the first bays, seen from the shore beside them. */
+  private shotHead() {
+    const br = this.d.bridges()!, h = this.bridgeAt(0, v3), dir = new THREE.Vector3(Math.sin(br.heading), 0, Math.cos(br.heading)), n = new THREE.Vector3(dir.z, 0, -dir.x);
+    this.pos.copy(h).addScaledVector(dir, -16).addScaledVector(n, 10);
+    this.pos.y = Math.max(this.d.ground(this.pos.x, this.pos.z), 0) + 3;
+    this.at.copy(h).addScaledVector(dir, 5).setY(h.y + 0.5);
+    this.fov = 38;
+  }
+
+  /**
+   * The crew: back and forth between the wagon and the end of the bridge with a board on their heads, and a knock or
+   * two at the end with a mallet. Far out on it, they're at the end, knocking. Their boards and mallets are drawn here.
+   */
+  private crewWork(dt: number, dir: THREE.Vector3, n: THREE.Vector3) {
+    const v = this.d.story.village, w = this.d.story.wagon!;
+    this.malletB.begin();
+    this.plankB.begin();
+    if (v && this.beat !== 'party') {
+      const end = this.bridgeAt(this.built, new THREE.Vector3());
+      const far = this.built > BUILT.head * 1.2;
+      for (const [i, k] of this.crew.entries()) {
+        const s = v.spirits[k], ph = (this.t + i * 1.7) % 6, laden = !far && ph < 3;
+        const side = (i % 2 ? -1 : 1) * (0.8 + (i >> 1) * 0.7);
+        const to = laden || far ? end.clone().addScaledVector(dir, -0.8 - (i >> 1) * 0.6).addScaledVector(n, side) : w.local(side * 0.5, -WAG.HL - 0.9);
+        to.y = Math.max(this.d.ground(to.x, to.z), end.y);
+        if (far) s.teleport(to);
+        s.want.at.copy(to);
+        s.want.settled = true;
+        s.want.face = end;
+        s.haste = 3.2;
+        s.laden = laden && !far;
+        const at = s.pos.distanceTo(to) < 0.8;
+        s.gesture = at && (far || laden) ? 'hammer' : null;
+        if (s.gesture === 'hammer' && !this.mallets[i].parent) s.take(this.mallets[i]);
+        if (!s.gesture && s.tool === this.mallets[i]) s.take(null);
+        if (s.tool === this.mallets[i]) { this.mallets[i].updateWorldMatrix(true, false); this.malletB.push(this.mallets[i].matrixWorld, WHITE); }
+        if (s.laden) { s.overhead(v3, q1); v3.y += 0.06; q1.multiply(QY); this.plankB.push(m4.compose(v3, q1, PLANK), WHITE); }
+        if (at && (far || laden) && Math.floor((this.t + i) * 1.7) !== Math.floor((this.t - dt + i) * 1.7)) this.d.puff(v3.copy(end).setY(end.y + 0.2), 2, 0.12, 1.2);
+      }
+      // The guide too, by the wagon, pointing them on.
+      if (!far) { this.spirit.want.face = end; }
+    }
+    this.malletB.end();
+    this.plankB.end();
+    void w;
+  }
+
+  /** Everyone round you at the bridgehead, cheering. */
+  private startParty() {
+    const v = this.d.story.village, b = this.d.body, sp = this.spirit;
+    this.afterYaw = this.d.bridges() ? this.d.bridges()!.heading + Math.PI : b.heading + Math.PI;
+    for (const [i, k] of this.crew.entries()) {
+      const s = v!.spirits[k];
+      if (s.tool) s.take(null);
+      s.laden = false;
+      s.gesture = null;
+      const a = (i / Math.max(1, this.crew.length)) * Math.PI * 1.4 - 0.7 + Math.PI, r = 2.6 + (i % 2) * 0.8;
+      const at = new THREE.Vector3(b.pos.x + Math.sin(b.heading + a) * r, 0, b.pos.z + Math.cos(b.heading + a) * r);
+      at.y = this.d.ground(at.x, at.z);
+      v!.attend(k, at, b.pos);
+      v!.spirits[k].teleport(at);
+    }
+    const g = new THREE.Vector3(b.pos.x + Math.sin(b.heading) * 2.2, 0, b.pos.z + Math.cos(b.heading) * 2.2);
+    g.y = this.d.ground(g.x, g.z);
+    sp.teleport(g);
+    sp.want = { at: g.clone(), face: b.pos, pose: 'stand', icon: null, lead: false, settled: true };
+    this.homeT = -1;
+  }
+
+  /** The party: a while of cheering, now one, now another; then they're off home up the trail. */
+  private party(dt: number) {
+    const v = this.d.story.village, sp = this.spirit, b = this.d.body;
+    if (!v) { this.finish(); return; }
+    for (const [i, k] of this.crew.entries()) {
+      if (Math.floor((this.t + i * 0.9) / 2.6) !== Math.floor((this.t - dt + i * 0.9) / 2.6)) v.spirits[k].celebrate();
+      v.spirits[k].want.face = b.pos;
+    }
+    if (Math.floor(this.t / 3.1) !== Math.floor((this.t - dt) / 3.1)) { sp.celebrate(); if (Math.random() < 0.5) this.d.story.chirp(true); }
+    if (this.t > BUILD.party) this.finish();
+  }
+
+  /** It stands: saved, and everyone sets off home (`after`), the guide pointing you across. */
+  private finish() {
+    const v = this.d.story.village, R = this.haulRail();
+    this.enter('done');
+    this.built = 1;
+    const br = this.d.bridges();
+    if (br) br.built = 1;
+    this.d.story.wagon?.setLoad(0);
+    this.homeT = 0;
+    this.homeward = true;
+    // Up the trail toward home, a little apart.
+    for (const [i, k] of this.crew.entries()) {
+      const s = v?.spirits[k];
+      if (!s) continue;
+      const q = R.beside(R.L - 80 - i * 6, (i % 2 ? -1 : 1) * 2, w1);
+      s.want = { at: new THREE.Vector3(q.x, this.d.ground(q.x, q.y), q.y), face: null, pose: 'stand', icon: null, lead: false, settled: true };
+      s.haste = 1.9;
+    }
+    const m = this.d.stelk();
+    if (m) this.stelkHome = R.L - 70;
+    const sp = this.spirit, h = this.bridgeAt(0.01);
+    const at = this.bridgeAt(0).addScaledVector(v1.set(Math.sin(br?.heading ?? 0), 0, Math.cos(br?.heading ?? 0)), -4).addScaledVector(v2.set(Math.cos(br?.heading ?? 0), 0, -Math.sin(br?.heading ?? 0)), 2.2);
+    at.y = this.d.ground(at.x, at.z);
+    sp.want = { at, face: this.bridgeAt(1).setY(6), pose: 'point', icon: null, lead: false };
+    void h;
+  }
+  /** Seconds since they set off home (-1: not yet). */
+  private homeT = -1;
+  private stelkHome = -1;
+
+  /**
+   * After: the villagers and the stelk walk off up the trail, and once you're well away (or over the water) they're
+   * simply home; the guide points you across until you've gone, and then it's home by its fire. The wagon stays.
+   */
+  private after(dt: number) {
+    const st = this.d.story, b = this.d.body, v = st.village, R = this.haulRail();
+    const br = this.d.bridges();
+    if (br) br.built = 1;
+    // The wagon's left where it stopped, at the bridgehead.
+    const w = st.wagon;
+    if (w && !this.homeward && this.homeT < 0 && !this.parked) {
+      this.parked = true;
+      this.parkWagon();
+      w.setLoad(0);
+      st.finishBridge();
+    }
+    if (this.homeT < 0) return;
+    this.homeT += dt;
+    this.parked = true;
+    st.lent = true;
+    const m = this.d.stelk();
+    if (m && this.stelkHome > 0) {
+      // Its yoke off, it walks home with them.
+      const to = R.at(this.stelkHome, w1), d = Math.hypot(to.x - m.pos.x, to.y - m.pos.z);
+      if (d > 0.5) { const sp = Math.min(1.6 * dt, d); m.vel.set(((to.x - m.pos.x) / d) * 1.6, 0, ((to.y - m.pos.z) / d) * 1.6); m.pos.x += ((to.x - m.pos.x) / d) * sp; m.pos.z += ((to.y - m.pos.z) / d) * sp; m.pos.y = this.d.ground(m.pos.x, m.pos.z); m.heading = Math.atan2(to.x - m.pos.x, to.y - m.pos.z); }
+      else m.vel.set(0, 0, 0);
+    }
+    const far = (p: THREE.Vector3) => Math.hypot(p.x - b.pos.x, p.z - b.pos.z) > 110;
+    // Out of your sight, they're home.
+    if (v && this.homeward && this.crew.every((k) => far(v.spirits[k].pos))) {
+      for (const k of this.crew) { const door = v.houses[v.home[k]].door; v.attend(k, door, door); v.dismiss(k); }
+      if (m) { const p = st.mill?.local(-6, 4); if (p) m.pos.set(p.x, this.d.ground(p.x, p.z), p.z); m.vel.set(0, 0, 0); this.stelkHome = -1; }
+      this.homeward = false;
+    }
+    // You're away over the water (or a long way off): the guide's home too.
+    const gap = Math.hypot(this.spirit.pos.x - b.pos.x, this.spirit.pos.z - b.pos.z);
+    if (gap > BUILD.away) {
+      if (v && this.homeward) for (const k of this.crew) { const door = v.houses[v.home[k]].door; v.attend(k, door, door); v.dismiss(k); }
+      this.homeward = false;
+      if (m && this.stelkHome > 0) { const p = st.mill?.local(-6, 4); if (p) m.pos.set(p.x, this.d.ground(p.x, p.z), p.z); this.stelkHome = -1; }
+      this.homeT = -1;
+      st.lent = false;
+      st.finishBridge();
+    }
+  }
+  private parked = false;
+
+  /** The wagon drawn off to the side of the bridgehead, out of the way, the stelk still in its shafts until they go home. */
+  private parkWagon() {
+    const st = this.d.story, w = st.wagon!, R = this.haulRail(), br = this.d.bridges(), m = this.d.stelk();
+    let best = -Infinity, at = R.at(R.L - 24, new THREE.Vector2());
+    for (const side of [5.5, -5.5, 8, -8]) {
+      const q = R.beside(R.L - 24, side, new THREE.Vector2()), g = this.d.gen.height(q.x, q.y);
+      const score = (br ? Math.min(br.distTo(q.x, q.y), 12) : 0) + (g > 0.8 ? 6 : 0) - Math.abs(side) * 0.2;
+      if (score > best) { best = score; at = q; }
+    }
+    w.place(at.x, at.y, R.heading(R.L - 24, 6) + 0.35, this.d.ground);
+    if (m && this.stelkHome < 0) { const h = w.hitch(v1); m.pos.set(h.x, this.d.ground(h.x, h.z), h.z); m.heading = w.heading; m.vel.set(0, 0, 0); }
+  }
+
+  /** Where you sit while you drive (the rig's seat). */
+  seat(out: { pos: THREE.Vector3; quat: THREE.Quaternion; spread: number }) { return this.d.story.wagon!.seat(out); }
+  /** The reins: from your hands to the stelk's shoulders (a direction, for the rig's rope arm). */
+  reins(out: THREE.Vector3) { const m = this.d.stelk(), b = this.d.body; return m ? out.set(m.pos.x - b.pos.x, m.pos.y + 1.2 - b.pos.y - 1.5, m.pos.z - b.pos.z) : null; }
+  /** Driving the wagon now. */
+  get driving() { return this.stage === 'haul'; }
+
   // ------------------------------------------------------------ for main
 
   /** The camera while a cutscene has it. */
   cinematic(): { pos: THREE.Vector3; at: THREE.Vector3; fov: number } | null {
     if (this.stage === 'cross' && this.beat !== 'in' && this.beat !== 'back') return { pos: this.pos, at: this.at, fov: this.fov };
     if (this.stage === 'ride') return { pos: this.pos, at: this.at, fov: this.fov };
+    if (this.stage === 'build' && this.beat !== 'party') return { pos: this.pos, at: this.at, fov: this.fov };
     return null;
   }
 
   /** Where the pointer points (the guide at the shore, from far off). */
   guide(): Guide | null {
-    if (this.stage === 'shore') return { at: this.spirit.pos, near: 30 };
+    if (this.stage === 'shore' || this.stage === 'yoke') return { at: this.spirit.pos, near: 30 };
     return null;
   }
 
@@ -593,8 +1037,24 @@ export class BridgeQuest {
     }
   }
 
+  /** Dev: on the bench `s` metres along the haul, the long middle behind you. */
+  debugHaul(s: number) { this.haul = { s: Math.min(s, this.haulRail().L - HAUL.end - 1), off: 0, cut: true }; this.saveHaul(); this.startHaul(false); }
+
   /** Dev: straight to a stage, as a save from there has it. */
   debug(s: QuestStage) {
+    if (s === 'yoke' || s === 'haul') {
+      // The wagon built and loaded, the stelk by it; for `haul`, on the bench already.
+      const st = this.d.story;
+      st.lent = false;
+      st.startBridge();
+      st.debugJump('loading');
+      st.wagon!.setLoad(99);
+      this.startYoke();
+      const p = st.wagon!.local(-9, WAG.HL - 1);
+      this.d.place(p.x, p.z, st.wagon!.heading);
+      if (s === 'haul') this.startHaul(true);
+      return;
+    }
     this.enter(s);
     if (s === 'shore') { this.stageCrossing(); this.resume(); }
     if (s === 'mill') {

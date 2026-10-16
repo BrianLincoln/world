@@ -15,6 +15,7 @@ const server = http.createServer((req, res) => {
 await new Promise((r) => server.listen(0, r));
 const browser = await chromium.launch({ args: ['--use-angle=metal', '--enable-gpu', '--ignore-gpu-blocklist'] });
 const page = await browser.newPage({ viewport: { width: 1600, height: 900 } });
+page.setDefaultTimeout(180000); page.setDefaultNavigationTimeout(180000);
 page.on('console', (m) => { if (!m.text().includes('useProgram')) console.log('[page]', m.text().slice(0, 600)); });
 page.on('pageerror', (e) => console.log('[pageerror]', e.message));
 await page.goto(`http://localhost:${server.address().port}/?${q}&ui=0&paused=1&capture=1`);

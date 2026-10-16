@@ -6213,3 +6213,40 @@ The owner: do a lot, decide as you go, on your own branch. So on `islands`
   where it was going. The mill's stack is yours to walk up and take, except
   while the wagon is being loaded.
 - While the wagon's loaded the mill works through the night (`urgent`).
+
+## The bridge quest, slices C to E: the wagon, the haul, the building (2026-10-15)
+
+- The wagon (`story/wagon.ts`) is a second `Buildable` of phase 4 (wheels 5
+  logs, bed 7), out in front of the mill facing the way out of the village.
+  The mill and the wagon together cost 6 stones and 24 logs, about what the
+  stable did (the brief's "about what the stable does" read as the pair).
+- Loading: the director's `loading` step keeps the mill's stack for the
+  wagon (`millKept`), points the sawyer's boards at it, and has an idle
+  sawyer carry what's on the mill's stack out to it (or go and fell a tree
+  itself rather than stand about). Wood of yours goes in as you walk up,
+  one at a time. A load is 21 boards: about three to four minutes with two
+  villagers and nobody helping (it was 15, which filled in two).
+- Driving is `WagonMode` in `player/movement.ts`: on a rail (the trail from
+  the wagon to the water's edge, `trailRail`), W walk / Shift trot, S reins
+  in and backs at most 4 m behind the furthest it's been (`balked`, a
+  "nope" and a puff), A/D across the trail, ±4.5 m. Nothing else moves it.
+  E does nothing on the bench. The stelk is the village's own (made once,
+  `village:stelk`), held `ridden` so nothing thinks for it and nobody can
+  mount it; it's posed at the shafts' end, and walks there for the yoking.
+  The guide sits beside you on the bench (`Spirit.riding`); the first two
+  villagers home walk either side. The rig sits on the bench with the
+  ride pose and a rein (`ropeAim`) to the stelk.
+- The veil comes 125 m out (about 50 s); you're set down 150 m short of
+  the water. About 110 s of driving in all. The haul's place is saved every
+  second (`embla.quest.<seed>.haul`); a reload puts you back on the bench.
+- The building is a scene of four shots with the bridge's `built` driven by
+  the quest (the bridgehead with the crew carrying boards from the wagon
+  and knocking them in; across the water from out on it; along the deck as
+  it reaches the far shore), the wagon's load going into it. Then hands
+  back: everyone round you cheering for about 20 s, then off up the trail;
+  once they're 110 m off they're home (attend at their door, dismissed),
+  the stelk too. The guide points you across, and once you're 60 m away
+  it's home by its fire (phase 4's last step, `bridged`). The wagon stays
+  at the bridgehead. `story/bridgeWork.ts` and its 100-wood sketch are gone.
+- `cp=ring3` (and later) marks the quest done, so the moth's scripts find
+  the bridge standing. New checkpoints: `yoke`, `haul`.

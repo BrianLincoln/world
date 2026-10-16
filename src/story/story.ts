@@ -915,7 +915,7 @@ export class Story {
       sp.warmth = sp.warmthTarget = st.warmth;
     }
     if (st.kind === 'rest') this.pot = { out: 0, t: 0, go: 0, stay: restoring ? 20 : 45 };
-    if (st.kind === 'rest' && this.phase.id === 'bridge') {
+    if (st.kind === 'rest' && this.phase.id === 'bridge' && st.id === 'loading') {
       // The wagon's being loaded: it stands by it (its thought, the wood still wanted: see `update`).
       sp.want = { at: this.anchor(st.anchor).clone(), face: this.anchor(st.face ?? st.anchor), pose: 'stand', icon: null, lead: false, settled: true };
       this.pot.stay = 1e9;
@@ -953,7 +953,9 @@ export class Story {
     /** How loud something is, from where you are. */
     const loud = (at: THREE.Vector3) => 0.7 * (1 - THREE.MathUtils.smoothstep(at.distanceTo(d.body.pos), 8, 60));
     return {
-      horse: m.horse, pileAt: m.pileAt,
+      horse: m.horse, pileAt: m.pileAt, stackAt: m.stackAt,
+      spare: () => (this.loading ? m.stock : 0),
+      takeSpare: (n) => (this.loading ? m.takeBoards(n) : 0),
       logs: () => m.logs, takeLog: () => m.takeLog(), addLog: () => m.addLog(),
       boardsTo: () => this.boardsTo?.() ?? this.toWagon() ?? { at: m.stackAt, face: stackTop(), add: (n) => m.addBoards(n) },
       tree: (k, from) => {
@@ -1029,6 +1031,13 @@ export class Story {
       if (k >= 1) { this.overlayGroup.remove(tk.bb.mesh); w.add(1); this.d.sfx.slot(w.load); this.dust(w.local(0, 0, 1.1)); }
     }
     this.loads = this.loads.filter((t) => t.t < 0.5);
+  }
+
+  /** The bridge is built: the guide is home again, by its fire (phase 4's last step). */
+  finishBridge() {
+    if (this.phaseIndex !== 2 || this.step.id === 'bridged') return;
+    this.goToStep('bridged');
+    this.spirit.teleport(this.anchor('hearthSeat'));
   }
 
   /** Phase 4 can begin: home from the strait (story/bridgeQuest.ts says when). */

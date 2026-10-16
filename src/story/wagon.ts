@@ -20,7 +20,7 @@ export type WagonPartId = 'wheels' | 'bed';
 /** Its measurements: wheel radius, axles fore and aft, track (half), the deck's top, its half length and width, the shafts' reach. */
 export const WAG = { R: 0.42, AX: 0.95, TR: 0.8, DECK: 0.86, HL: 1.35, HW: 0.68, SHAFT: 3.5 };
 /** How many boards make a full load, and how many go in a course of them. */
-export const LOAD = 15;
+export const LOAD = 21;
 const ROW = 3;
 
 function wheel(): THREE.BufferGeometry {
@@ -115,7 +115,8 @@ export class Wagon implements Buildable {
     const boards: THREE.BufferGeometry[] = [];
     for (let i = 0; i < LOAD; i++) {
       const course = Math.floor(i / ROW), k = i % ROW, j = (i * 7) % 5;
-      boards.push(kbox(0.38, 0.08, HL * 2 - 0.25 - (j % 2) * 0.12, (k - (ROW - 1) / 2) * 0.42, DECK + 0.05 + course * 0.085, (j - 2) * 0.03, K.wood, 0, (j - 2) * 0.012));
+      // (Fresh-sawn, paler than the wagon, piled up past its sides: a load you can see.)
+      boards.push(kbox(0.36, 0.09, HL * 2 - 0.35 - (j % 2) * 0.14, (k - (ROW - 1) / 2) * 0.4 * (1 - course * 0.06), DECK + 0.06 + course * 0.115, (j - 2) * 0.03, K.cut, 0, (j - 2) * 0.014));
     }
     this.boardVerts = boards[0].attributes.position.count;
     this.loadMesh = propMesh(merge(boards), this.mat);

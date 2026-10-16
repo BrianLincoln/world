@@ -32,5 +32,7 @@ export const PHASE4: PhaseDef = {
     { id: 'wagon', kind: 'build', parts: ['wheels', 'bed'], resource: 'logs', gather: 'wlogs', zone: 'wagonFront', zoneRadius: 6, anchor: 'wagonBase', face: 'wagonSite', icon: 'log', warmth: 1, hint: 'tug', onDone: 'praise' },
     // It's loaded: the villagers carry the mill's boards out to it, and any wood you bring goes in too.
     { id: 'loading', kind: 'rest', doneAt: 0, anchor: 'wagonView', face: 'wagonSite', pose: 'stand', icon: null, warmth: 1, hint: 'none' },
+    // The bridge stands (story/bridgeQuest.ts): it's home again, by its fire.
+    { id: 'bridged', kind: 'rest', doneAt: 0, anchor: 'hearthSeat', face: 'hearth', pose: 'sit', icon: null, warmth: 1, hint: 'none' },
   ],
 };

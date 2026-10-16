@@ -4,12 +4,10 @@
 //
 // **It isn't there at first** (owner, 2026-10-13). When the last dungeon of
 // the first island is done the giant wades the strait and comes up out of
-// it on the far side; then your spirit is at the water's edge and has you
-// build it, of a great deal of wood (a hundred or so, which the village
-// should by then be making for you). Of that, this file is the bridge
-// itself and how much of it stands (`built`, 0 to 1, from the near shore
-// out, a bay at a time). The building, the guide and the village's wood
-// aren't made yet: main stands it whole once the giant has crossed.
+// it on the far side; then your spirit is at the water's edge, and the
+// bridge is a quest (story/bridgeQuest.ts: the mill, the wagon, the haul and
+// the building). Of that, this file is the bridge itself and how much of it
+// stands (`built`, 0 to 1, from the near shore out, a bay at a time).
 //
 // To everything that walks, rides or cycles, the deck is simply ground
 // (`deckAt`, which main gives the world's ground query): nothing has to know
@@ -96,24 +94,6 @@ export class Bridges {
     }
   }
 
-  /** The whole of the first bridge in a few plain boxes, where it will stand: for its sketch (story/bridgeWork.ts). */
-  sketchGeometry(): THREE.BufferGeometry | null {
-    const s = this.spans[0];
-    if (!s) return null;
-    const parts: THREE.BufferGeometry[] = [];
-    const box = (w: number, h: number, d: number, side: number, y: number, along: number) => parts.push(new THREE.BoxGeometry(w, h, d).translate(side, y, along));
-    for (let a = s.from; a < s.to; a += BAY) {
-      const run = Math.min(BAY, s.to - a);
-      box(HALF * 2, 0.25, run, 0, DECK - 0.12, a + run / 2);
-      for (const sd of [-1, 1]) { box(0.16, 0.14, run, sd * (HALF - 0.1), DECK + 0.95, a + run / 2); box(0.3, DECK + 2.2, 0.3, sd * (HALF + 0.3), (DECK - 1) / 2, a); }
-    }
-    const g = mergeGeometries(parts)!;
-    for (const p of parts) p.dispose();
-    g.rotateY(Math.atan2(s.ux, s.uz));
-    g.translate(s.ax, 0, s.az);
-    return g;
-  }
-
   /** How far (x, z) is from the first bridge's line, shore to shore. */
   distTo(x: number, z: number) {
     const s = this.spans[0];
@@ -122,8 +102,11 @@ export class Bridges {
     return Math.hypot(dx - s.ux * along, dz - s.uz * along);
   }
 
-  /** The first bridge's near end, at its deck. */
-  headAt(out: THREE.Vector3) { const s = this.spans[0]; return s ? out.set(s.ax + s.ux * s.from, DECK, s.az + s.uz * s.from) : out; }
+  /** The first bridge's deck `k` (0..1) of the way from its near end to its far one. */
+  along(k: number, out: THREE.Vector3) { const s = this.spans[0]; if (!s) return out; const a = s.from + (s.to - s.from) * k; return out.set(s.ax + s.ux * a, DECK, s.az + s.uz * a); }
+  /** Its length (m), and which way it runs (a heading). */
+  get length() { const s = this.spans[0]; return s ? s.to - s.from : 0; }
+  get heading() { const s = this.spans[0]; return s ? Math.atan2(s.ux, s.uz) : 0; }
   /** `off` metres to the side of a point on the first bridge. */
   acrossAt(at: THREE.Vector3, off: number, out: THREE.Vector3) { const s = this.spans[0]; return s ? out.set(at.x + s.uz * off, at.y, at.z - s.ux * off) : out.copy(at); }
 

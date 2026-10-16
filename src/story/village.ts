@@ -280,6 +280,10 @@ export interface MillWorks {
   logs(): number;
   takeLog(): boolean;
   addLog(): void;
+  /** The mill's own stack (its near side), what of it may go elsewhere now (the wagon's being loaded), and taking that. */
+  stackAt: THREE.Vector3;
+  spare(): number;
+  takeSpare(n: number): number;
   /** Where sawn boards are wanted now: who carries them stands at `at` facing `face`, and `add` puts them there. */
   boardsTo(): { at: THREE.Vector3; face: THREE.Vector3; add(n: number): void };
   /** A standing tree to fell for `k`, near the mill (null: none in reach). */
@@ -1422,12 +1426,12 @@ export class Village {
   }
 
   /** A turn at the mill for `k`: the sawhorse if nobody's at it and there's a log for it (or one coming), else off to fell one. */
-  private millJob(k: number): boolean {
+  private millJob(k: number, fell = false): boolean {
     const w = this.works!, s = this.spirits[k], l = this.life[k];
     const jobs = this.life.filter((o) => o.mj);
     const sawyer = jobs.some((o) => o.mj!.kind === 'saw'), fellers = jobs.filter((o) => o.mj!.kind === 'fell').length;
     let kind: 'fell' | 'saw';
-    if (!sawyer && (w.logs() > 0 || fellers > 0 || !!this.onHorse)) kind = 'saw';
+    if (!fell && !sawyer && (w.logs() > 0 || fellers > 0 || !!this.onHorse || w.spare() >= LOG.BOARDS)) kind = 'saw';
     else if (fellers < 3) kind = 'fell';
     else return false;
     l.mate = -1;
@@ -1446,6 +1450,7 @@ export class Village {
   private toPile(k: number) {
     const w = this.works!;
     if (this.onHorse) this.mwalk(k, 'to', this.sawSpot(v1), this.sawFaceAt());
+    else if (w.logs() <= 0 && w.spare() >= LOG.BOARDS) this.mwalk(k, 'toStack', w.stackAt.clone(), w.stackAt.clone().setY(w.stackAt.y + 0.3));
     else if (w.logs() > 0) this.mwalk(k, 'toPile', w.pileAt.clone(), w.pileAt.clone().setY(w.pileAt.y + 0.3));
     else this.mwalk(k, 'wait', this.sawSpot(v1), w.pileAt.clone().setY(w.pileAt.y + 0.3));
   }
@@ -1653,14 +1658,24 @@ export class Village {
         w.boardsTo().add(LOG.BOARDS);
         this.millDone(k);
         break;
+      // ---- Nothing to saw, and boards on the mill's stack that are wanted elsewhere: three of them out there.
+      case 'saw toStack': {
+        if (!there()) break;
+        const n = w.takeSpare(LOG.BOARDS);
+        if (!n) { this.toPile(k); break; }
+        const t = this.thing(-1, false, v1.copy(w.stackAt).setY(w.stackAt.y + 0.3), q.setFromAxisAngle(UP, Math.atan2(s.pos.x - w.stackAt.x, s.pos.z - w.stackAt.z) + Math.PI / 2), v2.set(LOG.L * 0.9, 0.18, 0.26), new THREE.Color(BIOME.cutWood).lerp(new THREE.Color(BIOME.cabinWall2), 0.3));
+        this.mlift(k, t, 'lift');
+        break;
+      }
       case 'saw wait':
         if (!there()) break;
         this.mpause(k, 'idle', 3 + Math.random() * 2, Math.random() < 0.5 ? 'nod' : null);
         break;
       case 'saw idle':
         if (!wait()) break;
-        if (w.logs() > 0 || this.onHorse) this.toPile(k);
-        else if ((j.n += 1) > 6) this.millDone(k);
+        if (w.logs() > 0 || this.onHorse || w.spare() >= LOG.BOARDS) this.toPile(k);
+        // (Nothing coming soon: off to fell one itself, rather than stand about.)
+        else if ((j.n += 1) > 2) { this.quitMill(k); if (!this.millJob(k, true)) this.goHome(k); }
         else this.mpause(k, 'idle', 3 + Math.random() * 2, null);
         break;
       default:
